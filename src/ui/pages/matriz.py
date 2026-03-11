@@ -145,11 +145,11 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
     from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
     from datetime import datetime as _dt
 
-    # ── Página em portrait A4 (igual ao PDF de referência) ───────────────────
-    PAGE = A4
+    # ── Página em landscape A4 (igual ao PDF de referência) ─────────────────
+    PAGE = landscape(A4)
     LMARGIN = RMARGIN = TMARGIN = BMARGIN = 1.5*cm
-    pw = PAGE[0] - LMARGIN - RMARGIN   # largura útil ~18cm
-    ph = PAGE[1] - TMARGIN - BMARGIN   # altura útil
+    pw = PAGE[0] - LMARGIN - RMARGIN   # largura útil ~25.7cm (landscape)
+    ph = PAGE[1] - TMARGIN - BMARGIN   # altura útil ~17.7cm
 
     sty = getSampleStyleSheet()
     h1  = ParagraphStyle("h1", parent=sty["Heading1"], fontSize=15, leading=18,
@@ -206,7 +206,7 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
     story = [header_table, Spacer(1, 0.3*cm), meta_table, Spacer(1, 0.4*cm)]
 
     def _mk_table(df, max_svc=6):
-        """Constrói tabela(s) D/R/M para um setor — portrait A4."""
+        """Constrói tabela(s) D/R/M para um setor — landscape A4."""
         base = [c for c in df.columns if c == "Equipamento"]
         svc  = [c for c in df.columns if c not in ("Equipamento", "%", "Status")]
         if not svc: return []
@@ -227,13 +227,13 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
                 tmp[base2]["cols"][so[suf]] = col
         groups = [(tmp[k]["name"], [c for c in tmp[k]["cols"] if c], tmp[k]["cols"]) for k in okeys]
 
-        # Larguras para portrait: equipamento + D/R/M por serviço
-        we = 3.2*cm   # coluna Equipamento (frota + modelo abreviado)
+        # Larguras para landscape: coluna Equipamento maior, D/R/M mais espaçadas
+        we = 4.0*cm   # coluna Equipamento (landscape tem mais espaço)
         rem = pw - we
-        # quantos serviços por bloco cabem em portrait
+        # quantos serviços por bloco cabem em landscape
         n_svc_cols_total = sum(3 if len(g[2])==3 else len([c for c in g[1] if c]) for g in groups)
         col_w_unit = rem / max(n_svc_cols_total, 1)
-        col_w_unit = max(0.75*cm, min(1.4*cm, col_w_unit))
+        col_w_unit = max(0.85*cm, min(1.8*cm, col_w_unit))
         max_cols_per_block = max(1, int(rem / (col_w_unit * 3)))
         maxe = max(1, min(len(groups), max(max_svc, max_cols_per_block)))
 
@@ -364,10 +364,10 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
         story.append(Paragraph("Sem dados.", sm))
     else:
         rv_sorted = rv.sort_values("%", ascending=False).reset_index(drop=True)
-        # Portrait: coluna equipamento mais larga
-        col_w_eq  = pw * 0.52
-        col_w_num = pw * 0.16
-        col_w_pct = pw * 0.16
+        # Landscape: coluna equipamento proporcional à largura maior
+        col_w_eq  = pw * 0.45
+        col_w_num = pw * 0.18
+        col_w_pct = pw * 0.19
         rd = [["Equipamento", "Concluídos", "Total", "%"]] + rv_sorted.values.tolist()
         rt = Table(rd, colWidths=[col_w_eq, col_w_num, col_w_num, col_w_pct], repeatRows=1)
         ts_r = [
