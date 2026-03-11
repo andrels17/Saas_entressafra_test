@@ -1,11 +1,13 @@
 """Envio de e-mail via SMTP com anexo PDF.
 
 Configuração via st.secrets (ou variáveis de ambiente):
-  SMTP_HOST      ex: smtp.gmail.com
+  SMTP_HOST      ex: smtp.office365.com  (Microsoft) ou smtp.gmail.com (Gmail)
   SMTP_PORT      ex: 587
   SMTP_USER      ex: relatorios@empresa.com
   SMTP_PASSWORD  senha ou app-password
   SMTP_FROM_NAME ex: Sistema AgroSafra  (opcional)
+  SMTP_USE_TLS   true/false  (opcional — padrão: true para porta 587)
+  SMTP_USE_SSL   true/false  (opcional — padrão: true para porta 465)
 """
 from __future__ import annotations
 
@@ -26,7 +28,7 @@ class SmtpConfig:
     user: str
     password: str
     from_name: str = "Sistema de Revisões"
-    use_tls: bool = True          # STARTTLS na porta 587
+    use_tls: bool = True          # STARTTLS na porta 587 (Gmail, Outlook, Office365)
     use_ssl: bool = False         # SSL direto na porta 465
 
 
@@ -59,14 +61,31 @@ def _load_config_from_secrets() -> SmtpConfig:
             f"Configuração SMTP incompleta. Adicione ao secrets.toml: {', '.join(missing)}"
         )
 
+    port = int(secrets["SMTP_PORT"])
+
+    # Determina TLS/SSL: respeita override explícito, senão usa porta como padrão
+    _true_vals = ("true", "1", "yes")
+    use_tls_raw = secrets.get("SMTP_USE_TLS", "")
+    use_ssl_raw = secrets.get("SMTP_USE_SSL", "")
+
+    if use_tls_raw != "":
+        use_tls = str(use_tls_raw).lower() in _true_vals
+    else:
+        use_tls = port == 587  # STARTTLS padrão para 587 (Gmail, Outlook, Office365)
+
+    if use_ssl_raw != "":
+        use_ssl = str(use_ssl_raw).lower() in _true_vals
+    else:
+        use_ssl = port == 465  # SSL direto padrão para 465
+
     return SmtpConfig(
         host=secrets["SMTP_HOST"],
-        port=int(secrets["SMTP_PORT"]),
+        port=port,
         user=secrets["SMTP_USER"],
         password=secrets["SMTP_PASSWORD"],
         from_name=secrets.get("SMTP_FROM_NAME") or "Sistema de Revisões",
-        use_tls=int(secrets.get("SMTP_PORT", 587)) == 587,
-        use_ssl=int(secrets.get("SMTP_PORT", 587)) == 465,
+        use_tls=use_tls,
+        use_ssl=use_ssl,
     )
 
 
