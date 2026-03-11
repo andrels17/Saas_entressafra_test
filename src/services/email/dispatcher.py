@@ -85,6 +85,56 @@ def _load_tarefas(sb, tenant_id: str, revisao_id: str, grupo_ids: list[str]) -> 
         return []
 
 
+def _load_grupo_template(sb, tenant_id: str, grupo_ids: list[str]) -> dict[str, int]:
+    """Retorna {grupo_id: svc_count} — número de serviços do template por grupo.
+    Mesma fonte usada pela Matriz para calcular o denominador correto.
+    """
+    if not grupo_ids:
+        return {}
+    try:
+        rows = (
+            sb.table("grupo_servicos")
+            .select("grupo_id,servico_id")
+            .eq("tenant_id", tenant_id)
+            .in_("grupo_id", grupo_ids)
+            .execute()
+            .data
+        ) or []
+        svc_map: dict[str, set] = {}
+        for r in rows:
+            gid = r.get("grupo_id")
+            sid = r.get("servico_id")
+            if gid and sid:
+                svc_map.setdefault(gid, set()).add(sid)
+        return {gid: len(svcs) for gid, svcs in svc_map.items()}
+    except Exception:
+        return {}
+
+
+def _load_equipamentos_ativos(sb, tenant_id: str, grupo_ids: list[str]) -> dict[str, list[dict]]:
+    """Retorna {grupo_id: [{id, frota, modelo}]} — equipamentos ativos por grupo."""
+    if not grupo_ids:
+        return {}
+    try:
+        rows = (
+            sb.table("equipamentos")
+            .select("id,frota,modelo,grupo_id")
+            .eq("tenant_id", tenant_id)
+            .eq("ativo", True)
+            .in_("grupo_id", grupo_ids)
+            .execute()
+            .data
+        ) or []
+        out: dict[str, list] = {}
+        for r in rows:
+            gid = r.get("grupo_id")
+            if gid:
+                out.setdefault(gid, []).append(r)
+        return out
+    except Exception:
+        return {}
+
+
 def _load_revisao(sb, revisao_id: str) -> dict:
     try:
         rows = (
@@ -139,6 +189,9 @@ def _build_payload(
     departamento_nome: str,
     tenant_nome: str,
     branding: dict,
+    sb,                         # conexão supabase para consultar template
+    tenant_id: str,
+    grupo_ids: list[str],
     dias_travado: int = 2,
     dias_sem_update: int = 5,
 ):
@@ -150,77 +203,124 @@ def _build_payload(
     data_inicio   = revisao.get("data_inicio")
     semana_atual  = _semana_atual(data_inicio, semanas_total)
 
-    # ── progresso geral ───────────────────────────────────────────────────────
+    # ── Fonte de verdade: mesma fórmula da Matriz ──────────────────────────────
+    # denominador = eq_count_ativo × svc_count_template × 3
+    svc_por_grupo   = _load_grupo_template(sb, tenant_id, grupo_ids)
+    eq_por_grupo    = _load_equipamentos_ativos(sb, tenant_id, grupo_ids)
+
+    # Mapa eid → info do equipamento (frota, modelo, grupo_nome, grupo_id)
+    eid_to_info: dict[str, dict] = {}
+    for gid, eqs in eq_por_grupo.items():
+        for eq in eqs:
+            eid_to_info[eq["id"]] = {
+                "frota":  str(eq.get("frota") or eq["id"]),
+                "modelo": str(eq.get("modelo") or ""),
+                "grupo_id": gid,
+            }
+
+    # Agrupa tarefas por equipamento_id
     eq_tasks: dict[str, list] = {}
     for t in tarefas:
-        eq = (t.get("equipamentos") or {})
-        eid = eq.get("id") or t.get("equipamento_id", "")
-        eq_tasks.setdefault(eid, []).append(t)
+        eid = t.get("equipamento_id") or (t.get("equipamentos") or {}).get("id", "")
+        if eid:
+            eq_tasks.setdefault(eid, []).append(t)
 
-    total_done = total_possible = 0
-    n_concluidos = 0
+    # Acumula done_steps por grupo (para pct_geral com denominador correto)
+    done_by_grupo: dict[str, int] = {}
+    for gid in grupo_ids:
+        done_by_grupo[gid] = 0
+
+    # Progresso por equipamento (denominador = svc_count × 3)
     criticos: list[EquipamentoCritico] = []
-    all_equipamentos: list[dict] = []  # todos equipamentos para o email
+    all_equipamentos: list[dict] = []
+    n_concluidos = 0
 
-    for eid, tasks in eq_tasks.items():
-        eq  = (tasks[0].get("equipamentos") or {})
-        frota  = str(eq.get("frota") or eid)
-        modelo = str(eq.get("modelo") or "")
-        grupo  = str((eq.get("equip_grupos") or {}).get("nome") or "—")
-        done   = sum(int(bool(t.get("etapa_d")))+int(bool(t.get("etapa_r")))+int(bool(t.get("etapa_m")))
-                     for t in tasks)
-        total  = len(tasks) * 3
-        pct    = _pct(done, total)
-        total_done     += done
-        total_possible += total
-        if pct == 100:
-            n_concluidos += 1
+    for gid, eqs in eq_por_grupo.items():
+        svc_count = svc_por_grupo.get(gid, 0)
+        expected_per_eq = svc_count * 3  # denominador correto por equipamento
 
-        # críticos: 0% ou travados
-        any_travado = any(t.get("status") == "travado" for t in tasks)
-        status_eq = "travado" if any_travado else ("zero" if pct == 0 else ("concluido" if pct == 100 else "em_andamento"))
-        if pct == 0:
-            criticos.append(EquipamentoCritico(frota=frota, modelo=modelo, grupo=grupo,
-                                                pct=0, status="zero"))
-        elif any_travado:
-            criticos.append(EquipamentoCritico(frota=frota, modelo=modelo, grupo=grupo,
-                                                pct=pct, status="travado"))
+        # nome do grupo a partir das tarefas (fallback)
+        grupo_nome = "—"
+        for eq in eqs:
+            eid = eq["id"]
+            tasks = eq_tasks.get(eid, [])
+            if tasks:
+                grupo_nome = str((tasks[0].get("equipamentos") or {}).get("equip_grupos", {}).get("nome") or grupo_nome)
+                break
 
-        all_equipamentos.append({
-            "frota": frota,
-            "modelo": modelo,
-            "grupo": grupo,
-            "pct": pct,
-            "status": status_eq,
-        })
+        for eq in eqs:
+            eid = eq["id"]
+            frota  = str(eq.get("frota") or eid)
+            modelo = str(eq.get("modelo") or "")
+            tasks  = eq_tasks.get(eid, [])
 
-    pct_geral = _pct(total_done, total_possible)
+            done = sum(
+                int(bool(t.get("etapa_d"))) + int(bool(t.get("etapa_r"))) + int(bool(t.get("etapa_m")))
+                for t in tasks
+            )
+            done_by_grupo[gid] = done_by_grupo.get(gid, 0) + done
 
-    # ── evolução semanal (S1..semana_atual) ───────────────────────────────────
-    # Agrupa etapas por semana usando o campo `semana` das tarefas
+            # pct usando denominador correto (eq × svc × 3)
+            if expected_per_eq > 0:
+                pct = max(0, min(100, round(done / expected_per_eq * 100)))
+            else:
+                pct = 0
+
+            if pct == 100:
+                n_concluidos += 1
+
+            any_travado = any(t.get("status") == "travado" for t in tasks)
+            if expected_per_eq == 0:
+                status_eq = "sem_template"
+            elif any_travado:
+                status_eq = "travado"
+            elif done == 0:
+                status_eq = "zero"
+            elif pct == 100:
+                status_eq = "concluido"
+            else:
+                status_eq = "em_andamento"
+
+            if done == 0 and expected_per_eq > 0:
+                criticos.append(EquipamentoCritico(frota=frota, modelo=modelo, grupo=grupo_nome, pct=0, status="zero"))
+            elif any_travado:
+                criticos.append(EquipamentoCritico(frota=frota, modelo=modelo, grupo=grupo_nome, pct=pct, status="travado"))
+
+            all_equipamentos.append({
+                "frota": frota, "modelo": modelo, "grupo": grupo_nome,
+                "pct": pct, "status": status_eq,
+            })
+
+    # pct_geral ponderado (mesma fórmula do kpi_engine: sum(done) / sum(expected))
+    total_done = 0
+    total_expected = 0
+    for gid in grupo_ids:
+        eq_list = eq_por_grupo.get(gid, [])
+        svc_c   = svc_por_grupo.get(gid, 0)
+        eq_c    = len(eq_list)
+        if eq_c > 0 and svc_c > 0:
+            total_done     += done_by_grupo.get(gid, 0)
+            total_expected += eq_c * svc_c * 3
+
+    pct_geral = max(0, min(100, round(total_done / max(total_expected, 1) * 100)))
+    n_equipamentos = sum(len(v) for v in eq_por_grupo.values())
+
+    # ── evolução semanal ───────────────────────────────────────────────────────
     evolucao: list[SemanaSnapshot] = []
     semana_counts: dict[int, int] = {}
     for t in tarefas:
         sem = int(t.get("semana") or 0)
         if sem <= 0:
             continue
-        done_t = int(bool(t.get("etapa_d")))+int(bool(t.get("etapa_r")))+int(bool(t.get("etapa_m")))
+        done_t = int(bool(t.get("etapa_d"))) + int(bool(t.get("etapa_r"))) + int(bool(t.get("etapa_m")))
         semana_counts[sem] = semana_counts.get(sem, 0) + done_t
-
-    total_equip = len(eq_tasks)
-    # total possível por semana = todas as tarefas × 3 (D+R+M)
-    total_tasks_3 = len(tarefas) * 3 if tarefas else 1
 
     cumulative = 0
     for sem in range(1, semana_atual + 1):
         cumulative += semana_counts.get(sem, 0)
-        pct_sem = _pct(cumulative, total_tasks_3)
-        evolucao.append(SemanaSnapshot(
-            semana=sem,
-            concluidos=cumulative,
-            total=total_tasks_3,
-            pct=pct_sem,
-        ))
+        pct_sem = max(0, min(100, round(cumulative / max(total_expected, 1) * 100)))
+        evolucao.append(SemanaSnapshot(semana=sem, concluidos=cumulative,
+                                       total=total_expected, pct=pct_sem))
 
     pct_semana_atual    = evolucao[-1].pct if evolucao else pct_geral
     pct_semana_anterior = evolucao[-2].pct if len(evolucao) >= 2 else 0
@@ -229,27 +329,31 @@ def _build_payload(
     n_travados = n_sem_inicio = n_parados = n_risco_prazo = 0
     esperado_pct = _pct(semana_atual, semanas_total)
 
-    for eid, tasks in eq_tasks.items():
-        done  = sum(int(bool(t.get("etapa_d")))+int(bool(t.get("etapa_r")))+int(bool(t.get("etapa_m")))
-                    for t in tasks)
-        total = len(tasks)*3
-        pct   = _pct(done, total)
-        for t in tasks:
-            status  = t.get("status") or "pendente"
-            updated = t.get("updated_at") or t.get("dt_etapa_m") or t.get("dt_etapa_r") or t.get("dt_etapa_d")
-            dias    = _dias_desde(updated)
-            if status == "travado" and (dias is None or dias >= dias_travado):
-                n_travados += 1
-            if not t.get("etapa_d") and not t.get("etapa_r") and not t.get("etapa_m"):
-                if dias is None or dias >= dias_sem_update:
-                    n_sem_inicio += 1
-            if status not in ("concluido", "nao_aplica", "travado"):
-                if dias is not None and dias >= dias_sem_update:
-                    n_parados += 1
-        if pct < esperado_pct - 15 and pct < 100:
-            n_risco_prazo += 1
+    for gid, eqs in eq_por_grupo.items():
+        svc_count = svc_por_grupo.get(gid, 0)
+        expected_per_eq = svc_count * 3
+        for eq in eqs:
+            eid   = eq["id"]
+            tasks = eq_tasks.get(eid, [])
+            done  = sum(int(bool(t.get("etapa_d"))) + int(bool(t.get("etapa_r"))) + int(bool(t.get("etapa_m")))
+                        for t in tasks)
+            pct   = max(0, min(100, round(done / max(expected_per_eq, 1) * 100))) if expected_per_eq > 0 else 0
+            for t in tasks:
+                status  = t.get("status") or "pendente"
+                updated = t.get("updated_at") or t.get("dt_etapa_m") or t.get("dt_etapa_r") or t.get("dt_etapa_d")
+                dias    = _dias_desde(updated)
+                if status == "travado" and (dias is None or dias >= dias_travado):
+                    n_travados += 1
+                if not t.get("etapa_d") and not t.get("etapa_r") and not t.get("etapa_m"):
+                    if dias is None or dias >= dias_sem_update:
+                        n_sem_inicio += 1
+                if status not in ("concluido", "nao_aplica", "travado"):
+                    if dias is not None and dias >= dias_sem_update:
+                        n_parados += 1
+            if expected_per_eq > 0 and pct < esperado_pct - 15 and pct < 100:
+                n_risco_prazo += 1
 
-    n_alertas_total = n_travados + (1 if n_risco_prazo else 0)  # simplificado p/ capa
+    n_alertas_total = n_travados + (1 if n_risco_prazo else 0)
 
     return RelatorioDeptPayload(
         tenant_nome=tenant_nome or "AgroSafra",
@@ -259,13 +363,14 @@ def _build_payload(
         semanas_total=semanas_total,
         data_inicio=data_inicio,
         pct_geral=pct_geral,
-        n_equipamentos=len(eq_tasks),
+        n_equipamentos=n_equipamentos,
         n_concluidos=n_concluidos,
         n_alertas_total=n_alertas_total,
         evolucao=evolucao,
         pct_semana_anterior=pct_semana_anterior,
         pct_semana_atual=pct_semana_atual,
         criticos=sorted(criticos, key=lambda x: x.pct),
+        todos_equipamentos=sorted(all_equipamentos, key=lambda e: e["pct"]),
         n_travados=n_travados,
         n_sem_inicio=n_sem_inicio,
         n_parados=n_parados,
@@ -355,10 +460,7 @@ def dispatch_relatorio_semanal(
         _log(f"  → Processando departamento: {grp.departamento_nome}")
         try:
             tarefas = _load_tarefas(sb, tenant_id, revisao_id, grp.grupo_ids)
-            if not tarefas:
-                _log(f"    ↳ Sem tarefas — pulando.")
-                result.skipped += 1
-                continue
+            # Não pula departamentos sem tarefas — podem ter equipamentos com 0% ainda sem início
 
             payload, eq_list = _build_payload(
                 tarefas=tarefas,
@@ -366,6 +468,9 @@ def dispatch_relatorio_semanal(
                 departamento_nome=grp.departamento_nome,
                 tenant_nome=tenant_nome,
                 branding=branding,
+                sb=sb,
+                tenant_id=tenant_id,
+                grupo_ids=grp.grupo_ids,
                 dias_travado=dias_travado,
                 dias_sem_update=dias_sem_update,
             )
@@ -438,6 +543,7 @@ def dispatch_relatorio_semanal(
                         tarefas=tarefas_g, revisao=revisao,
                         departamento_nome=grp.departamento_nome,
                         tenant_nome=tenant_nome, branding=branding,
+                        sb=sb, tenant_id=tenant_id, grupo_ids=grp.grupo_ids,
                         dias_travado=dias_travado, dias_sem_update=dias_sem_update,
                     )
                     dept_summaries.append(DeptSummary(

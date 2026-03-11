@@ -87,6 +87,8 @@ class RelatorioDeptPayload:
     pct_semana_atual: int
     # críticos
     criticos: List[EquipamentoCritico]
+    # todos os equipamentos (para tabela de progresso geral no PDF)
+    todos_equipamentos: List[dict] = None  # [{frota, modelo, grupo, pct, status}]
     # alertas consolidados
     n_travados: int = 0
     n_sem_inicio: int = 0
@@ -359,6 +361,76 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
     else:
         c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 14)
         c.drawString(16*mm, y-10*mm, "✓ Nenhum equipamento crítico neste departamento.")
+
+    footer(); c.showPage()
+
+    # ── PÁGINA 3b: Progresso de todos os equipamentos ─────────────────────────
+    todos = payload.todos_equipamentos or []
+    if todos:
+        new_page("Progresso de Todos os Equipamentos")
+        y = h - 52*mm
+
+        y = section_title(f"Progresso individual — {len(todos)} equipamento(s)", y)
+
+        label_w  = 40*mm
+        pct_w    = 14*mm
+        bar_avail = w - 32*mm - label_w - pct_w - 6*mm
+        row_h    = 8*mm
+
+        status_labels = {
+            "concluido":    "✓",
+            "travado":      "⚠",
+            "zero":         "—",
+            "em_andamento": "",
+            "sem_template": "?",
+        }
+
+        for eq in todos:
+            if y < 25*mm:
+                footer(); c.showPage()
+                new_page("Progresso de Todos os Equipamentos (cont.)")
+                y = h - 52*mm
+                y = section_title("continuação", y)
+
+            pct    = int(eq.get("pct", 0))
+            frota  = str(eq.get("frota") or "—")
+            modelo = str(eq.get("modelo") or "")[:18]
+            grupo  = str(eq.get("grupo") or "")[:16]
+            status = eq.get("status") or ""
+            col    = _risk_color(pct)
+
+            # linha de fundo alternada
+            c.setFillColor(SURFACE if todos.index(eq) % 2 == 0 else WHITE)
+            c.rect(16*mm, y - row_h, w - 32*mm, row_h, fill=1, stroke=0)
+
+            # frota (bold) + modelo
+            c.setFillColor(FG); c.setFont("Helvetica-Bold", 8)
+            c.drawString(17*mm, y - row_h*0.38, frota)
+            c.setFillColor(MUTED); c.setFont("Helvetica", 7)
+            c.drawString(17*mm, y - row_h*0.72, modelo)
+
+            # grupo
+            c.setFillColor(MUTED); c.setFont("Helvetica", 7.5)
+            c.drawString(17*mm + label_w, y - row_h/2, grupo)
+
+            # barra de progresso
+            bx = 17*mm + label_w + 28*mm
+            progress_bar(bx, y - row_h + 1.5*mm, bar_avail, row_h - 3*mm, pct)
+
+            # %
+            badge = status_labels.get(status, "")
+            c.setFillColor(col); c.setFont("Helvetica-Bold", 8)
+            c.drawRightString(w - 17*mm, y - row_h*0.4, f"{pct}%")
+            if badge:
+                c.setFillColor(RED if status in ("travado","zero") else MUTED)
+                c.setFont("Helvetica-Bold", 7)
+                c.drawRightString(w - 17*mm, y - row_h*0.72, badge)
+
+            # divisor leve
+            c.setStrokeColor(BORDER); c.setLineWidth(0.3)
+            c.line(16*mm, y - row_h, w - 16*mm, y - row_h)
+
+            y -= row_h
 
     footer(); c.showPage()
 
