@@ -1607,12 +1607,45 @@ def render_matriz():
                 st.info("Instale `reportlab` no requirements.txt para habilitar a exportação em PDF.")
             else:
                 st.caption(f"Relatório com {_n_set} setor(es) · {_n_res} equipamento(s)")
-                pdf_bytes=_build_pdf_tables(titulo=titulo,grupo_nome=grupo_nome,
-                    resumo_df=resumo_df if isinstance(resumo_df,pd.DataFrame) else pd.DataFrame(),
-                    sector_tables=sector_tables_for_export)
-                st.download_button("⬇️ Baixar PDF completo",data=pdf_bytes,
-                    file_name=f"relatorio_matriz_{grupo_nome}.pdf".replace("/","-"),
-                    mime="application/pdf",use_container_width=True,type="primary")
+
+                # Evita reaproveitar bytes do grupo/revisão anterior no download.
+                export_signature = (
+                    str(tenant_id),
+                    str(grupo_id),
+                    str(revisao_id),
+                    str(st.session_state.get("data_version", "0")),
+                    int(_n_res),
+                    int(_n_set),
+                )
+                prev_signature = st.session_state.get("mtz_pdf_export_signature")
+                if prev_signature != export_signature:
+                    st.session_state.pop("mtz_pdf_export_bytes", None)
+                    st.session_state["mtz_pdf_export_signature"] = export_signature
+
+                if "mtz_pdf_export_bytes" not in st.session_state:
+                    resumo_pdf_df = resumo_df.copy() if isinstance(resumo_df, pd.DataFrame) else pd.DataFrame()
+                    sector_tables_pdf = [
+                        (setor_nome, setor_df.copy())
+                        for setor_nome, setor_df in (sector_tables_for_export or [])
+                    ]
+                    st.session_state["mtz_pdf_export_bytes"] = _build_pdf_tables(
+                        titulo=titulo,
+                        grupo_nome=grupo_nome,
+                        resumo_df=resumo_pdf_df,
+                        sector_tables=sector_tables_pdf,
+                    )
+
+                pdf_bytes = st.session_state["mtz_pdf_export_bytes"]
+                pdf_file_name = f"relatorio_matriz_{grupo_nome}.pdf".replace("/", "-")
+                st.download_button(
+                    "⬇️ Baixar PDF completo",
+                    data=pdf_bytes,
+                    file_name=pdf_file_name,
+                    mime="application/pdf",
+                    use_container_width=True,
+                    type="primary",
+                    key=f"mtz_pdf_download_{grupo_id}_{revisao_id}_{_n_res}_{_n_set}",
+                )
 
     except Exception as e:
         st.error("Erro ao renderizar a Matriz.")
