@@ -541,84 +541,100 @@ def _fragment_resumo_grupos(alertas: dict) -> None:
 def _fragment_disparo_manual(tenant_id: str, revisao_id: str, is_admin: bool,
                               dias_travado: int, dias_sem_update: int) -> None:
     """UI de disparo manual de e-mail semanal por departamento."""
-    st.markdown("### 📧 Envio de Relatório Semanal por E-mail")
-    st.caption(
-        "Envia um PDF personalizado por departamento para cada responsável vinculado. "
-        "O relatório inclui: KPIs, evolução semanal, comparativo e equipamentos críticos."
-    )
 
     if not is_admin:
         st.info("Apenas administradores podem disparar o envio de e-mails.")
         return
 
-    # ── Verificar configuração SMTP ───────────────────────────────────────────
+    # ── 1. Status do SMTP ─────────────────────────────────────────────────────
     smtp_ok = True
+    smtp_erro = ""
     try:
         from src.services.email.smtp_sender import _load_config_from_secrets
         _load_config_from_secrets()
     except Exception as e:
         smtp_ok = False
-        st.error(
-            "⚠️ **SMTP não configurado.** Adicione ao `secrets.toml`:\n\n"
-            "```toml\n"
-            'SMTP_HOST = "smtp.gmail.com"\n'
-            'SMTP_PORT = "587"\n'
-            'SMTP_USER = "seu@email.com"\n'
-            'SMTP_PASSWORD = "sua_senha_ou_app_password"\n'
-            'SMTP_FROM_NAME = "Sistema AgroSafra"\n'
-            "```\n\n"
-            f"Erro: `{e}`"
-        )
+        smtp_erro = str(e)
 
-    # ── Preview de destinatários ──────────────────────────────────────────────
-    with st.expander("👥 Ver destinatários por departamento", expanded=False):
+    col_smtp, col_dest = st.columns(2)
+    with col_smtp:
+        if smtp_ok:
+            st.success("✅ SMTP configurado")
+        else:
+            st.error("❌ SMTP não configurado")
+            with st.expander("Ver como configurar", expanded=False):
+                st.markdown("**Microsoft (Outlook / Office 365):**")
+                st.code(
+                    'SMTP_HOST = "smtp.office365.com"\n'
+                    'SMTP_PORT = "587"\n'
+                    'SMTP_USER = "seu@empresa.com.br"\n'
+                    'SMTP_PASSWORD = "sua_senha"\n'
+                    'SMTP_FROM_NAME = "AgroSafra"',
+                    language="toml",
+                )
+                st.markdown("**Gmail:**")
+                st.code(
+                    'SMTP_HOST = "smtp.gmail.com"\n'
+                    'SMTP_PORT = "587"\n'
+                    'SMTP_USER = "seu@gmail.com"\n'
+                    'SMTP_PASSWORD = "sua_app_password"\n'
+                    'SMTP_FROM_NAME = "AgroSafra"',
+                    language="toml",
+                )
+                if smtp_erro:
+                    st.caption(f"Erro atual: `{smtp_erro}`")
+
+    # ── 2. Destinatários ──────────────────────────────────────────────────────
+    with col_dest:
         try:
             from src.services.email.recipients import get_recipient_groups
-            with st.spinner("Buscando responsáveis..."):
-                groups = get_recipient_groups(tenant_id)
-            if not groups:
-                st.warning("Nenhum departamento com gestor vinculado e e-mail válido encontrado.")
-                st.caption("Verifique em Admin → Usuários se os gestores estão vinculados a departamentos.")
+            groups = get_recipient_groups(tenant_id)
+            if groups:
+                total_dest = sum(len(g.recipients) for g in groups)
+                st.success(f"✅ {len(groups)} departamento(s) · {total_dest} destinatário(s)")
+                with st.expander("Ver destinatários", expanded=False):
+                    for g in groups:
+                        emails = ", ".join(f"`{r.email}`" for r in g.recipients)
+                        st.markdown(f"**{g.departamento_nome}:** {emails}")
             else:
-                for g in groups:
-                    emails = [r.email for r in g.recipients]
-                    st.markdown(
-                        f"**{g.departamento_nome}** — {len(g.recipients)} responsável(is): "
-                        + ", ".join(f"`{e}`" for e in emails)
-                    )
+                st.warning("⚠️ Nenhum destinatário encontrado")
+                st.caption("Vincule gestores a departamentos em Admin → Usuários.")
         except Exception as e:
-            st.error(f"Erro ao buscar destinatários: {e}")
+            st.warning(f"Não foi possível carregar destinatários: {e}")
 
     st.divider()
 
-    # ── Opções de disparo ─────────────────────────────────────────────────────
-    col_opt1, col_opt2 = st.columns(2)
-    with col_opt1:
-        dry_run = st.toggle(
-            "Modo teste (não envia e-mails)",
-            value=True,
-            key="ntf_email_dry",
-            help="Gera os PDFs e valida tudo, mas não dispara os e-mails. Recomendado para testar primeiro."
-        )
-    with col_opt2:
-        if dry_run:
-            st.caption("🟡 Modo teste ativado — nenhum e-mail será enviado")
-        else:
-            st.caption("🟢 Modo real — e-mails serão enviados aos responsáveis")
+    # ── 3. Modo de envio ──────────────────────────────────────────────────────
+    dry_run = st.toggle(
+        "🧪 Modo teste — gerar PDFs sem enviar e-mails",
+        value=True,
+        key="ntf_email_dry",
+        help="Ative para validar a geração dos PDFs sem disparar nenhum e-mail.",
+    )
 
     if dry_run:
-        st.info("**Modo teste ativo.** Os PDFs serão gerados e validados, mas nenhum e-mail será enviado.")
+        st.info("PDFs serão gerados e validados, mas **nenhum e-mail será enviado**.")
+    else:
+        if not smtp_ok:
+            st.error("Configure o SMTP antes de enviar e-mails reais.")
+        else:
+            st.warning("⚠️ Modo real — os e-mails **serão enviados** aos responsáveis de cada departamento.")
 
-    # ── Botão de disparo ──────────────────────────────────────────────────────
-    col_btn, _ = st.columns([1, 2])
-    with col_btn:
-        btn_label = "🧪 Testar geração" if dry_run else "📧 Enviar relatórios agora"
-        btn_disabled = not smtp_ok and not dry_run
-        btn_help = "Configure o SMTP primeiro." if btn_disabled else None
-        do_send = st.button(btn_label, type="primary", use_container_width=True,
-                            key="ntf_send_btn", disabled=btn_disabled, help=btn_help)
+    # ── 4. Botão de disparo ───────────────────────────────────────────────────
+    btn_label   = "🧪 Testar geração de PDFs" if dry_run else "📧 Enviar relatórios agora"
 
+    do_send = st.button(
+        btn_label,
+        type="primary",
+        use_container_width=False,
+        key="ntf_send_btn",
+    )
+
+    # ── 5. Execução ───────────────────────────────────────────────────────────
     if do_send:
+        if not dry_run and not smtp_ok:
+            st.error("Configure o SMTP no `secrets.toml` antes de enviar e-mails reais.")
+            return
         from src.services.email.dispatcher import dispatch_relatorio_semanal
         log_lines: list[str] = []
 
@@ -638,21 +654,22 @@ def _fragment_disparo_manual(tenant_id: str, revisao_id: str, is_admin: bool,
 
         if result.failed == 0 and result.sent > 0:
             if dry_run:
-                st.success(f"✅ Teste ok. {result.sent} PDF(s) gerado(s) — nenhum e-mail enviado.")
+                st.success(f"✅ Teste concluído — {result.sent} PDF(s) gerado(s) com sucesso. Nenhum e-mail enviado.")
             else:
                 st.success(f"✅ {result.sent} e-mail(s) enviado(s) com sucesso!")
         elif result.sent == 0 and result.skipped > 0:
             st.warning("Nenhum departamento com destinatário válido encontrado.")
-        else:
-            st.warning(f"Concluído com {result.failed} falha(s). Veja o log abaixo.")
+        elif result.failed > 0:
+            st.warning(f"Concluído com {result.failed} falha(s).")
 
         if result.errors:
             with st.expander("❌ Erros", expanded=True):
                 for err in result.errors:
                     st.error(err)
 
-        with st.expander("📋 Log completo", expanded=False):
-            st.code("\n".join(log_lines) or "(sem log)")
+        if log_lines:
+            with st.expander("📋 Log completo", expanded=False):
+                st.code("\n".join(log_lines))
 
 
 @st.fragment
@@ -663,17 +680,12 @@ def _fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
         ScheduleConfig, load_schedule_config, save_schedule_config,
     )
 
-    st.markdown("### ⏰ Agendamento Automático de E-mail")
-    st.caption(
-        "Configure quando o sistema deve enviar automaticamente os relatórios semanais. "
-        "O `scheduler.py` (ou GitHub Actions) respeita esta configuração."
-    )
+    st.markdown("### ⏰ Agendamento Automático")
 
     if not is_admin:
         st.info("Apenas administradores podem configurar o agendamento.")
         return
 
-    # ── Carrega config atual ──────────────────────────────────────────────────
     with st.spinner("Carregando configuração…"):
         cfg = load_schedule_config(tenant_id)
 
@@ -681,30 +693,22 @@ def _fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
     col_status, col_prox = st.columns(2)
     with col_status:
         if cfg.ativo:
-            st.success("✅ Agendamento **ativo**")
+            st.success(f"✅ Ativo — {cfg.descricao_humana()}")
         else:
-            st.warning("⏸ Agendamento **pausado**")
-        st.caption(cfg.descricao_humana())
+            st.warning(f"⏸ Pausado — {cfg.descricao_humana()}")
     with col_prox:
         try:
             proximo = cfg.proximo_disparo_brt().strftime("%d/%m/%Y às %H:%M")
-            st.info(f"**Próximo disparo previsto:** {proximo} (Brasília)")
+            st.info(f"Próximo disparo: **{proximo}** (Brasília)")
         except Exception:
-            st.info("Configure o agendamento abaixo para ver o próximo disparo.")
+            st.caption("Configure abaixo para ver o próximo disparo.")
 
     st.divider()
 
-    # ── Formulário de configuração ────────────────────────────────────────────
-    st.markdown("#### Configurar periodicidade e horário")
-
+    # ── Formulário ────────────────────────────────────────────────────────────
     col1, col2 = st.columns(2)
     with col1:
-        ativo = st.toggle(
-            "Agendamento ativo",
-            value=cfg.ativo,
-            key="sch_ativo",
-            help="Desative para pausar todos os envios automáticos sem apagar a configuração.",
-        )
+        ativo = st.toggle("Agendamento ativo", value=cfg.ativo, key="sch_ativo")
         periodicidade_idx = PERIODICIDADE_OPTS.index(cfg.periodicidade) if cfg.periodicidade in PERIODICIDADE_OPTS else 0
         periodicidade = st.selectbox(
             "Periodicidade",
@@ -713,116 +717,71 @@ def _fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
             format_func=lambda x: PERIODICIDADE_LABELS.get(x, x),
             key="sch_period",
         )
+        dias_travado = st.number_input("Alertar travado há (dias)", min_value=1, max_value=30,
+                                       value=cfg.dias_travado, key="sch_dias_trav")
 
     with col2:
-        hora_envio = st.text_input(
-            "Horário de envio (HH:MM — Brasília)",
-            value=cfg.hora_envio or "07:00",
-            key="sch_hora",
-            help="Use formato 24h. Ex: 07:00 = 7h da manhã no horário de Brasília.",
-        )
+        hora_envio = st.text_input("Horário (HH:MM — Brasília)", value=cfg.hora_envio or "07:00", key="sch_hora")
 
         if periodicidade == "mensal":
-            dia_mes = st.number_input(
-                "Dia do mês",
-                min_value=1, max_value=28,
-                value=cfg.dia_mes or 1,
-                key="sch_dia_mes",
-                help="Dia fixo do mês. Máximo 28 para garantir compatibilidade com todos os meses.",
-            )
-            dia_semana = cfg.dia_semana  # mantém valor existente
+            dia_mes = st.number_input("Dia do mês", min_value=1, max_value=28,
+                                      value=cfg.dia_mes or 1, key="sch_dia_mes")
+            dia_semana = cfg.dia_semana
         else:
-            dia_semana = st.selectbox(
-                "Dia da semana",
-                options=list(range(7)),
-                index=cfg.dia_semana % 7,
-                format_func=lambda i: DIAS_SEMANA_LABELS[i],
-                key="sch_dia_sem",
-            )
-            dia_mes = cfg.dia_mes  # mantém valor existente
+            dia_semana = st.selectbox("Dia da semana", options=list(range(7)),
+                                      index=cfg.dia_semana % 7,
+                                      format_func=lambda i: DIAS_SEMANA_LABELS[i],
+                                      key="sch_dia_sem")
+            dia_mes = cfg.dia_mes
 
-    # ── Thresholds de alerta ──────────────────────────────────────────────────
-    st.markdown("#### Thresholds de alertas (para os PDFs gerados automaticamente)")
-    col3, col4 = st.columns(2)
-    with col3:
-        dias_travado = st.number_input(
-            "Alertar travado há (dias)",
-            min_value=1, max_value=30,
-            value=cfg.dias_travado,
-            key="sch_dias_trav",
-        )
-    with col4:
-        dias_parado = st.number_input(
-            "Alertar parado há (dias)",
-            min_value=1, max_value=30,
-            value=cfg.dias_parado,
-            key="sch_dias_par",
-        )
+        dias_parado = st.number_input("Alertar parado há (dias)", min_value=1, max_value=30,
+                                      value=cfg.dias_parado, key="sch_dias_par")
 
-    # ── Validação de hora ─────────────────────────────────────────────────────
+    # ── Validação e salvar ────────────────────────────────────────────────────
     hora_valida = True
     try:
         hh, mm = hora_envio.split(":")
         assert 0 <= int(hh) <= 23 and 0 <= int(mm) <= 59
     except Exception:
-        st.error("Formato de horário inválido. Use HH:MM (ex: 07:00 ou 14:30).")
+        st.error("Formato de horário inválido. Use HH:MM (ex: 07:00).")
         hora_valida = False
 
-    # ── Botão salvar ──────────────────────────────────────────────────────────
     col_save, col_preview = st.columns([1, 2])
     with col_save:
-        if st.button("💾 Salvar configuração", type="primary",
-                     use_container_width=True, key="sch_save",
-                     disabled=not hora_valida):
+        if st.button("💾 Salvar", type="primary", use_container_width=True,
+                     key="sch_save", disabled=not hora_valida):
             new_cfg = ScheduleConfig(
-                tenant_id=tenant_id,
-                id=cfg.id,
-                ativo=ativo,
-                periodicidade=periodicidade,
-                dia_semana=int(dia_semana),
-                dia_mes=int(dia_mes),
-                hora_envio=hora_envio.strip(),
-                dias_travado=int(dias_travado),
-                dias_parado=int(dias_parado),
+                tenant_id=tenant_id, id=cfg.id, ativo=ativo,
+                periodicidade=periodicidade, dia_semana=int(dia_semana),
+                dia_mes=int(dia_mes), hora_envio=hora_envio.strip(),
+                dias_travado=int(dias_travado), dias_parado=int(dias_parado),
                 revisao_fixa=cfg.revisao_fixa,
             )
             if save_schedule_config(new_cfg):
-                st.success("✅ Configuração salva com sucesso!")
-                proximo_str = new_cfg.proximo_disparo_brt().strftime("%d/%m/%Y às %H:%M")
-                st.info(f"Próximo disparo automático previsto: **{proximo_str}** (Brasília)")
+                st.success("✅ Configuração salva!")
                 st.rerun()
             else:
-                st.error(
-                    "Falha ao salvar. Verifique se a tabela `email_schedule_config` "
-                    "foi criada (execute `sql/migration_email_schedule.sql` no Supabase)."
-                )
+                st.error("Falha ao salvar. Verifique se a tabela `email_schedule_config` existe no Supabase.")
     with col_preview:
         if hora_valida:
-            preview_cfg = ScheduleConfig(
-                tenant_id=tenant_id,
-                ativo=ativo,
-                periodicidade=periodicidade,
-                dia_semana=int(dia_semana),
-                dia_mes=int(dia_mes),
-                hora_envio=hora_envio.strip(),
-                dias_travado=int(dias_travado),
-                dias_parado=int(dias_parado),
-            )
             try:
+                preview_cfg = ScheduleConfig(
+                    tenant_id=tenant_id, ativo=ativo, periodicidade=periodicidade,
+                    dia_semana=int(dia_semana), dia_mes=int(dia_mes),
+                    hora_envio=hora_envio.strip(), dias_travado=int(dias_travado),
+                    dias_parado=int(dias_parado),
+                )
                 prox = preview_cfg.proximo_disparo_brt().strftime("%d/%m/%Y às %H:%M")
                 st.caption(f"**Prévia:** {preview_cfg.descricao_humana()}")
                 st.caption(f"Próximo disparo: {prox} (Brasília)")
             except Exception:
                 pass
 
-    # ── Como ativar o scheduler ───────────────────────────────────────────────
-    st.divider()
-    with st.expander("📋 Como conectar o scheduler a esta configuração", expanded=False):
+    with st.expander("📋 Como configurar o scheduler", expanded=False):
         st.markdown(f"""
-O `scheduler.py` e o GitHub Actions **já lêem esta configuração automaticamente** do Supabase.
-Basta garantir que o `SCHEDULER_TENANT_ID` esteja definido — não é mais necessário ajustar o cron manualmente.
+O `scheduler.py` e o GitHub Actions lêem esta configuração automaticamente do Supabase.
 
-**GitHub Actions** — secrets necessários no repositório:
+**Secrets necessários no repositório GitHub:**
 
 | Secret | Valor |
 |--------|-------|
@@ -833,15 +792,6 @@ Basta garantir que o `SCHEDULER_TENANT_ID` esteja definido — não é mais nece
 | `SMTP_USER` | e-mail remetente |
 | `SMTP_PASSWORD` | senha ou App Password |
 | `SCHEDULER_TENANT_ID` | `{tenant_id}` |
-
-O workflow (`.github/workflows/relatorio_semanal.yml`) pode rodar com cron mais frequente (ex: a cada hora)
-e o scheduler decide sozinho se é a janela certa, conforme a configuração acima.
-
-**Cron local:**
-```bash
-# Roda todo dia às 06:50 e o scheduler verifica se é hora de disparar
-50 6 * * * cd /caminho/do/projeto && python scheduler.py
-```
 """)
 
 # ── Ponto de entrada público ──────────────────────────────────────────────────
@@ -960,6 +910,9 @@ def render_notificacoes() -> None:
                 st.info("Instale `reportlab` no requirements.txt para habilitar exportação em PDF.")
 
     with tab_email:
+        st.markdown("### 📧 Envio de Relatório por E-mail")
+        st.caption("Envie manualmente ou configure o agendamento automático por departamento.")
+        st.divider()
         _fragment_disparo_manual(tenant_id, revisao_id, is_admin,
                                  int(dias_travado), int(dias_sem_update))
         st.divider()
