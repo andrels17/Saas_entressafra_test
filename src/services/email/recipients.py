@@ -124,14 +124,13 @@ def get_recipient_groups(tenant_id: str) -> list[RecipientGroup]:
                 user_info[uid] = Recipient(
                     user_id=uid,
                     email="",            # preenchido abaixo
-                    nome=p.get("nome") or uid[:8],
+                    nome=p.get("nome") or "",  # deixa vazio — será preenchido pelo email abaixo
                 )
         except Exception:
             pass
 
     # E-mails via auth.admin (requer service role)
     try:
-        # Supabase Python SDK: admin.list_users() retorna paginado
         page = 1
         while True:
             resp = svc.auth.admin.list_users(page=page, per_page=1000)
@@ -142,10 +141,26 @@ def get_recipient_groups(tenant_id: str) -> list[RecipientGroup]:
                 uid = getattr(u, "id", None) or (u.get("id") if isinstance(u, dict) else None)
                 email = getattr(u, "email", None) or (u.get("email") if isinstance(u, dict) else None)
                 if uid and email and uid in all_user_ids:
+                    # Tenta pegar nome dos metadados do auth (user_metadata ou raw_user_meta_data)
+                    meta = getattr(u, "user_metadata", None) or getattr(u, "raw_user_meta_data", None) or {}
+                    if isinstance(meta, dict):
+                        meta_nome = meta.get("nome") or meta.get("name") or meta.get("full_name") or ""
+                    else:
+                        meta_nome = ""
+                    # Fallback: parte antes do @ do email (ex: "joao.silva" de "joao.silva@empresa.com")
+                    email_nome = email.split("@")[0].replace(".", " ").replace("_", " ").title()
+
                     if uid not in user_info:
-                        user_info[uid] = Recipient(user_id=uid, email=email, nome=uid[:8])
+                        user_info[uid] = Recipient(
+                            user_id=uid,
+                            email=email,
+                            nome=meta_nome or email_nome,
+                        )
                     else:
                         user_info[uid].email = email
+                        # Só atualiza o nome se ainda for o fallback do uid
+                        if not user_info[uid].nome or len(user_info[uid].nome) == 8:
+                            user_info[uid].nome = meta_nome or email_nome
             if len(users_page) < 1000:
                 break
             page += 1
@@ -217,10 +232,11 @@ def get_admin_recipients(tenant_id: str) -> list[Recipient]:
                 uid   = getattr(u, "id", None) or (u.get("id") if isinstance(u, dict) else None)
                 email = getattr(u, "email", None) or (u.get("email") if isinstance(u, dict) else None)
                 if uid and email and uid in admin_ids:
+                    email_nome = email.split("@")[0].replace(".", " ").replace("_", " ").title()
                     recipients.append(Recipient(
                         user_id=uid,
                         email=email,
-                        nome=profiles.get(uid) or uid[:8],
+                        nome=profiles.get(uid) or email_nome,
                     ))
             if len(users_page) < 1000:
                 break
