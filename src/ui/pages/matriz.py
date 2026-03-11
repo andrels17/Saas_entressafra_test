@@ -135,7 +135,6 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
         TableStyle,
         PageBreak,
         HRFlowable,
-        KeepTogether,
     )
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
@@ -478,10 +477,10 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
 
     cards = Table(
         [[
-            KeepTogether([Paragraph("Equipamentos", card_label), Spacer(1, 0.03 * cm), Paragraph(str(total_eq), card_value)]),
-            KeepTogether([Paragraph("Concluídos (100%)", card_label), Spacer(1, 0.03 * cm), Paragraph(f'<font color="#16A34A">{eq_100}</font>', card_value)]),
-            KeepTogether([Paragraph("Progresso médio", card_label), Spacer(1, 0.03 * cm), Paragraph(f"{avg_pct}%", card_value)]),
-            KeepTogether([Paragraph("Sem início (0%)", card_label), Spacer(1, 0.03 * cm), Paragraph(f'<font color="#EF4444">{eq_zero}</font>', card_value)]),
+            [Paragraph("Equipamentos", card_label), Spacer(1, 0.03 * cm), Paragraph(str(total_eq), card_value)],
+            [Paragraph("Concluídos (100%)", card_label), Spacer(1, 0.03 * cm), Paragraph(f'<font color="#16A34A">{eq_100}</font>', card_value)],
+            [Paragraph("Progresso médio", card_label), Spacer(1, 0.03 * cm), Paragraph(f"{avg_pct}%", card_value)],
+            [Paragraph("Sem início (0%)", card_label), Spacer(1, 0.03 * cm), Paragraph(f'<font color="#EF4444">{eq_zero}</font>', card_value)],
         ]],
         colWidths=[pw / 4.0] * 4,
         rowHeights=[1.45 * cm],
