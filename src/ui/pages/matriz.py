@@ -1,3 +1,15 @@
+"""Matriz Operacional — visao por grupo com drill-down por setor.
+
+Melhorias v2:
+  1. Scope/permissoes — nao-admin veem apenas seus grupos/departamentos
+  2. Tab "Resumo" dedicada com ranking visual por equipamento + barra de progresso
+  3. Barra de progresso visual nos cards de grupo (tela de selecao)
+  4. Filtro de semana na aba Matriz
+  5. Observacoes inline no editor — expander por setor + campo no editor rapido
+  6. _style_heatmap definida uma vez fora do loop de setores
+  7. svc_ids_all calculado antes das tabs (sem dir() fragil)
+  8. Barra de progresso no header do grupo
+"""
 from __future__ import annotations
 
 import io
@@ -978,6 +990,15 @@ def render_matriz():
 
         # FIX #3 e #8: pré-computar dados de export ANTES das tabs
         # Assim Exportar funciona mesmo sem o usuário ter visitado Matriz ou Tempos
+
+        # FIX GRUPO: invalidar bytes de PDF cacheados ANTES das tabs,
+        # para garantir que trocar de grupo sempre gera um novo PDF.
+        _early_signature = (str(tenant_id), str(grupo_id), str(revisao_id))
+        if st.session_state.get("_mtz_pdf_grupo_sig") != _early_signature:
+            st.session_state.pop("mtz_pdf_export_bytes", None)
+            st.session_state.pop("mtz_pdf_export_signature", None)
+            st.session_state["_mtz_pdf_grupo_sig"] = _early_signature
+
         sector_tables_for_export=[]
         for _sn in sorted(setor_to_services.keys()):
             _svs=sorted(setor_to_services[_sn],key=lambda x:(x.get("nome") or "").lower())
