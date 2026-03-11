@@ -1,14 +1,3 @@
-"""Notificações — alertas proativos gerados automaticamente.
-
-Funcionalidades:
-  - Equipamentos travados há X dias sem atualização
-  - Equipamentos sem nenhum apontamento na semana atual
-  - Setores com 0% de progresso (nunca iniciados)
-  - Equipamentos em risco de não concluir no prazo
-  - Resumo de alertas por grupo/departamento
-  - Exportação CSV de cada categoria
-  - Exportação PDF consolidada de todos os alertas
-"""
 from __future__ import annotations
 
 import io
@@ -653,18 +642,6 @@ def _fragment_disparo_manual(tenant_id: str, revisao_id: str, is_admin: bool,
 
         with st.expander("📋 Log completo", expanded=False):
             st.code("\n".join(log_lines) or "(sem log)")
-
-    # ── Sub-abas: Disparo Manual + Configurar Agendamento ────────────────────
-    st.divider()
-    sub_manual, sub_agendar = st.tabs(["🚀 Disparo manual", "⏰ Configurar agendamento"])
-
-    with sub_manual:
-        _fragment_disparo_manual(tenant_id, revisao_id, is_admin,
-                                 int(dias_travado), int(dias_sem_update))
-
-    with sub_agendar:
-        _fragment_configurar_agendamento(tenant_id, is_admin)
-
 
 
 @st.fragment
