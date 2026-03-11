@@ -219,7 +219,7 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
     y -= 4*mm
     c.setFillColor(FG); c.setFont("Helvetica-Bold", 10)
     c.drawString(16*mm, y, "Progresso geral do departamento")
-    y -= 6*mm
+    y -= 10*mm
     bar_w = w - 32*mm
     progress_bar(16*mm, y, bar_w, 8*mm, payload.pct_geral)
     c.setFillColor(_risk_color(payload.pct_geral)); c.setFont("Helvetica-Bold", 9)

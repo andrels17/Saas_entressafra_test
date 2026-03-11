@@ -202,10 +202,10 @@ def build_consolidated_pdf(payload: RelatorioConsolidadoPayload) -> bytes:
     ], top_y=y)
 
     # Barra geral
-    y -= 2*mm
+    y -= 4*mm
     c.setFillColor(FG); c.setFont("Helvetica-Bold", 10)
     c.drawString(16*mm, y, "Progresso médio geral")
-    y -= 6*mm
+    y -= 10*mm
     progress_bar(16*mm, y, w - 32*mm, 8*mm, payload.pct_geral)
     c.setFillColor(pct_color); c.setFont("Helvetica-Bold", 9)
     c.drawRightString(w - 16*mm, y + 9*mm, f"{payload.pct_geral}%")

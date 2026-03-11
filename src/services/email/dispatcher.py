@@ -160,6 +160,7 @@ def _build_payload(
     total_done = total_possible = 0
     n_concluidos = 0
     criticos: list[EquipamentoCritico] = []
+    all_equipamentos: list[dict] = []  # todos equipamentos para o email
 
     for eid, tasks in eq_tasks.items():
         eq  = (tasks[0].get("equipamentos") or {})
@@ -177,12 +178,21 @@ def _build_payload(
 
         # críticos: 0% ou travados
         any_travado = any(t.get("status") == "travado" for t in tasks)
+        status_eq = "travado" if any_travado else ("zero" if pct == 0 else ("concluido" if pct == 100 else "em_andamento"))
         if pct == 0:
             criticos.append(EquipamentoCritico(frota=frota, modelo=modelo, grupo=grupo,
                                                 pct=0, status="zero"))
         elif any_travado:
             criticos.append(EquipamentoCritico(frota=frota, modelo=modelo, grupo=grupo,
                                                 pct=pct, status="travado"))
+
+        all_equipamentos.append({
+            "frota": frota,
+            "modelo": modelo,
+            "grupo": grupo,
+            "pct": pct,
+            "status": status_eq,
+        })
 
     pct_geral = _pct(total_done, total_possible)
 
@@ -262,7 +272,7 @@ def _build_payload(
         n_risco_prazo=n_risco_prazo,
         primary_color=branding.get("primary_color") or "#FFD100",
         logo_url=branding.get("logo_url"),
-    )
+    ), sorted(all_equipamentos, key=lambda e: e["pct"])
 
 
 # ── Resultado do dispatch ─────────────────────────────────────────────────────
@@ -350,7 +360,7 @@ def dispatch_relatorio_semanal(
                 result.skipped += 1
                 continue
 
-            payload = _build_payload(
+            payload, eq_list = _build_payload(
                 tarefas=tarefas,
                 revisao=revisao,
                 departamento_nome=grp.departamento_nome,
@@ -382,6 +392,7 @@ def dispatch_relatorio_semanal(
                         pct_geral=payload.pct_geral,
                         n_alertas=payload.n_alertas_total,
                         primary_color=payload.primary_color,
+                        equipamentos=eq_list,
                     )
                     send_email(EmailMessage(
                         to=[rec.email],
@@ -423,7 +434,7 @@ def dispatch_relatorio_semanal(
                     tarefas_g = _load_tarefas(sb, tenant_id, revisao_id, grp.grupo_ids)
                     if not tarefas_g:
                         continue
-                    p = _build_payload(
+                    p, _ = _build_payload(
                         tarefas=tarefas_g, revisao=revisao,
                         departamento_nome=grp.departamento_nome,
                         tenant_nome=tenant_nome, branding=branding,
