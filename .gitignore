@@ -1,0 +1,3 @@
+# Secrets — nunca commitar
+.streamlit/secrets.toml
+secrets.toml
