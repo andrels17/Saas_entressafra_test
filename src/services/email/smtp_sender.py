@@ -1,0 +1,192 @@
+"""Envio de e-mail via SMTP com anexo PDF.
+
+Configuração via st.secrets (ou variáveis de ambiente):
+  SMTP_HOST      ex: smtp.gmail.com
+  SMTP_PORT      ex: 587
+  SMTP_USER      ex: relatorios@empresa.com
+  SMTP_PASSWORD  senha ou app-password
+  SMTP_FROM_NAME ex: Sistema AgroSafra  (opcional)
+"""
+from __future__ import annotations
+
+import smtplib
+import ssl
+from dataclasses import dataclass, field
+from datetime import datetime
+from email.mime.application import MIMEApplication
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from typing import List
+
+
+@dataclass
+class SmtpConfig:
+    host: str
+    port: int
+    user: str
+    password: str
+    from_name: str = "Sistema de Revisões"
+    use_tls: bool = True          # STARTTLS na porta 587
+    use_ssl: bool = False         # SSL direto na porta 465
+
+
+@dataclass
+class EmailMessage:
+    to: List[str]                 # lista de destinatários
+    subject: str
+    html_body: str
+    pdf_bytes: bytes | None = None
+    pdf_filename: str = "relatorio.pdf"
+    cc: List[str] = field(default_factory=list)
+
+
+def _load_config_from_secrets() -> SmtpConfig:
+    """Carrega configuração SMTP do st.secrets. Levanta ValueError se incompleto."""
+    try:
+        import streamlit as st
+        secrets = st.secrets
+    except Exception:
+        import os
+        class _FakeSecrets:
+            def __getitem__(self, k): return os.environ[k]
+            def get(self, k, d=None): return os.environ.get(k, d)
+        secrets = _FakeSecrets()
+
+    missing = [k for k in ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD")
+               if not secrets.get(k)]
+    if missing:
+        raise ValueError(
+            f"Configuração SMTP incompleta. Adicione ao secrets.toml: {', '.join(missing)}"
+        )
+
+    return SmtpConfig(
+        host=secrets["SMTP_HOST"],
+        port=int(secrets["SMTP_PORT"]),
+        user=secrets["SMTP_USER"],
+        password=secrets["SMTP_PASSWORD"],
+        from_name=secrets.get("SMTP_FROM_NAME") or "Sistema de Revisões",
+        use_tls=int(secrets.get("SMTP_PORT", 587)) == 587,
+        use_ssl=int(secrets.get("SMTP_PORT", 587)) == 465,
+    )
+
+
+def send_email(msg: EmailMessage, cfg: SmtpConfig | None = None) -> None:
+    """Envia o e-mail. Levanta smtplib.SMTPException em caso de falha."""
+    if cfg is None:
+        cfg = _load_config_from_secrets()
+
+    mime = MIMEMultipart("mixed")
+    mime["From"]    = f"{cfg.from_name} <{cfg.user}>"
+    mime["To"]      = ", ".join(msg.to)
+    mime["Subject"] = msg.subject
+    if msg.cc:
+        mime["Cc"] = ", ".join(msg.cc)
+
+    # Corpo HTML
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(msg.html_body, "html", "utf-8"))
+    mime.attach(alt)
+
+    # Anexo PDF
+    if msg.pdf_bytes:
+        part = MIMEApplication(msg.pdf_bytes, _subtype="pdf")
+        part.add_header("Content-Disposition", "attachment",
+                        filename=msg.pdf_filename)
+        mime.attach(part)
+
+    all_to = list(msg.to) + list(msg.cc)
+
+    ctx = ssl.create_default_context()
+    if cfg.use_ssl:
+        with smtplib.SMTP_SSL(cfg.host, cfg.port, context=ctx) as server:
+            server.login(cfg.user, cfg.password)
+            server.sendmail(cfg.user, all_to, mime.as_bytes())
+    else:
+        with smtplib.SMTP(cfg.host, cfg.port) as server:
+            if cfg.use_tls:
+                server.starttls(context=ctx)
+            server.login(cfg.user, cfg.password)
+            server.sendmail(cfg.user, all_to, mime.as_bytes())
+
+
+def build_html_body(
+    *,
+    destinatario_nome: str,
+    departamento_nome: str,
+    revisao_titulo: str,
+    semana_atual: int,
+    semanas_total: int,
+    pct_geral: int,
+    n_alertas: int,
+    primary_color: str = "#FFD100",
+) -> str:
+    """Gera o corpo HTML do e-mail — limpo, legível em qualquer cliente."""
+    bar_color = "#12B76A" if pct_geral >= 80 else ("#F59E0B" if pct_geral >= 50 else "#EF4444")
+    now = datetime.now().strftime("%d/%m/%Y")
+    alerta_txt = f"{n_alertas} alerta{'s' if n_alertas != 1 else ''} ativo{'s' if n_alertas != 1 else ''}" if n_alertas else "sem alertas críticos"
+    alerta_color = "#EF4444" if n_alertas else "#12B76A"
+
+    return f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Relatório Semanal</title></head>
+<body style="margin:0;padding:0;background:#F3F4F6;font-family:Arial,Helvetica,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F3F4F6;padding:32px 0;">
+  <tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08);">
+
+      <!-- Header -->
+      <tr><td style="background:#111827;padding:24px 32px;">
+        <div style="font-size:20px;font-weight:700;color:#fff;">Relatório Semanal de Revisão</div>
+        <div style="font-size:13px;color:rgba(255,255,255,.6);margin-top:4px;">{revisao_titulo} · Semana {semana_atual}/{semanas_total} · {now}</div>
+      </td></tr>
+
+      <!-- Saudação -->
+      <tr><td style="padding:28px 32px 0;">
+        <div style="font-size:15px;color:#374151;">Olá, <b>{destinatario_nome}</b>!</div>
+        <div style="font-size:14px;color:#6B7280;margin-top:6px;">
+          Segue o relatório semanal do departamento <b>{departamento_nome}</b>.
+          O PDF completo com evolução, comparativos e equipamentos críticos está anexo.
+        </div>
+      </td></tr>
+
+      <!-- KPI bar -->
+      <tr><td style="padding:24px 32px;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background:#F9FAFB;border-radius:10px;border:1px solid #E5E7EB;">
+          <tr>
+            <td style="padding:18px 24px;" width="50%">
+              <div style="font-size:12px;color:#6B7280;margin-bottom:4px;">Progresso geral</div>
+              <div style="font-size:28px;font-weight:700;color:{bar_color};">{pct_geral}%</div>
+              <div style="background:#E5E7EB;border-radius:4px;height:6px;margin-top:8px;">
+                <div style="width:{min(pct_geral,100)}%;background:{bar_color};height:6px;border-radius:4px;"></div>
+              </div>
+            </td>
+            <td style="padding:18px 24px;border-left:1px solid #E5E7EB;" width="50%">
+              <div style="font-size:12px;color:#6B7280;margin-bottom:4px;">Alertas ativos</div>
+              <div style="font-size:28px;font-weight:700;color:{alerta_color};">{alerta_txt}</div>
+              <div style="font-size:12px;color:#9CA3AF;margin-top:8px;">Semana {semana_atual} de {semanas_total}</div>
+            </td>
+          </tr>
+        </table>
+      </td></tr>
+
+      <!-- CTA -->
+      <tr><td style="padding:0 32px 28px;">
+        <div style="font-size:13px;color:#6B7280;">
+          📎 O relatório detalhado em PDF está anexo a este e-mail.<br>
+          Ele inclui: evolução semanal, comparativo com a semana anterior e equipamentos críticos.
+        </div>
+      </td></tr>
+
+      <!-- Footer -->
+      <tr><td style="background:#F9FAFB;padding:16px 32px;border-top:1px solid #E5E7EB;">
+        <div style="font-size:11px;color:#9CA3AF;">
+          Este relatório foi gerado automaticamente pelo sistema de gestão de revisões.
+          Dúvidas? Entre em contato com o administrador do sistema.
+        </div>
+      </td></tr>
+
+    </table>
+  </td></tr>
+</table>
+</body></html>"""
