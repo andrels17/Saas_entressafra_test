@@ -896,6 +896,18 @@ def render_matriz():
         limit_eq=int(st.session_state["matriz_limit_eq"])
         if not revisao_id: st.warning("Nenhuma revisao selecionada."); return
 
+        # FIX TROCA DE GRUPO: se o grupo mudou desde o último render,
+        # limpa o cache de dados para garantir que _load_payload busque do banco.
+        _last_rendered_grupo = st.session_state.get("_mtz_last_rendered_grupo_id")
+        if _last_rendered_grupo != grupo_id:
+            try: _load_payload.clear()
+            except Exception:
+                try: st.cache_data.clear()
+                except Exception: pass
+            st.session_state["_mtz_last_rendered_grupo_id"] = grupo_id
+            # Limpa payload cacheado manualmente no session_state
+            st.session_state.pop("_mtz_payload_cache", None)
+
         if not is_admin and grp_scope_ids and grupo_id not in grp_scope_ids:
             st.warning("Voce nao tem acesso a este grupo.")
             if st.button("Voltar",key="mtz_back_noaccess"): st.session_state["matriz_view"]="select"; st.rerun()
@@ -908,7 +920,19 @@ def render_matriz():
         if st.session_state.get("matriz_show_legend"):
             st.markdown("**Legenda:** pendente · em andamento · concluido · travado · nao aplica")
 
-        payload=_load_payload(tenant_id,grupo_id,revisao_id,limit_eq,st.session_state.get("data_version","0"))
+        # Carrega payload — usa cache manual no session_state keyed por grupo_id
+        # para garantir que troca de grupo sempre busca dados corretos do banco.
+        _payload_cache = st.session_state.get("_mtz_payload_cache") or {}
+        _payload_key = (str(tenant_id), str(grupo_id), str(revisao_id), str(limit_eq),
+                        str(st.session_state.get("data_version","0")))
+        if _payload_cache.get("key") != str(_payload_key):
+            _payload_cache = {
+                "key": str(_payload_key),
+                "data": _load_payload(tenant_id, grupo_id, revisao_id, limit_eq,
+                                      st.session_state.get("data_version","0")),
+            }
+            st.session_state["_mtz_payload_cache"] = _payload_cache
+        payload = _payload_cache["data"]
         eqs=payload.get("eqs") or []
         if not eqs:
             st.info("Nenhum equipamento no grupo.")
