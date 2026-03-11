@@ -1,15 +1,3 @@
-"""Matriz Operacional — visao por grupo com drill-down por setor.
-
-Melhorias v2:
-  1. Scope/permissoes — nao-admin veem apenas seus grupos/departamentos
-  2. Tab "Resumo" dedicada com ranking visual por equipamento + barra de progresso
-  3. Barra de progresso visual nos cards de grupo (tela de selecao)
-  4. Filtro de semana na aba Matriz
-  5. Observacoes inline no editor — expander por setor + campo no editor rapido
-  6. _style_heatmap definida uma vez fora do loop de setores
-  7. svc_ids_all calculado antes das tabs (sem dir() fragil)
-  8. Barra de progresso no header do grupo
-"""
 from __future__ import annotations
 
 import io
@@ -139,276 +127,405 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.units import cm
     from reportlab.lib import colors
-    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
-                                    TableStyle, PageBreak, HRFlowable)
+    from reportlab.platypus import (
+        SimpleDocTemplate,
+        Paragraph,
+        Spacer,
+        Table,
+        TableStyle,
+        PageBreak,
+        HRFlowable,
+        KeepTogether,
+    )
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
     from datetime import datetime as _dt
 
-    # ── Página em landscape A4 (igual ao PDF de referência) ─────────────────
     PAGE = landscape(A4)
-    LMARGIN = RMARGIN = TMARGIN = BMARGIN = 1.5*cm
-    pw = PAGE[0] - LMARGIN - RMARGIN   # largura útil ~25.7cm (landscape)
-    ph = PAGE[1] - TMARGIN - BMARGIN   # altura útil ~17.7cm
+    LMARGIN = RMARGIN = TMARGIN = BMARGIN = 1.35 * cm
+    pw = PAGE[0] - LMARGIN - RMARGIN
 
     sty = getSampleStyleSheet()
-    h1  = ParagraphStyle("h1", parent=sty["Heading1"], fontSize=15, leading=18,
-                          alignment=TA_LEFT, textColor=colors.HexColor("#111827"),
-                          spaceAfter=2)
-    h2  = ParagraphStyle("h2", parent=sty["Heading2"], fontSize=11, leading=14,
-                          alignment=TA_LEFT, textColor=colors.HexColor("#111827"),
-                          spaceBefore=8, spaceAfter=3)
-    p   = ParagraphStyle("p",  parent=sty["BodyText"], fontSize=9,  leading=12,
-                          textColor=colors.HexColor("#374151"))
-    sm  = ParagraphStyle("sm", parent=sty["BodyText"], fontSize=8,  leading=10,
-                          textColor=colors.grey)
-    htp = ParagraphStyle("ht", parent=sty["BodyText"], fontSize=8, leading=9,
-                          alignment=TA_CENTER, textColor=colors.white)
-    hsp = ParagraphStyle("hs", parent=sty["BodyText"], fontSize=7, leading=8,
-                          alignment=TA_CENTER, textColor=colors.white)
-    meta_lbl = ParagraphStyle("ml", parent=sty["BodyText"], fontSize=8, leading=10,
-                               textColor=colors.HexColor("#6B7280"))
-    meta_val = ParagraphStyle("mv", parent=sty["BodyText"], fontSize=10, leading=13,
-                               textColor=colors.HexColor("#111827"), fontName="Helvetica-Bold")
+    title_style = ParagraphStyle(
+        "pdf_title",
+        parent=sty["Heading1"],
+        fontSize=16,
+        leading=18,
+        alignment=TA_LEFT,
+        textColor=colors.HexColor("#111827"),
+        fontName="Helvetica-Bold",
+        spaceAfter=0,
+    )
+    section_style = ParagraphStyle(
+        "pdf_section",
+        parent=sty["Heading2"],
+        fontSize=11,
+        leading=13,
+        alignment=TA_LEFT,
+        textColor=colors.HexColor("#111827"),
+        fontName="Helvetica-Bold",
+        spaceBefore=0,
+        spaceAfter=2,
+    )
+    body_style = ParagraphStyle(
+        "pdf_body",
+        parent=sty["BodyText"],
+        fontSize=8.5,
+        leading=10,
+        textColor=colors.HexColor("#374151"),
+    )
+    small_style = ParagraphStyle(
+        "pdf_small",
+        parent=sty["BodyText"],
+        fontSize=7.5,
+        leading=9,
+        textColor=colors.HexColor("#6B7280"),
+    )
+    meta_label = ParagraphStyle(
+        "meta_label",
+        parent=small_style,
+        fontSize=7.8,
+        textColor=colors.HexColor("#6B7280"),
+    )
+    meta_value = ParagraphStyle(
+        "meta_value",
+        parent=body_style,
+        fontSize=9.4,
+        leading=11,
+        textColor=colors.HexColor("#111827"),
+        fontName="Helvetica-Bold",
+    )
+    card_label = ParagraphStyle(
+        "card_label",
+        parent=small_style,
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor("#6B7280"),
+        alignment=TA_CENTER,
+    )
+    card_value = ParagraphStyle(
+        "card_value",
+        parent=body_style,
+        fontSize=14,
+        leading=16,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#111827"),
+        fontName="Helvetica-Bold",
+    )
+    header_top = ParagraphStyle(
+        "header_top",
+        parent=small_style,
+        alignment=TA_CENTER,
+        fontSize=8,
+        leading=9,
+        textColor=colors.white,
+        fontName="Helvetica-Bold",
+    )
+    header_sub = ParagraphStyle(
+        "header_sub",
+        parent=small_style,
+        alignment=TA_CENTER,
+        fontSize=7,
+        leading=8,
+        textColor=colors.HexColor("#D1D5DB"),
+        fontName="Helvetica-Bold",
+    )
+
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=PAGE,
-        leftMargin=LMARGIN, rightMargin=RMARGIN,
-        topMargin=TMARGIN, bottomMargin=BMARGIN)
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=PAGE,
+        leftMargin=LMARGIN,
+        rightMargin=RMARGIN,
+        topMargin=TMARGIN,
+        bottomMargin=BMARGIN,
+    )
 
-    # ── Cabeçalho ─────────────────────────────────────────────────────────────
-    now_str = _dt.now().strftime("%d/%m/%Y %H:%M")
-    ts_style = ParagraphStyle("ts", parent=sty["BodyText"], fontSize=8, leading=11,
-                               alignment=TA_RIGHT, textColor=colors.HexColor("#111827"))
-    header_data = [[
-        Paragraph("Relatório Operacional — Matriz", h1),
-        Paragraph(f'<font color="#6B7280">Emitido em</font><br/>{now_str}', ts_style),
-    ]]
-    header_table = Table(header_data, colWidths=[pw - 3.5*cm, 3.5*cm], rowHeights=[1*cm])
-    header_table.setStyle(TableStyle([
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-        ("ALIGN",  (1,0), (1,0),  "RIGHT"),
-        ("LINEBELOW", (0,0), (-1,0), 1.0, colors.HexColor("#E5E7EB")),
-    ]))
+    def _pct_color(value: int):
+        if value >= 80:
+            return colors.HexColor("#16A34A")
+        if value >= 50:
+            return colors.HexColor("#F59E0B")
+        return colors.HexColor("#EF4444")
 
-    # Bloco de metadados — Revisão | Grupo (linha horizontal igual ao PDF)
-    meta_data = [
-        [Paragraph("Revisão", meta_lbl), Paragraph("Grupo", meta_lbl)],
-        [Paragraph(titulo or "—", meta_val), Paragraph(grupo_nome or "—", meta_val)],
-    ]
-    meta_table = Table(meta_data, colWidths=[pw * 0.4, pw * 0.6])
-    meta_table.setStyle(TableStyle([
-        ("TOPPADDING",    (0,0), (-1,-1), 3),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 3),
-        ("LEFTPADDING",   (0,0), (-1,-1), 0),
-        ("LINEBELOW", (0,1), (-1,1), 0.5, colors.HexColor("#E5E7EB")),
-    ]))
+    def _int_pct(value) -> int:
+        try:
+            return int(round(float(value or 0)))
+        except Exception:
+            return 0
 
-    story = [header_table, Spacer(1, 0.3*cm), meta_table, Spacer(1, 0.4*cm)]
+    def _safe_int(value) -> int:
+        try:
+            return int(value or 0)
+        except Exception:
+            return 0
 
-    def _mk_table(df, max_svc=6):
-        """Constrói tabela(s) D/R/M para um setor — landscape A4."""
-        base = [c for c in df.columns if c == "Equipamento"]
-        svc  = [c for c in df.columns if c not in ("Equipamento", "%", "Status")]
-        if not svc: return []
+    def _summary_table(df: pd.DataFrame):
+        cols = ["Equipamento", "Concluidos", "Total", "%"]
+        if not isinstance(df, pd.DataFrame) or not all(c in df.columns for c in cols):
+            return Paragraph("Sem dados.", small_style)
 
-        so = {"D": 0, "R": 1, "M": 2}
-        tmp = {}; okeys = []
-        for col in svc:
-            base2, suf = str(col), None
+        view = df[cols].copy()
+        view["Concluidos"] = view["Concluidos"].map(_safe_int)
+        view["Total"] = view["Total"].map(_safe_int)
+        view["%"] = view["%"].map(_int_pct)
+        view = view.sort_values(["%", "Concluidos", "Equipamento"], ascending=[False, False, True]).reset_index(drop=True)
+
+        data = [["Equipamento", "Concluídos", "Total", "%"]] + view.values.tolist()
+        col_widths = [pw * 0.50, pw * 0.16, pw * 0.14, pw * 0.20]
+        table = Table(data, colWidths=col_widths, repeatRows=1)
+        style_cmds = [
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#111827")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 9),
+            ("ALIGN", (0, 0), (0, -1), "LEFT"),
+            ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#E5E7EB")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F9FAFB")]),
+            ("FONTSIZE", (0, 1), (-1, -1), 8.5),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
+        ]
+        for row_idx, pct in enumerate(view["%"].tolist(), start=1):
+            style_cmds.extend([
+                ("TEXTCOLOR", (3, row_idx), (3, row_idx), _pct_color(_int_pct(pct))),
+                ("FONTNAME", (3, row_idx), (3, row_idx), "Helvetica-Bold"),
+            ])
+        table.setStyle(TableStyle(style_cmds))
+        return table
+
+    def _split_service_columns(df: pd.DataFrame):
+        svc_cols = [c for c in df.columns if c not in ("Equipamento", "%", "Status")]
+        groups = []
+        order_map = {"D": 0, "R": 1, "M": 2}
+        by_service = {}
+        service_order = []
+        for col in svc_cols:
+            label = str(col)
+            service_name = label
+            suffix = None
             try:
-                bc, sc = str(col).rsplit(" ", 1)
-                if sc in so: base2, suf = bc, sc
-            except: pass
-            if suf is None:
-                k = f"__s__{base2}"
-                if k not in tmp: tmp[k] = {"name": base2, "cols": [col]}; okeys.append(k)
+                left, right = label.rsplit(" ", 1)
+                if right in order_map:
+                    service_name, suffix = left, right
+            except Exception:
+                pass
+            if service_name not in by_service:
+                by_service[service_name] = {"name": service_name, "cols": [None, None, None], "extras": []}
+                service_order.append(service_name)
+            if suffix is None:
+                by_service[service_name]["extras"].append(col)
             else:
-                if base2 not in tmp: tmp[base2] = {"name": base2, "cols": [None,None,None]}; okeys.append(base2)
-                tmp[base2]["cols"][so[suf]] = col
-        groups = [(tmp[k]["name"], [c for c in tmp[k]["cols"] if c], tmp[k]["cols"]) for k in okeys]
+                by_service[service_name]["cols"][order_map[suffix]] = col
+        for name in service_order:
+            item = by_service[name]
+            ordered = [c for c in item["cols"] if c] or item["extras"]
+            groups.append((item["name"], ordered))
+        return groups
 
-        # Larguras para landscape: coluna Equipamento maior, D/R/M mais espaçadas
-        we = 4.0*cm   # coluna Equipamento (landscape tem mais espaço)
-        rem = pw - we
-        # quantos serviços por bloco cabem em landscape
-        n_svc_cols_total = sum(3 if len(g[2])==3 else len([c for c in g[1] if c]) for g in groups)
-        col_w_unit = rem / max(n_svc_cols_total, 1)
-        col_w_unit = max(0.85*cm, min(1.8*cm, col_w_unit))
-        max_cols_per_block = max(1, int(rem / (col_w_unit * 3)))
-        maxe = max(1, min(len(groups), max(max_svc, max_cols_per_block)))
+    def _sector_matrix(df: pd.DataFrame):
+        groups = _split_service_columns(df)
+        if not groups:
+            return [Paragraph("Sem dados deste setor.", small_style)]
 
-        chunks = [groups[i:i+maxe] for i in range(0, len(groups), maxe)]
-        out = []
-        for ci, gc in enumerate(chunks, 1):
-            cols = list(base); ht = []; hb = []; spans = []; thick = []; cur = len(base)
-            ht.append(Paragraph("<b>Equip.</b>", htp)); hb.append("")
+        equip_w = 4.8 * cm
+        per_group_w = 1.1 * cm * 3
+        max_groups = max(1, min(len(groups), int((pw - equip_w) // per_group_w) or 1))
+        chunks = [groups[i:i + max_groups] for i in range(0, len(groups), max_groups)]
+        blocks = []
 
-            for sname, clean, c3 in gc:
-                if len(c3) == 3:
-                    cols.extend(c3)
-                    ht.extend([Paragraph(f"<b>{sname}</b>", htp), "", ""])
-                    hb.extend([Paragraph(f"<b>{x}</b>", hsp) for x in ("D", "R", "M")])
-                    spans.append((cur, cur+2)); thick.append(cur+2); cur += 3
+        for chunk_idx, chunk in enumerate(chunks, start=1):
+            cols = ["Equipamento"]
+            top = [Paragraph("<b>Equipamento</b>", header_top)]
+            sub = [""]
+            spans = [(0, 0, 0, 1)]
+            separators = []
+            cur_col = 1
+
+            for service_name, ordered_cols in chunk:
+                normalized = list(ordered_cols)
+                if len(normalized) == 3:
+                    cols.extend(normalized)
+                    top.extend([Paragraph(f"<b>{service_name}</b>", header_top), "", ""])
+                    sub.extend([
+                        Paragraph("<b>D</b>", header_sub),
+                        Paragraph("<b>R</b>", header_sub),
+                        Paragraph("<b>M</b>", header_sub),
+                    ])
+                    spans.append((cur_col, 0, cur_col + 2, 0))
+                    separators.append(cur_col + 2)
+                    cur_col += 3
                 else:
-                    nc = [c for c in c3 if c]
-                    cols.extend(nc)
-                    ht.append(Paragraph(f"<b>{sname}</b>", htp)); hb.append("")
-                    cur += len(nc)
-
-            n_sub = len(cols) - len(base)
-            col_w = rem / max(n_sub, 1)
-            col_w = max(0.75*cm, min(1.4*cm, col_w))
-            cw = [we] + [col_w] * n_sub
+                    cols.extend(normalized)
+                    top.append(Paragraph(f"<b>{service_name}</b>", header_top))
+                    sub.append("")
+                    if len(normalized) == 1:
+                        spans.append((cur_col, 0, cur_col, 1))
+                    cur_col += len(normalized)
 
             view = df[cols].copy().fillna("")
-            data = [ht, hb] + view.values.tolist()
-
-            n_svc = len(gc)
-            hfs = 7.5 if n_svc <= 5 else 7.0 if n_svc <= 8 else 6.5
-            bfs = 7.5 if n_svc <= 6 else 7.0
-
-            t = Table(data, colWidths=cw, repeatRows=2)
-            ts = [
-                # Header linha 0 — nome do serviço
-                ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#111827")),
-                ("TEXTCOLOR",  (0,0), (-1,0), colors.white),
-                ("FONTNAME",   (0,0), (-1,0), "Helvetica-Bold"),
-                ("FONTSIZE",   (0,0), (-1,0), hfs),
-                ("ALIGN",      (0,0), (-1,0), "CENTER"),
-                ("VALIGN",     (0,0), (-1,0), "MIDDLE"),
-                ("TOPPADDING",    (0,0), (-1,0), 3),
-                ("BOTTOMPADDING", (0,0), (-1,0), 3),
-                # Header linha 1 — D/R/M
-                ("BACKGROUND", (0,1), (-1,1), colors.HexColor("#1F2937")),
-                ("TEXTCOLOR",  (0,1), (-1,1), colors.HexColor("#D1D5DB")),
-                ("FONTNAME",   (0,1), (-1,1), "Helvetica-Bold"),
-                ("FONTSIZE",   (0,1), (-1,1), hfs - 0.5),
-                ("ALIGN",      (0,1), (-1,1), "CENTER"),
-                ("VALIGN",     (0,1), (-1,1), "MIDDLE"),
-                ("TOPPADDING",    (0,1), (-1,1), 2),
-                ("BOTTOMPADDING", (0,1), (-1,1), 2),
-                ("LINEBELOW",  (0,1), (-1,1), 1.2, colors.HexColor("#0B1220")),
-                # Dados
-                ("GRID",     (0,2), (-1,-1), 0.2, colors.HexColor("#E5E7EB")),
-                ("FONTSIZE", (0,2), (-1,-1), bfs),
-                ("VALIGN",   (0,2), (-1,-1), "MIDDLE"),
-                ("ALIGN",    (0,2), (0,-1),  "LEFT"),    # Equipamento: esquerda
-                ("ALIGN",    (1,2), (-1,-1), "CENTER"),  # D/R/M: centro
-                ("ROWBACKGROUNDS", (0,2), (-1,-1), [colors.white, colors.HexColor("#F9FAFB")]),
-                ("TOPPADDING",    (0,2), (-1,-1), 2),
-                ("BOTTOMPADDING", (0,2), (-1,-1), 2),
-                ("LEFTPADDING",   (0,2), (-1,-1), 2),
-                ("RIGHTPADDING",  (0,2), (-1,-1), 2),
-                # Borda externa
-                ("BOX", (0,0), (-1,-1), 0.6, colors.HexColor("#374151")),
+            data = [top, sub] + view.values.tolist()
+            col_widths = [equip_w] + [max(0.95 * cm, min(1.2 * cm, (pw - equip_w) / max(len(cols) - 1, 1)))] * (len(cols) - 1)
+            table = Table(data, colWidths=col_widths, repeatRows=2)
+            style_cmds = [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#111827")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#1F2937")),
+                ("TEXTCOLOR", (0, 1), (-1, 1), colors.HexColor("#D1D5DB")),
+                ("FONTNAME", (0, 0), (-1, 1), "Helvetica-Bold"),
+                ("ALIGN", (0, 0), (-1, 1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#E5E7EB")),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
+                ("ROWBACKGROUNDS", (0, 2), (-1, -1), [colors.white, colors.HexColor("#F9FAFB")]),
+                ("ALIGN", (0, 2), (0, -1), "LEFT"),
+                ("ALIGN", (1, 2), (-1, -1), "CENTER"),
+                ("FONTSIZE", (0, 0), (-1, 0), 8),
+                ("FONTSIZE", (0, 1), (-1, 1), 7),
+                ("FONTSIZE", (0, 2), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                ("SPAN", (0, 0), (0, 1)),
             ]
-            # Span: coluna Equipamento nas duas linhas de header
-            ts.append(("SPAN", (0,0), (0,1)))
-            # Span: nome do serviço ocupa as 3 sub-colunas D/R/M
-            for s_, e_ in spans:
-                ts.append(("SPAN", (s_,0), (e_,0)))
-            # Separador vertical entre serviços
-            for c_ in thick:
-                ts.append(("LINEAFTER", (c_,0), (c_,-1), 0.6, colors.HexColor("#6B7280")))
-            # Células OK: fundo verde
-            for r_ in range(2, len(data)):
-                for c_ in range(1, len(cols)):
-                    if str(data[r_][c_]).strip().upper() == "OK":
-                        ts += [
-                            ("BACKGROUND", (c_,r_), (c_,r_), colors.HexColor("#12B76A")),
-                            ("TEXTCOLOR",  (c_,r_), (c_,r_), colors.white),
-                            ("FONTNAME",   (c_,r_), (c_,r_), "Helvetica-Bold"),
-                            ("FONTSIZE",   (c_,r_), (c_,r_), bfs - 0.5),
-                        ]
-            t.setStyle(TableStyle(ts))
+            for c1, r1, c2, r2 in spans[1:]:
+                style_cmds.append(("SPAN", (c1, r1), (c2, r2)))
+            for col in separators:
+                style_cmds.append(("LINEAFTER", (col, 0), (col, -1), 0.7, colors.HexColor("#9CA3AF")))
+            for row_i in range(2, len(data)):
+                for col_i in range(1, len(cols)):
+                    val = str(data[row_i][col_i]).strip().upper()
+                    if val == "OK":
+                        style_cmds.extend([
+                            ("BACKGROUND", (col_i, row_i), (col_i, row_i), colors.HexColor("#22C55E")),
+                            ("TEXTCOLOR", (col_i, row_i), (col_i, row_i), colors.white),
+                            ("FONTNAME", (col_i, row_i), (col_i, row_i), "Helvetica-Bold"),
+                        ])
+            table.setStyle(TableStyle(style_cmds))
             if len(chunks) > 1:
-                out.append(Paragraph(f"<i>Bloco {ci}/{len(chunks)}</i>", sm))
-            out.append(t)
-            out.append(Spacer(1, 0.3*cm))
-        return out
+                blocks.append(Paragraph(f"Bloco {chunk_idx}/{len(chunks)}", small_style))
+                blocks.append(Spacer(1, 0.12 * cm))
+            blocks.append(table)
+            if chunk_idx < len(chunks):
+                blocks.append(Spacer(1, 0.28 * cm))
+        return blocks
 
-    rc=["Equipamento","Concluidos","Total","%"]
-    rv=resumo_df[rc].copy() if (isinstance(resumo_df,pd.DataFrame) and all(c in resumo_df.columns for c in rc)) else pd.DataFrame(columns=rc)
-
-    # KPI cards da primeira página
-    if not rv.empty:
-        total_eq   = len(rv)
-        eq_100     = int((rv["%"] >= 100).sum())
-        avg_pct    = int(rv["%"].mean())
-        eq_zero    = int((rv["%"] == 0).sum())
-        kpi_data   = [[
-            Paragraph(f'<font color="#6B7280" size="8">Equipamentos</font><br/>'
-                      f'<b><font size="14">{total_eq}</font></b>', p),
-            Paragraph(f'<font color="#6B7280" size="8">Concluídos (100%)</font><br/>'
-                      f'<b><font size="14" color="#12B76A">{eq_100}</font></b>', p),
-            Paragraph(f'<font color="#6B7280" size="8">Progresso médio</font><br/>'
-                      f'<b><font size="14">{avg_pct}%</font></b>', p),
-            Paragraph(f'<font color="#6B7280" size="8">Sem inicio (0%)</font><br/>'
-                      f'<b><font size="14" color="#EF4444">{eq_zero}</font></b>', p),
-        ]]
-        kpi_w = pw / 4
-        kpi_table = Table(kpi_data, colWidths=[kpi_w]*4, rowHeights=[1.2*cm])
-        kpi_table.setStyle(TableStyle([
-            ("BOX",     (0,0), (-1,-1), 0.5, colors.HexColor("#E5E7EB")),
-            ("LINEAFTER",(0,0),(2,0),   0.5, colors.HexColor("#E5E7EB")),
-            ("VALIGN",  (0,0), (-1,-1), "MIDDLE"),
-            ("ALIGN",   (0,0), (-1,-1), "CENTER"),
-            ("TOPPADDING",    (0,0), (-1,-1), 6),
-            ("BOTTOMPADDING", (0,0), (-1,-1), 6),
-            ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#F9FAFB")),
-        ]))
-        story.append(kpi_table); story.append(Spacer(1, 0.35*cm))
-
-    story.append(Paragraph("Resumo por equipamento", h2)); story.append(Spacer(1, .1*cm))
-    if rv.empty:
-        story.append(Paragraph("Sem dados.", sm))
+    resumo_cols = ["Equipamento", "Concluidos", "Total", "%"]
+    if isinstance(resumo_df, pd.DataFrame) and all(c in resumo_df.columns for c in resumo_cols):
+        rv = resumo_df[resumo_cols].copy()
+        rv["Concluidos"] = rv["Concluidos"].map(_safe_int)
+        rv["Total"] = rv["Total"].map(_safe_int)
+        rv["%"] = rv["%"].map(_int_pct)
     else:
-        rv_sorted = rv.sort_values("%", ascending=False).reset_index(drop=True)
-        # Landscape: coluna equipamento proporcional à largura maior
-        col_w_eq  = pw * 0.45
-        col_w_num = pw * 0.18
-        col_w_pct = pw * 0.19
-        rd = [["Equipamento", "Concluídos", "Total", "%"]] + rv_sorted.values.tolist()
-        rt = Table(rd, colWidths=[col_w_eq, col_w_num, col_w_num, col_w_pct], repeatRows=1)
-        ts_r = [
-            ("BACKGROUND",  (0,0),(-1,0), colors.HexColor("#111827")),
-            ("TEXTCOLOR",   (0,0),(-1,0), colors.white),
-            ("FONTNAME",    (0,0),(-1,0), "Helvetica-Bold"),
-            ("FONTSIZE",    (0,0),(-1,0), 9),
-            ("ALIGN",       (0,0),(0,-1), "LEFT"),
-            ("ALIGN",       (1,0),(-1,-1),"CENTER"),
-            ("VALIGN",      (0,0),(-1,-1),"MIDDLE"),
-            ("GRID",        (0,0),(-1,-1),.25, colors.lightgrey),
-            ("FONTSIZE",    (0,1),(-1,-1), 8),
-            ("TOPPADDING",  (0,0),(-1,-1), 3),
-            ("BOTTOMPADDING",(0,0),(-1,-1),3),
-            ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white, colors.HexColor("#F9FAFB")]),
-        ]
-        # Colorir coluna % por threshold
-        for ri, row in enumerate(rv_sorted.itertuples(), start=1):
-            pct_v = int(getattr(row, "_4", 0) or 0)
-            clr = colors.HexColor("#12B76A") if pct_v>=80 else (colors.HexColor("#F59E0B") if pct_v>=50 else colors.HexColor("#EF4444"))
-            ts_r += [("TEXTCOLOR",(3,ri),(3,ri),clr), ("FONTNAME",(3,ri),(3,ri),"Helvetica-Bold")]
-        rt.setStyle(TableStyle(ts_r))
-        story.append(rt)
-    story.append(PageBreak())
-    story.append(Paragraph("Detalhamento por setor", h2)); story.append(Spacer(1,.2*cm))
-    for sn,df in sector_tables:
-        story.append(Paragraph(sn,h2))
-        sc=[c for c in df.columns if c not in ("%","Equipamento","Status")]
-        tok=int((df[sc]=="OK").sum().sum()) if sc else 0; tc=int(len(df)*max(len(sc),1))
-        story.append(Paragraph(f"<b>Geral:</b> {round((tok/max(tc,1))*100)}% &nbsp;|&nbsp; <b>Concluídos:</b> {tok}/{tc}",p))
-        story.append(Spacer(1,.15*cm))
-        for part in _mk_table(df): story.append(part)
+        rv = pd.DataFrame(columns=resumo_cols)
+
+    total_eq = len(rv)
+    eq_100 = int((rv["%"] >= 100).sum()) if not rv.empty else 0
+    avg_pct = int(round(rv["%"].mean())) if not rv.empty else 0
+    eq_zero = int((rv["%"] <= 0).sum()) if not rv.empty else 0
+    emitido = _dt.now().strftime("%d/%m/%Y %H:%M")
+
+    story = []
+
+    issued_style = ParagraphStyle(
+        "issued_style",
+        parent=small_style,
+        alignment=TA_RIGHT,
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor("#111827"),
+    )
+    header = Table(
+        [[
+            Paragraph("Relatório Operacional — Matriz", title_style),
+            Paragraph(f'<font color="#6B7280">Data de emissão</font><br/><b>{emitido}</b>', issued_style),
+        ]],
+        colWidths=[pw * 0.76, pw * 0.24],
+    )
+    header.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(header)
+    story.append(HRFlowable(width="100%", thickness=0.7, color=colors.HexColor("#E5E7EB"), spaceAfter=6, spaceBefore=2))
+
+    meta = Table(
+        [
+            [Paragraph("Revisão", meta_label), Paragraph("Grupo", meta_label)],
+            [Paragraph(titulo or "—", meta_value), Paragraph(grupo_nome or "—", meta_value)],
+        ],
+        colWidths=[pw * 0.38, pw * 0.62],
+    )
+    meta.setStyle(TableStyle([
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LINEBELOW", (0, 1), (-1, 1), 0.5, colors.HexColor("#E5E7EB")),
+    ]))
+    story.append(meta)
+    story.append(Spacer(1, 0.28 * cm))
+
+    cards = Table(
+        [[
+            KeepTogether([Paragraph("Equipamentos", card_label), Spacer(1, 0.03 * cm), Paragraph(str(total_eq), card_value)]),
+            KeepTogether([Paragraph("Concluídos (100%)", card_label), Spacer(1, 0.03 * cm), Paragraph(f'<font color="#16A34A">{eq_100}</font>', card_value)]),
+            KeepTogether([Paragraph("Progresso médio", card_label), Spacer(1, 0.03 * cm), Paragraph(f"{avg_pct}%", card_value)]),
+            KeepTogether([Paragraph("Sem início (0%)", card_label), Spacer(1, 0.03 * cm), Paragraph(f'<font color="#EF4444">{eq_zero}</font>', card_value)]),
+        ]],
+        colWidths=[pw / 4.0] * 4,
+        rowHeights=[1.45 * cm],
+    )
+    cards.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F9FAFB")),
+        ("BOX", (0, 0), (-1, -1), 0.55, colors.HexColor("#E5E7EB")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.45, colors.HexColor("#E5E7EB")),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(cards)
+    story.append(Spacer(1, 0.30 * cm))
+
+    story.append(Paragraph("Resumo por equipamento", section_style))
+    story.append(Spacer(1, 0.06 * cm))
+    story.append(_summary_table(rv))
+
+    for sector_name, sector_df in sector_tables:
         story.append(PageBreak())
-    def _footer(canvas,_doc):
-        canvas.saveState(); canvas.setFont("Helvetica",8)
-        canvas.setFillColor(colors.grey)
-        w=PAGE[0]
-        canvas.drawString(1.5*cm,.8*cm,"D = desmontou   R = revisou   M = montou")
-        canvas.drawRightString(w-1.5*cm,.8*cm,f"Página {canvas.getPageNumber()}")
+        service_cols = [c for c in sector_df.columns if c not in ("Equipamento", "%", "Status")]
+        ok_count = int((sector_df[service_cols] == "OK").sum().sum()) if service_cols else 0
+        total_cells = int(len(sector_df) * len(service_cols)) if service_cols else 0
+        pct_general = int(round((ok_count / max(total_cells, 1)) * 100)) if total_cells else 0
+
+        story.append(Paragraph(f"Detalhamento por setor — {sector_name}", section_style))
+        story.append(Paragraph(f"Geral: {pct_general}% | Concluídos: {ok_count}/{total_cells}", body_style))
+        story.append(Spacer(1, 0.18 * cm))
+        for part in _sector_matrix(sector_df):
+            story.append(part)
+
+    def _footer(canvas, _doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(colors.HexColor("#6B7280"))
+        canvas.drawString(LMARGIN, 0.65 * cm, "D = desmontou   R = revisou   M = montou")
+        canvas.drawRightString(PAGE[0] - RMARGIN, 0.65 * cm, f"Página {canvas.getPageNumber()}")
         canvas.restoreState()
-    doc.build(story,onFirstPage=_footer,onLaterPages=_footer)
+
+    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
     return buf.getvalue()
 
 
