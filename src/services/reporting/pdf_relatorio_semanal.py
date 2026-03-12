@@ -80,8 +80,6 @@ class RelatorioDeptPayload:
     n_equipamentos: int
     n_concluidos: int               # equipamentos 100%
     n_alertas_total: int
-    done_steps: int = 0             # etapas concluídas (para pct_global ponderado)
-    expected_steps: int = 0         # etapas esperadas  (para pct_global ponderado)
     # evolução semanal
     evolucao: List[SemanaSnapshot]
     # comparativo
@@ -91,6 +89,9 @@ class RelatorioDeptPayload:
     criticos: List[EquipamentoCritico]
     # todos os equipamentos (para tabela de progresso geral no PDF)
     todos_equipamentos: List[dict] = None  # [{frota, modelo, grupo, pct, status}]
+    # etapas para cálculo ponderado do pct_global no relatório executivo
+    done_steps: int = 0
+    expected_steps: int = 0
     # alertas consolidados
     n_travados: int = 0
     n_sem_inicio: int = 0
