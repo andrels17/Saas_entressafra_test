@@ -208,6 +208,20 @@ def _build_payload(
     svc_por_grupo   = _load_grupo_template(sb, tenant_id, grupo_ids)
     eq_por_grupo    = _load_equipamentos_ativos(sb, tenant_id, grupo_ids)
 
+    # Nomes dos grupos direto da tabela (independente de ter tarefas)
+    grupo_nomes: dict[str, str] = {}
+    try:
+        gnrows = (
+            sb.table("equip_grupos")
+            .select("id,nome")
+            .in_("id", grupo_ids)
+            .execute()
+            .data
+        ) or []
+        grupo_nomes = {r["id"]: r.get("nome") or r["id"] for r in gnrows}
+    except Exception:
+        pass
+
     # Mapa eid → info do equipamento (frota, modelo, grupo_nome, grupo_id)
     eid_to_info: dict[str, dict] = {}
     for gid, eqs in eq_por_grupo.items():
@@ -248,14 +262,8 @@ def _build_payload(
         svc_count = svc_por_grupo.get(gid, 0)
         expected_per_eq = svc_count * 3  # denominador correto por equipamento
 
-        # nome do grupo a partir das tarefas (fallback)
-        grupo_nome = "—"
-        for eq in eqs:
-            eid = eq["id"]
-            tasks = eq_tasks.get(eid, [])
-            if tasks:
-                grupo_nome = str((tasks[0].get("equipamentos") or {}).get("equip_grupos", {}).get("nome") or grupo_nome)
-                break
+        # nome do grupo direto da tabela
+        grupo_nome = grupo_nomes.get(gid) or gid
 
         for eq in eqs:
             eid = eq["id"]

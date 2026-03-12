@@ -544,115 +544,159 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
                 if not _mini_eq_row(eq, i, show_delta=True):
                     break
 
-        # ── Progresso completo agrupado por grupo ─────────────────────────────
-        footer(); c.showPage()
-        new_page("Progresso Completo — Todos os Equipamentos")
-        y = h - 52*mm
-
-        # Agrupa equipamentos por grupo, mantendo ordem de progresso dentro de cada grupo
+        # ── PÁGINA 3+: Uma página por grupo ──────────────────────────────────
         from collections import defaultdict as _defaultdict
+
+        # Agrupa equipamentos por (grupo_id, grupo_nome, grupo_pct)
         grupos_dict: dict[str, list[dict]] = _defaultdict(list)
-        grupos_pct:  dict[str, int]        = {}
+        grupos_meta: dict[str, dict]       = {}   # gid → {nome, pct}
         for eq in todos:
-            gname = eq.get("grupo") or "—"
-            grupos_dict[gname].append(eq)
-            grupos_pct[gname] = int(eq.get("grupo_pct", 0))
+            gid   = eq.get("grupo_id") or "__sem_grupo__"
+            gname = eq.get("grupo") or "Sem grupo"
+            grupos_dict[gid].append(eq)
+            grupos_meta[gid] = {
+                "nome": gname,
+                "pct":  int(eq.get("grupo_pct", 0)),
+            }
 
-        # Ordena grupos pelo pct crescente (piores primeiro)
-        grupos_sorted = sorted(grupos_dict.keys(), key=lambda g: grupos_pct.get(g, 0))
-        n_grupos      = len(grupos_sorted)
+        # Ordena grupos: piores primeiro
+        grupos_sorted = sorted(grupos_meta.keys(), key=lambda g: grupos_meta[g]["pct"])
 
-        for gi, gname in enumerate(grupos_sorted):
-            eqs_grupo = sorted(grupos_dict[gname], key=lambda e: e.get("pct", 0))
-            gpct      = grupos_pct.get(gname, 0)
+        for gi, gid in enumerate(grupos_sorted):
+            eqs_grupo = sorted(grupos_dict[gid], key=lambda e: e.get("pct", 0))
+            gmeta     = grupos_meta[gid]
+            gname     = gmeta["nome"]
+            gpct      = gmeta["pct"]
             gcol      = _risk_color(gpct)
             n_eq_g    = len(eqs_grupo)
+            n_conc_g  = sum(1 for e in eqs_grupo if e.get("pct", 0) == 100)
+            n_crit_g  = sum(1 for e in eqs_grupo if e.get("pct", 0) == 0 and e.get("status") != "sem_template")
+            n_trav_g  = sum(1 for e in eqs_grupo if e.get("status") == "travado")
 
-            # Cabeçalho do grupo — cabe? senão nova página
-            if y < 40*mm:
-                footer(); c.showPage()
-                new_page("Progresso Completo (cont.)")
-                y = h - 52*mm
+            # ── Cabeçalho da página do grupo ─────────────────────────────────
+            footer(); c.showPage()
 
-            # Faixa do cabeçalho do grupo
+            # Fundo escuro no topo (maior que o new_page padrão)
             c.setFillColor(DARK)
-            c.rect(16*mm, y - 9*mm, w - 32*mm, 9*mm, fill=1, stroke=0)
+            c.rect(0, h - 38*mm, w, 38*mm, fill=1, stroke=0)
             c.setFillColor(gcol)
-            c.rect(16*mm, y - 9*mm, 4, 9*mm, fill=1, stroke=0)
-            c.setFillColor(WHITE); c.setFont("Helvetica-Bold", 9)
-            c.drawString(23*mm, y - 6*mm, gname)
-            c.setFillColor(colors.Color(0.6, 0.65, 0.7)); c.setFont("Helvetica", 8)
-            c.drawString(23*mm + 80*mm, y - 6*mm,
-                         f"{n_eq_g} equipamento(s)  ·  {sum(1 for e in eqs_grupo if e.get('pct',0)==100)} concluídos")
-            c.setFillColor(gcol); c.setFont("Helvetica-Bold", 10)
-            c.drawRightString(w - 18*mm, y - 5.5*mm, f"{gpct}%")
+            c.rect(0, h - 38*mm, w, 2.5, fill=1, stroke=0)   # linha de acento
 
-            # Minibarra do grupo
-            pbar_x = w/2 + 10*mm
-            pbar_w = w - 32*mm - (pbar_x - 16*mm) - 16*mm
-            c.setFillColor(colors.Color(0.2, 0.23, 0.28))
-            c.roundRect(pbar_x, y - 7*mm, pbar_w, 4*mm, 2, fill=1, stroke=0)
-            fw = max(pbar_w * gpct / 100, 4*mm if gpct > 0 else 0)
+            # Breadcrumb
+            c.setFillColor(colors.Color(0.5, 0.55, 0.62)); c.setFont("Helvetica", 8)
+            c.drawString(16*mm, h - 10*mm,
+                         f"{payload.tenant_nome}  ›  {payload.departamento_nome}  ›  {payload.revisao_titulo}  ·  Semana {payload.semana_atual}/{payload.semanas_total}")
+
+            # Nome do grupo grande
+            c.setFillColor(WHITE); c.setFont("Helvetica-Bold", 17)
+            c.drawString(16*mm, h - 20*mm, gname)
+
+            # Barra de progresso do grupo
+            bar_w_g = w - 32*mm
+            c.setFillColor(colors.Color(0.18, 0.21, 0.27))
+            c.roundRect(16*mm, h - 28*mm, bar_w_g, 5*mm, 2.5, fill=1, stroke=0)
+            fw_g = max(bar_w_g * gpct / 100, 5*mm if gpct > 0 else 0)
             c.setFillColor(gcol)
-            c.roundRect(pbar_x, y - 7*mm, fw, 4*mm, 2, fill=1, stroke=0)
+            c.roundRect(16*mm, h - 28*mm, fw_g, 5*mm, 2.5, fill=1, stroke=0)
+            c.setFillColor(gcol); c.setFont("Helvetica-Bold", 13)
+            c.drawRightString(w - 16*mm, h - 23*mm, f"{gpct}%")
 
-            y -= 9*mm
+            # KPI strip do grupo (4 cards compactos)
+            y_kpi  = h - 38*mm - 1*mm
+            kpi_h  = 14*mm
+            kpi_ww = (w - 36*mm) / 4
+            for ki, (klbl, kval, kcol) in enumerate([
+                ("Equipamentos",  str(n_eq_g),   WHITE),
+                ("Concluídos",    str(n_conc_g),  GREEN),
+                ("Sem início",    str(n_crit_g),  RED if n_crit_g else MUTED),
+                ("Travados",      str(n_trav_g),  RED if n_trav_g else MUTED),
+            ]):
+                kx = 16*mm + ki * (kpi_ww + 1.3*mm)
+                c.setFillColor(SURFACE); c.setStrokeColor(BORDER); c.setLineWidth(0.5)
+                c.roundRect(kx, y_kpi - kpi_h, kpi_ww, kpi_h, 3, fill=1, stroke=1)
+                c.setFillColor(kcol); c.setFont("Helvetica-Bold", 14)
+                c.drawString(kx + 4, y_kpi - 9*mm, kval)
+                c.setFillColor(MUTED); c.setFont("Helvetica", 7)
+                c.drawString(kx + 4, y_kpi - 13*mm, klbl)
 
-            row_h = 7.5*mm
+            y = y_kpi - kpi_h - 4*mm
+
+            # ── Lista de equipamentos ─────────────────────────────────────────
+            # Cabeçalho da tabela
+            c.setFillColor(DARK)
+            c.rect(16*mm, y - 6*mm, w - 32*mm, 6*mm, fill=1, stroke=0)
+            c.setFillColor(colors.Color(0.6, 0.65, 0.7)); c.setFont("Helvetica-Bold", 7.5)
+            c.drawString(22*mm, y - 4*mm, "Frota")
+            c.drawString(36*mm, y - 4*mm, "Modelo")
+            c.drawString(w/2,   y - 4*mm, "Progresso")
+            c.drawRightString(w - 18*mm, y - 4*mm, "%  /  Δ semana")
+            y -= 6*mm
+
+            row_h = 8*mm
             for i, eq in enumerate(eqs_grupo):
-                if y < 22*mm:
+                if y - row_h < 18*mm:
                     footer(); c.showPage()
-                    new_page("Progresso Completo (cont.)")
-                    y = h - 52*mm
-                    # repete mini-cabeçalho do grupo
-                    c.setFillColor(colors.Color(0.88, 0.90, 0.93))
-                    c.rect(16*mm, y - 6*mm, w - 32*mm, 6*mm, fill=1, stroke=0)
+                    # cabeçalho de continuação compacto
+                    c.setFillColor(DARK)
+                    c.rect(0, h - 14*mm, w, 14*mm, fill=1, stroke=0)
                     c.setFillColor(gcol)
-                    c.rect(16*mm, y - 6*mm, 3, 6*mm, fill=1, stroke=0)
-                    c.setFillColor(FG); c.setFont("Helvetica-Bold", 8)
-                    c.drawString(22*mm, y - 4.5*mm, f"{gname} (cont.)")
+                    c.rect(0, h - 14*mm, 4, 14*mm, fill=1, stroke=0)
+                    c.setFillColor(WHITE); c.setFont("Helvetica-Bold", 10)
+                    c.drawString(10*mm, h - 9*mm, gname)
+                    c.setFillColor(colors.Color(0.5, 0.55, 0.62)); c.setFont("Helvetica", 8)
+                    c.drawRightString(w - 10*mm, h - 9*mm, f"{gpct}%  (cont.)")
+                    y = h - 18*mm
+                    # re-cabeçalho da tabela
+                    c.setFillColor(colors.Color(0.92, 0.93, 0.95))
+                    c.rect(16*mm, y - 6*mm, w - 32*mm, 6*mm, fill=1, stroke=0)
+                    c.setFillColor(MUTED); c.setFont("Helvetica-Bold", 7.5)
+                    c.drawString(22*mm, y - 4*mm, "Frota")
+                    c.drawString(36*mm, y - 4*mm, "Modelo")
+                    c.drawString(w/2,   y - 4*mm, "Progresso")
+                    c.drawRightString(w - 18*mm, y - 4*mm, "%  /  Δ")
                     y -= 6*mm
 
                 pct    = int(eq.get("pct", 0))
                 frota  = str(eq.get("frota") or "—")[:10]
-                modelo = str(eq.get("modelo") or "")[:20]
+                modelo = str(eq.get("modelo") or "")[:28]
                 col    = _risk_color(pct)
                 status = eq.get("status", "")
 
-                bg = SURFACE if i % 2 == 0 else WHITE
-                c.setFillColor(bg)
+                # fundo alternado
+                c.setFillColor(SURFACE if i % 2 == 0 else WHITE)
                 c.rect(16*mm, y - row_h, w - 32*mm, row_h, fill=1, stroke=0)
 
-                # indicador de status lateral
-                status_col = RED if status in ("zero", "travado") else (YELLOW if status == "em_andamento" else GREEN)
-                c.setFillColor(status_col)
-                c.rect(16*mm, y - row_h, 2, row_h, fill=1, stroke=0)
+                # faixa lateral de status
+                s_col = RED if status in ("zero", "travado") else (YELLOW if status == "em_andamento" else GREEN)
+                c.setFillColor(s_col)
+                c.rect(16*mm, y - row_h, 3, row_h, fill=1, stroke=0)
 
-                c.setFillColor(FG); c.setFont("Helvetica-Bold", 8)
-                c.drawString(20*mm, y - row_h*0.35, frota)
+                # frota + modelo
+                c.setFillColor(FG); c.setFont("Helvetica-Bold", 8.5)
+                c.drawString(22*mm, y - row_h*0.38, frota)
                 c.setFillColor(MUTED); c.setFont("Helvetica", 7.5)
-                c.drawString(20*mm, y - row_h*0.72, modelo)
+                c.drawString(36*mm, y - row_h*0.38, modelo)
 
-                bar_x = 65*mm
-                bar_ww = w - 32*mm - 49*mm - 20*mm
+                # barra de progresso
+                bar_x  = w/2
+                bar_ww = w - 32*mm - (bar_x - 16*mm) - 18*mm
                 progress_bar(bar_x, y - row_h + 2*mm, bar_ww, row_h - 4*mm, pct)
 
+                # %
                 c.setFillColor(col); c.setFont("Helvetica-Bold", 9)
-                c.drawRightString(w - 17*mm, y - row_h*0.38, f"{pct}%")
+                c.drawRightString(w - 18*mm, y - row_h*0.38, f"{pct}%")
 
+                # delta
                 delta_v = pct - int(eq.get("pct_anterior", pct))
                 if delta_v != 0:
                     d_col = GREEN if delta_v > 0 else RED
                     d_str = f"+{delta_v}p.p." if delta_v > 0 else f"{delta_v}p.p."
                     c.setFillColor(d_col); c.setFont("Helvetica-Bold", 7)
-                    c.drawRightString(w - 17*mm, y - row_h*0.72, d_str)
+                    c.drawRightString(w - 18*mm, y - row_h*0.72, d_str)
 
                 c.setStrokeColor(BORDER); c.setLineWidth(0.3)
                 c.line(16*mm, y - row_h, w - 16*mm, y - row_h)
                 y -= row_h
-
-            # Espaçamento entre grupos
-    footer(); c.showPage()
 
     # ── PÁGINA 4: Resumo de alertas ───────────────────────────────────────────
     new_page("Resumo de Alertas")
