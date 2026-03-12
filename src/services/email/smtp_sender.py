@@ -138,10 +138,15 @@ def build_html_body(
     pct_geral: int,
     n_alertas: int,
     primary_color: str = "#FFD100",
-    equipamentos: list | None = None,  # mantido na assinatura por compatibilidade, não usado no corpo
+    equipamentos: list | None = None,
 ) -> str:
     """Gera o corpo HTML do e-mail — objetivo, sem tabela de equipamentos (está no PDF)."""
-    bar_color = _eq_color(pct_geral)
+    if pct_geral >= 80:
+        bar_color = "#12B76A"
+    elif pct_geral >= 50:
+        bar_color = "#F59E0B"
+    else:
+        bar_color = "#EF4444"
     now = datetime.now().strftime("%d/%m/%Y")
     alerta_txt = (f"{n_alertas} alerta{'s' if n_alertas != 1 else ''} "
                   f"ativo{'s' if n_alertas != 1 else ''}") if n_alertas else "sem alertas"
