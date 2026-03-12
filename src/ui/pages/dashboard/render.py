@@ -20,22 +20,22 @@ import plotly.express as px
 import streamlit as st
 
 from src.auth.scope import get_my_scope
+from src.domain.kpi import calc_global_kpis
 from src.ui.core.empty_state import empty_state
 from src.ui.core.styles import page_header
+from src.utils.kpi_engine import get_group_kpis
 from src.utils.mobile import is_mobile
-from src.utils.nav import get_current_revisao, set_current_revisao
+from src.utils.nav import set_current_revisao
 from src.utils.supabase_helpers import current_tenant_id, sb_for_user
 from src.utils.ui_helpers import status_badge
 
 from .transforms import (
     apply_filters,
     build_inteligencia,
-    build_progress_meta,
     equipment_progress,
     fmt_date,
     group_progress,
     normalize_matriz_base,
-    normalize_task_base,
     overall_from_base,
     sector_progress,
 )
@@ -58,95 +58,28 @@ def _load_revisao(sb, tenant_id: str) -> dict | None:
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def _load_base_cached(_tenant_id: str, _revisao_id: str, _ver: str = "0") -> tuple[list, list, list, list, list]:
-    """Carrega a base do dashboard priorizando tarefas_servico (fonte exata).
-
-    Ordem de preferência:
-      1) tarefas_servico + grupo_servicos + equipamentos + grupos
-      2) fallback para mv_matriz_base
-    """
+def _load_base_cached(_tenant_id: str, _revisao_id: str, _ver: str = "0") -> tuple[list, list]:
+    """Versao cacheada para mv_matriz_base e equipamentos."""
     sb = sb_for_user()
-
     try:
-        eq_meta = (
-            sb.table("equipamentos")
-            .select("id,grupo_id,frota,modelo,departamento_id")
-            .eq("tenant_id", _tenant_id)
-            .eq("ativo", True)
-            .execute()
-            .data or []
-        )
+        raw = sb.table("mv_matriz_base").select("*").eq("tenant_id", _tenant_id).eq("revisao_id", _revisao_id).execute().data or []
+    except Exception:
+        raw = []
+    try:
+        eq_meta = sb.table("equipamentos").select("id,frota,modelo,departamento_id").eq("tenant_id", _tenant_id).eq("ativo", True).execute().data or []
     except Exception:
         eq_meta = []
-
-    try:
-        grupos = (
-            sb.table("equip_grupos")
-            .select("id,nome,departamento_id")
-            .eq("tenant_id", _tenant_id)
-            .eq("ativo", True)
-            .execute()
-            .data or []
-        )
-    except Exception:
-        grupos = []
-
-    try:
-        grupo_servicos = (
-            sb.table("grupo_servicos")
-            .select("grupo_id,servico_id,servicos(setor)")
-            .eq("tenant_id", _tenant_id)
-            .execute()
-            .data or []
-        )
-    except Exception:
-        grupo_servicos = []
-
-    try:
-        tarefas = (
-            sb.table("tarefas_servico")
-            .select("equipamento_id,servico_id,status,updated_at,etapa_d,etapa_r,etapa_m,servicos(setor)")
-            .eq("tenant_id", _tenant_id)
-            .eq("revisao_id", _revisao_id)
-            .execute()
-            .data or []
-        )
-    except Exception:
-        tarefas = []
-
-    try:
-        raw_mv = sb.table("mv_matriz_base").select("*").eq("tenant_id", _tenant_id).eq("revisao_id", _revisao_id).execute().data or []
-    except Exception:
-        raw_mv = []
-
-    return tarefas, raw_mv, eq_meta, grupos, grupo_servicos
+    return raw, eq_meta
 
 
-def _load_base(sb, tenant_id: str, revisao_id: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def _load_base(sb, tenant_id: str, revisao_id: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     ver = str(st.session_state.get("data_version", "0"))
-    tarefas_list, raw_mv_list, eq_list, grupos_list, grupo_servicos_list = _load_base_cached(tenant_id, revisao_id, ver)
-
+    raw_list, eq_list = _load_base_cached(tenant_id, revisao_id, ver)
+    raw = pd.DataFrame(raw_list)
     eq_meta = pd.DataFrame(eq_list)
     if not eq_meta.empty and "id" in eq_meta.columns:
         eq_meta = eq_meta.rename(columns={"id": "equipamento_id"})
-
-    grupos_df = pd.DataFrame(grupos_list)
-
-    gs_df = pd.DataFrame(grupo_servicos_list)
-    if not gs_df.empty and "servicos" in gs_df.columns:
-        gs_df["setor"] = gs_df["servicos"].apply(lambda s: (s or {}).get("setor") if isinstance(s, dict) else None)
-
-    tarefas_df = pd.DataFrame(tarefas_list)
-    if not tarefas_df.empty and "servicos" in tarefas_df.columns:
-        tarefas_df["setor"] = tarefas_df["servicos"].apply(lambda s: (s or {}).get("setor") if isinstance(s, dict) else None)
-
-    if not tarefas_df.empty:
-        base = normalize_task_base(tarefas_df, eq_meta, grupos_df)
-    else:
-        raw = pd.DataFrame(raw_mv_list)
-        base = normalize_matriz_base(raw, eq_meta)
-
-    return base, eq_meta, grupos_df, gs_df
+    return raw, eq_meta
 
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -190,11 +123,11 @@ def _fragment_kpis_globais(overall: dict) -> None:
     from src.utils.ui_helpers import mobile_columns
     cols = mobile_columns(5, 2)
     labels = [
-        ("% Concluido", f"{overall['pct']}%",   None,                                   "off",     "Percentual global calculado por etapas ok / (total x 3)."),
+        ("% Concluído", f"{overall['pct']:.1f}%", None, "off", "Percentual global alinhado à mesma regra da Matriz/Home."),
         ("Concluidos",  overall["concl"],         None,                                   "off",     None),
         ("Em andamento",overall["andamento"],     None,                                   "off",     None),
-        ("Pendentes",   overall["pend"],           f"-{overall['pend']}" if overall["pend"] else "0",  "inverse" if overall["pend"] else "off", None),
-        ("Travados",    overall["trav"],           f"-{overall['trav']}" if overall["trav"] else "0",  "inverse" if overall["trav"] else "off", None),
+        ("Pendentes",   overall["pend"],           None, "off", None),
+        ("Travados",    overall["trav"],           None, "off", None),
     ]
     for i, (label, value, delta, delta_color, help_text) in enumerate(labels):
         with cols[i % len(cols)]:
@@ -227,8 +160,8 @@ def _fragment_previsao(previsao: dict, risco: dict) -> None:
 
 
 @st.fragment
-def _fragment_grupos(base: pd.DataFrame, dept_map: dict, dep_scope_ids, progress_meta: dict) -> None:
-    gdf = group_progress(base, progress_meta)
+def _fragment_grupos(base: pd.DataFrame, dept_map: dict, dep_scope_ids, group_kpis_df: pd.DataFrame | None = None) -> None:
+    gdf = group_kpis_df.copy() if group_kpis_df is not None and not group_kpis_df.empty else group_progress(base)
     if gdf.empty:
         empty_state(icon="⊕", title="Sem dados de grupos", description="Nenhum grupo com tarefas para esta revisao.")
         return
@@ -236,60 +169,54 @@ def _fragment_grupos(base: pd.DataFrame, dept_map: dict, dep_scope_ids, progress
     gdf["Departamento"] = gdf["departamento_id"].map(dept_map).fillna("—")
     if dep_scope_ids and "departamento_id" in gdf.columns:
         gdf = gdf[gdf["departamento_id"].isin(dep_scope_ids)]
-    display = (
-        gdf[["grupo", "Departamento", "pct_concluido"]]
-        .rename(columns={"grupo": "Grupo", "pct_concluido": "% Concluído"})
-        .sort_values("% Concluído", ascending=False)
-    )
+    gdf["pct_concluido"] = pd.to_numeric(gdf["pct_concluido"], errors="coerce").fillna(0).clip(0, 100)
+    display = gdf[["grupo", "Departamento", "pct_concluido"]].rename(columns={"grupo": "Grupo", "pct_concluido": "% Concluído"}).sort_values("% Concluído", ascending=False)
+    st.bar_chart(display.set_index("Grupo")[["% Concluído"]], horizontal=True, use_container_width=True)
     st.dataframe(
         display, use_container_width=True, hide_index=True,
-        column_config={"% Concluído": st.column_config.ProgressColumn(
-            "% Concluído", min_value=0, max_value=100)},
+        column_config={"% Concluído": st.column_config.ProgressColumn("% Concluído", min_value=0, max_value=100, format="%.1f%%")},
     )
 
 
 @st.fragment
-def _fragment_setores(base: pd.DataFrame, progress_meta: dict) -> None:
-    sdf = sector_progress(base, progress_meta)
+def _fragment_setores(base: pd.DataFrame) -> None:
+    sdf = sector_progress(base)
     if sdf.empty:
         st.info("Sem dados de setores.")
         return
-    display = sdf.rename(
-        columns={"setor": "Setor", "pct_concluido": "% Concluído"}
-    ).sort_values("% Concluído", ascending=False)
+    display = sdf.rename(columns={"setor": "Setor", "pct_concluido": "% Concluído"}).sort_values("% Concluído", ascending=False)
+    st.bar_chart(display.set_index("Setor")[["% Concluído"]], horizontal=True, use_container_width=True)
     st.dataframe(
-        display, use_container_width=True, hide_index=True,
-        column_config={"% Concluído": st.column_config.ProgressColumn(
-            "% Concluído", min_value=0, max_value=100)},
+        display[["Setor", "% Concluído"]], use_container_width=True, hide_index=True,
+        column_config={"% Concluído": st.column_config.ProgressColumn("% Concluído", min_value=0, max_value=100, format="%.1f%%")},
     )
 
 
 @st.fragment
-def _fragment_equipamentos(base: pd.DataFrame, dept_map: dict, progress_meta: dict) -> None:
-    edf = equipment_progress(base, progress_meta)
+def _fragment_equipamentos(base: pd.DataFrame, dept_map: dict) -> None:
+    edf = equipment_progress(base)
     if edf.empty:
         st.info("Sem dados de equipamentos.")
         return
     edf = edf.copy()
     edf["Departamento"] = edf["departamento_id"].map(dept_map).fillna("—")
 
-    busca = st.text_input("Buscar frota / modelo", placeholder="Ex.: 2055, JD 6190…",
-                          key="dash_busca_eq")
+    busca = st.text_input("Buscar frota / modelo", placeholder="Ex.: 2055, JD 6190…", key="dash_busca_eq")
     if busca.strip():
-        mask = (
-            edf["Frota"].str.lower().str.contains(busca.lower(), na=False)
-            | edf["Modelo"].str.lower().str.contains(busca.lower(), na=False)
-        )
+        mask = edf["Frota"].astype(str).str.lower().str.contains(busca.lower(), na=False) | edf["Modelo"].astype(str).str.lower().str.contains(busca.lower(), na=False)
         edf = edf[mask]
 
-    cols = ["Frota", "Modelo", "Departamento", "Total", "% Concluído",
-            "Pendentes", "Em andamento", "Travados", "Não aplica", "Concluídos"]
+    edf["% Concluído"] = pd.to_numeric(edf["% Concluído"], errors="coerce").fillna(0).clip(0, 100)
+    chart_source = edf.sort_values("% Concluído", ascending=False).head(15)
+    if not chart_source.empty:
+        st.bar_chart(chart_source.set_index("Frota")[["% Concluído"]], horizontal=True, use_container_width=True)
+
+    cols = ["Frota", "Modelo", "Departamento", "Total", "% Concluído", "Pendentes", "Em andamento", "Travados", "Não aplica", "Concluídos"]
     present = [c for c in cols if c in edf.columns]
     st.dataframe(
         edf[present].sort_values("% Concluído", ascending=False),
         use_container_width=True, hide_index=True,
-        column_config={"% Concluído": st.column_config.ProgressColumn(
-            "% Concluído", min_value=0, max_value=100)},
+        column_config={"% Concluído": st.column_config.ProgressColumn("% Concluído", min_value=0, max_value=100, format="%.1f%%")},
     )
 
 
@@ -347,19 +274,19 @@ def _fragment_timeline(tl: pd.DataFrame) -> None:
     if tl.empty:
         st.info("Sem movimentações registradas nesta revisão.")
         return
-    fig = px.bar(
-        tl, x="dia", y="movimentacoes",
-        labels={"dia": "Data", "movimentacoes": "Movimentações"},
-        title="Movimentações diárias",
+    plot_df = tl.copy().sort_values("dia")
+    plot_df["dia"] = pd.to_datetime(plot_df["dia"], errors="coerce").dt.strftime("%d/%m")
+    st.bar_chart(plot_df.set_index("dia")[["movimentacoes"]], use_container_width=True)
+    st.dataframe(
+        tl.sort_values("dia", ascending=False),
+        use_container_width=True, hide_index=True,
+        column_config={
+            "dia": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+            "movimentacoes": st.column_config.NumberColumn("Movimentações"),
+            "concluidos": st.column_config.NumberColumn("Concluídos"),
+            "restantes": st.column_config.NumberColumn("Restantes"),
+        },
     )
-    fig.update_layout(
-        height=300, margin=dict(l=10, r=10, t=40, b=10),
-        paper_bgcolor="#06080B", plot_bgcolor="#0C111A",
-        xaxis=dict(gridcolor="rgba(255,255,255,0.06)"),
-        yaxis=dict(gridcolor="rgba(255,255,255,0.06)"),
-        font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=11),
-    )
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
 # ── Retrocompatibilidade: render_kpis simples ─────────────────────────────────
@@ -420,10 +347,16 @@ def render_dashboard() -> None:
     # Carregamento de dados
     ver = str(st.session_state.get("data_version", "0"))
     with st.spinner("", show_time=False):
-        base, eq_meta, grupos_df, grupo_servicos_df = _load_base(sb, tenant_id, revisao_id)
+        raw, eq_meta  = _load_base(sb, tenant_id, revisao_id)
         departamentos = _load_departamentos(tenant_id, ver)
+        grupos = _load_grupos(tenant_id, ver)
 
     dept_map = {d["id"]: d.get("nome", "—") for d in departamentos if d.get("id")}
+    gid_to_name = {g["id"]: g.get("nome", "—") for g in grupos if g.get("id")}
+    gid_to_dept = {g["id"]: g.get("departamento_id") for g in grupos if g.get("id")}
+
+    # Normaliza base
+    base = normalize_matriz_base(raw, eq_meta)
 
     if base.empty:
         st.info(
@@ -434,17 +367,36 @@ def render_dashboard() -> None:
 
     # Filtros de escopo
     base = apply_filters(base, dep_scope_ids, grp_scope_ids)
-    progress_meta = build_progress_meta(eq_meta, grupo_servicos_df, base)
 
-    # KPIs globais
-    overall = overall_from_base(base, progress_meta)
+    # KPIs globais alinhados com Home/Matriz
+    group_kpis_df = get_group_kpis(tenant_id, revisao_id, ver)
+    if group_kpis_df is None or group_kpis_df.empty:
+        overall = overall_from_base(base)
+        dashboard_groups = group_progress(base)
+    else:
+        if grp_scope_ids:
+            group_kpis_df = group_kpis_df[group_kpis_df["grupo_id"].isin(grp_scope_ids)]
+        if dep_scope_ids:
+            group_kpis_df = group_kpis_df[group_kpis_df["grupo_id"].map(gid_to_dept).isin(dep_scope_ids)]
+        overall_calc = calc_global_kpis(group_kpis_df)
+        overall = {
+            "pct": float(overall_calc.get("pct", 0)),
+            "concl": int((base["state"] == "concluido").sum()) if not base.empty else 0,
+            "andamento": int((base["state"] == "em_andamento").sum()) if not base.empty else 0,
+            "pend": int((base["state"] == "pendente").sum()) if not base.empty else 0,
+            "trav": int((base["state"] == "travado").sum()) if not base.empty else 0,
+        }
+        dashboard_groups = group_kpis_df.copy()
+        dashboard_groups["grupo"] = dashboard_groups["grupo_id"].map(gid_to_name).fillna("—")
+        dashboard_groups["departamento_id"] = dashboard_groups["grupo_id"].map(gid_to_dept)
+        dashboard_groups["pct_concluido"] = pd.to_numeric(dashboard_groups.get("pct", 0), errors="coerce").fillna(0).clip(0, 100)
     _fragment_kpis_globais(overall)
 
     st.divider()
 
     # Inteligência
     with st.spinner("", show_time=False):
-        risco, previsao, heat, crit, tl = build_inteligencia(base, progress_meta)
+        risco, previsao, heat, crit, tl = build_inteligencia(base)
 
     _fragment_previsao(previsao, risco)
 
@@ -472,15 +424,15 @@ def render_dashboard() -> None:
 
     if active == "🏗️ Grupos":
         st.markdown("### Progresso por grupo")
-        _fragment_grupos(base, dept_map, dep_scope_ids, progress_meta)
+        _fragment_grupos(base, dept_map, dep_scope_ids, dashboard_groups)
 
     elif active == "🔧 Equipamentos":
         st.markdown("### Progresso por equipamento")
-        _fragment_equipamentos(base, dept_map, progress_meta)
+        _fragment_equipamentos(base, dept_map)
 
     elif active == "📋 Setores":
         st.markdown("### Progresso por setor")
-        _fragment_setores(base, progress_meta)
+        _fragment_setores(base)
 
     elif active == "🌡️ Heatmap":
         st.markdown("### Heatmap de risco — Grupo × Setor")

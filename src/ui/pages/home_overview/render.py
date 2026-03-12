@@ -313,15 +313,14 @@ def render_home_overview() -> None:
 
     ver = str(st.session_state.get("data_version", "0"))
     rev = load_revision(tenant_id, ver, get_current_revisao())
+    if rev and rev.get("id"):
+        set_current_revisao(rev["id"], titulo=rev.get("titulo"), semana=week if rev else None)
     if not rev:
         st.warning("Nenhuma revisão encontrada para este tenant.")
         return
 
     rev_start, _rev_end, semanas_total = rev_start_end(rev)
-    week = current_week(rev_start, semanas_total)
-
-    if rev.get("id"):
-        set_current_revisao(rev["id"], titulo=rev.get("titulo"), semana=week)
+    week       = current_week(rev_start, semanas_total)
     grupos     = load_groups(tenant_id, ver)
     deps       = load_depts(tenant_id, ver)
     gid_to_name  = {g["id"]: (g.get("nome") or "—") for g in grupos if g.get("id")}
