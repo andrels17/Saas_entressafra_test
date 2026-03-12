@@ -30,10 +30,12 @@ from src.utils.ui_helpers import status_badge
 from .transforms import (
     apply_filters,
     build_inteligencia,
+    build_progress_meta,
     equipment_progress,
     fmt_date,
     group_progress,
     normalize_matriz_base,
+    normalize_task_base,
     overall_from_base,
     sector_progress,
 )
@@ -56,28 +58,95 @@ def _load_revisao(sb, tenant_id: str) -> dict | None:
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def _load_base_cached(_tenant_id: str, _revisao_id: str, _ver: str = "0") -> tuple[list, list]:
-    """Versao cacheada para mv_matriz_base e equipamentos."""
+def _load_base_cached(_tenant_id: str, _revisao_id: str, _ver: str = "0") -> tuple[list, list, list, list, list]:
+    """Carrega a base do dashboard priorizando tarefas_servico (fonte exata).
+
+    Ordem de preferência:
+      1) tarefas_servico + grupo_servicos + equipamentos + grupos
+      2) fallback para mv_matriz_base
+    """
     sb = sb_for_user()
+
     try:
-        raw = sb.table("mv_matriz_base").select("*").eq("tenant_id", _tenant_id).eq("revisao_id", _revisao_id).execute().data or []
-    except Exception:
-        raw = []
-    try:
-        eq_meta = sb.table("equipamentos").select("id,frota,modelo,departamento_id").eq("tenant_id", _tenant_id).eq("ativo", True).execute().data or []
+        eq_meta = (
+            sb.table("equipamentos")
+            .select("id,grupo_id,frota,modelo,departamento_id")
+            .eq("tenant_id", _tenant_id)
+            .eq("ativo", True)
+            .execute()
+            .data or []
+        )
     except Exception:
         eq_meta = []
-    return raw, eq_meta
+
+    try:
+        grupos = (
+            sb.table("equip_grupos")
+            .select("id,nome,departamento_id")
+            .eq("tenant_id", _tenant_id)
+            .eq("ativo", True)
+            .execute()
+            .data or []
+        )
+    except Exception:
+        grupos = []
+
+    try:
+        grupo_servicos = (
+            sb.table("grupo_servicos")
+            .select("grupo_id,servico_id,servicos(setor)")
+            .eq("tenant_id", _tenant_id)
+            .execute()
+            .data or []
+        )
+    except Exception:
+        grupo_servicos = []
+
+    try:
+        tarefas = (
+            sb.table("tarefas_servico")
+            .select("equipamento_id,servico_id,status,updated_at,etapa_d,etapa_r,etapa_m,servicos(setor)")
+            .eq("tenant_id", _tenant_id)
+            .eq("revisao_id", _revisao_id)
+            .execute()
+            .data or []
+        )
+    except Exception:
+        tarefas = []
+
+    try:
+        raw_mv = sb.table("mv_matriz_base").select("*").eq("tenant_id", _tenant_id).eq("revisao_id", _revisao_id).execute().data or []
+    except Exception:
+        raw_mv = []
+
+    return tarefas, raw_mv, eq_meta, grupos, grupo_servicos
 
 
-def _load_base(sb, tenant_id: str, revisao_id: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+def _load_base(sb, tenant_id: str, revisao_id: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     ver = str(st.session_state.get("data_version", "0"))
-    raw_list, eq_list = _load_base_cached(tenant_id, revisao_id, ver)
-    raw = pd.DataFrame(raw_list)
+    tarefas_list, raw_mv_list, eq_list, grupos_list, grupo_servicos_list = _load_base_cached(tenant_id, revisao_id, ver)
+
     eq_meta = pd.DataFrame(eq_list)
     if not eq_meta.empty and "id" in eq_meta.columns:
         eq_meta = eq_meta.rename(columns={"id": "equipamento_id"})
-    return raw, eq_meta
+
+    grupos_df = pd.DataFrame(grupos_list)
+
+    gs_df = pd.DataFrame(grupo_servicos_list)
+    if not gs_df.empty and "servicos" in gs_df.columns:
+        gs_df["setor"] = gs_df["servicos"].apply(lambda s: (s or {}).get("setor") if isinstance(s, dict) else None)
+
+    tarefas_df = pd.DataFrame(tarefas_list)
+    if not tarefas_df.empty and "servicos" in tarefas_df.columns:
+        tarefas_df["setor"] = tarefas_df["servicos"].apply(lambda s: (s or {}).get("setor") if isinstance(s, dict) else None)
+
+    if not tarefas_df.empty:
+        base = normalize_task_base(tarefas_df, eq_meta, grupos_df)
+    else:
+        raw = pd.DataFrame(raw_mv_list)
+        base = normalize_matriz_base(raw, eq_meta)
+
+    return base, eq_meta, grupos_df, gs_df
 
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -158,8 +227,8 @@ def _fragment_previsao(previsao: dict, risco: dict) -> None:
 
 
 @st.fragment
-def _fragment_grupos(base: pd.DataFrame, dept_map: dict, dep_scope_ids) -> None:
-    gdf = group_progress(base)
+def _fragment_grupos(base: pd.DataFrame, dept_map: dict, dep_scope_ids, progress_meta: dict) -> None:
+    gdf = group_progress(base, progress_meta)
     if gdf.empty:
         empty_state(icon="⊕", title="Sem dados de grupos", description="Nenhum grupo com tarefas para esta revisao.")
         return
@@ -180,8 +249,8 @@ def _fragment_grupos(base: pd.DataFrame, dept_map: dict, dep_scope_ids) -> None:
 
 
 @st.fragment
-def _fragment_setores(base: pd.DataFrame) -> None:
-    sdf = sector_progress(base)
+def _fragment_setores(base: pd.DataFrame, progress_meta: dict) -> None:
+    sdf = sector_progress(base, progress_meta)
     if sdf.empty:
         st.info("Sem dados de setores.")
         return
@@ -196,8 +265,8 @@ def _fragment_setores(base: pd.DataFrame) -> None:
 
 
 @st.fragment
-def _fragment_equipamentos(base: pd.DataFrame, dept_map: dict) -> None:
-    edf = equipment_progress(base)
+def _fragment_equipamentos(base: pd.DataFrame, dept_map: dict, progress_meta: dict) -> None:
+    edf = equipment_progress(base, progress_meta)
     if edf.empty:
         st.info("Sem dados de equipamentos.")
         return
@@ -282,7 +351,6 @@ def _fragment_timeline(tl: pd.DataFrame) -> None:
         tl, x="dia", y="movimentacoes",
         labels={"dia": "Data", "movimentacoes": "Movimentações"},
         title="Movimentações diárias",
-        color_discrete_sequence=["#4A9EFF"],
     )
     fig.update_layout(
         height=300, margin=dict(l=10, r=10, t=40, b=10),
@@ -352,13 +420,10 @@ def render_dashboard() -> None:
     # Carregamento de dados
     ver = str(st.session_state.get("data_version", "0"))
     with st.spinner("", show_time=False):
-        raw, eq_meta  = _load_base(sb, tenant_id, revisao_id)
+        base, eq_meta, grupos_df, grupo_servicos_df = _load_base(sb, tenant_id, revisao_id)
         departamentos = _load_departamentos(tenant_id, ver)
 
     dept_map = {d["id"]: d.get("nome", "—") for d in departamentos if d.get("id")}
-
-    # Normaliza base
-    base = normalize_matriz_base(raw, eq_meta)
 
     if base.empty:
         st.info(
@@ -369,16 +434,17 @@ def render_dashboard() -> None:
 
     # Filtros de escopo
     base = apply_filters(base, dep_scope_ids, grp_scope_ids)
+    progress_meta = build_progress_meta(eq_meta, grupo_servicos_df, base)
 
     # KPIs globais
-    overall = overall_from_base(base)
+    overall = overall_from_base(base, progress_meta)
     _fragment_kpis_globais(overall)
 
     st.divider()
 
     # Inteligência
     with st.spinner("", show_time=False):
-        risco, previsao, heat, crit, tl = build_inteligencia(base)
+        risco, previsao, heat, crit, tl = build_inteligencia(base, progress_meta)
 
     _fragment_previsao(previsao, risco)
 
@@ -406,15 +472,15 @@ def render_dashboard() -> None:
 
     if active == "🏗️ Grupos":
         st.markdown("### Progresso por grupo")
-        _fragment_grupos(base, dept_map, dep_scope_ids)
+        _fragment_grupos(base, dept_map, dep_scope_ids, progress_meta)
 
     elif active == "🔧 Equipamentos":
         st.markdown("### Progresso por equipamento")
-        _fragment_equipamentos(base, dept_map)
+        _fragment_equipamentos(base, dept_map, progress_meta)
 
     elif active == "📋 Setores":
         st.markdown("### Progresso por setor")
-        _fragment_setores(base)
+        _fragment_setores(base, progress_meta)
 
     elif active == "🌡️ Heatmap":
         st.markdown("### Heatmap de risco — Grupo × Setor")

@@ -1,3 +1,13 @@
+"""Home Overview — camada de renderização.
+
+Melhorias Streamlit 1.42+:
+  - st.metric nativo no lugar de _kpi_card HTML customizado
+  - @st.fragment para cards de KPI e ranking em reruns parciais
+  - st.status para carregamento granular
+  - st.dataframe com ProgressColumn para tabelas de departamento
+  - st.popover para ajuda contextual nos cards
+  - st.segmented_control para troca de visão (resumo / tendência)
+"""
 from __future__ import annotations
 
 import time
@@ -311,11 +321,7 @@ def render_home_overview() -> None:
     week = current_week(rev_start, semanas_total)
 
     if rev.get("id"):
-        # Compatível com versões antigas de set_current_revisao que aceitam
-        # apenas o ID da revisão.
-        set_current_revisao(rev["id"])
-        st.session_state["_sidebar_rev_titulo"] = rev.get("titulo")
-        st.session_state["_sidebar_rev_semana"] = week
+        set_current_revisao(rev["id"], titulo=rev.get("titulo"), semana=week)
     grupos     = load_groups(tenant_id, ver)
     deps       = load_depts(tenant_id, ver)
     gid_to_name  = {g["id"]: (g.get("nome") or "—") for g in grupos if g.get("id")}
