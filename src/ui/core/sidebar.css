@@ -256,3 +256,21 @@ section[data-testid="stSidebar"] .sb-footer-text {
   color: var(--sb-text-secondary);
   line-height: 1.35;
 }
+
+/* ── Chip de revisão ativa ───────────────────────────────────────────────── */
+section[data-testid="stSidebar"] .sb-revisao-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 2px 0;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: rgba(255, 209, 0, 0.08);
+  border: 1px solid rgba(255, 209, 0, 0.20);
+  font-size: 0.75rem;
+  color: rgba(255, 209, 0, 0.90);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

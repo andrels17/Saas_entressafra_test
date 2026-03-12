@@ -704,7 +704,7 @@ CREATE POLICY "service_role_all" ON tenant_email_prefs
         from src.services.email.dispatcher import dispatch_relatorio_semanal
         log_lines: list[str] = []
 
-        with st.spinner("Processando..."):
+        with st.spinner("Enviando relatórios…", show_time=True):
             try:
                 result = dispatch_relatorio_semanal(
                     tenant_id=tenant_id,
@@ -752,7 +752,7 @@ def _fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
         st.info("Apenas administradores podem configurar o agendamento.")
         return
 
-    with st.spinner("Carregando configuração…"):
+    with st.spinner("", show_time=False):
         cfg = load_schedule_config(tenant_id)
 
     # ── Status atual ──────────────────────────────────────────────────────────
@@ -891,9 +891,8 @@ def render_notificacoes() -> None:
             )
 
     # ── Carregamento ─────────────────────────────────────────────────────────
-    with st.status("Carregando alertas…", expanded=False) as s:
+    with st.spinner("", show_time=False):
         raw = _load_data(tenant_id, revisao_id, ver)
-        s.update(state="complete")
 
     tarefas = raw["tarefas"]
     revisao = raw["revisao"]

@@ -326,16 +326,15 @@ def render_dashboard() -> None:
     dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id)
 
     # Revisão ativa
-    with st.status("Verificando revisão ativa…", expanded=False) as s:
+    with st.spinner("", show_time=False):
         rev = _load_revisao(sb, tenant_id)
-        s.update(state="complete")
 
     if not rev:
         st.warning("Nenhuma revisão ativa encontrada para este tenant.")
         return
 
     revisao_id = rev["id"]
-    set_current_revisao(revisao_id)
+    set_current_revisao(revisao_id, titulo=rev.get("titulo"))
 
     # Header
     h1, h2 = st.columns([0.82, 0.18])
@@ -351,10 +350,9 @@ def render_dashboard() -> None:
 
     # Carregamento de dados
     ver = str(st.session_state.get("data_version", "0"))
-    with st.status("Carregando dados da revisao...", expanded=False) as s:
+    with st.spinner("", show_time=False):
         raw, eq_meta  = _load_base(sb, tenant_id, revisao_id)
         departamentos = _load_departamentos(tenant_id, ver)
-        s.update(label="Dados carregados", state="complete")
 
     dept_map = {d["id"]: d.get("nome", "—") for d in departamentos if d.get("id")}
 
@@ -378,9 +376,8 @@ def render_dashboard() -> None:
     st.divider()
 
     # Inteligência
-    with st.status("Calculando inteligência…", expanded=False) as s:
+    with st.spinner("", show_time=False):
         risco, previsao, heat, crit, tl = build_inteligencia(base)
-        s.update(state="complete")
 
     _fragment_previsao(previsao, risco)
 

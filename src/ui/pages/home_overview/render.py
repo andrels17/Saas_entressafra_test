@@ -314,7 +314,7 @@ def render_home_overview() -> None:
     ver = str(st.session_state.get("data_version", "0"))
     rev = load_revision(tenant_id, ver, get_current_revisao())
     if rev and rev.get("id"):
-        set_current_revisao(rev["id"])
+        set_current_revisao(rev["id"], titulo=rev.get("titulo"), semana=week if rev else None)
     if not rev:
         st.warning("Nenhuma revisão encontrada para este tenant.")
         return
@@ -346,9 +346,8 @@ def render_home_overview() -> None:
             st.rerun()
 
     # ── Carrega KPIs ──────────────────────────────────────────────────────────
-    with st.status("Carregando KPIs…", expanded=False) as s:
+    with st.spinner("", show_time=False):
         kdf = get_group_kpis(tenant_id, rev["id"], ver, prefer_mv=True)
-        s.update(state="complete")
 
     kdf = enforce_home_schema(kdf)
     if kdf is None or (hasattr(kdf, "empty") and kdf.empty):

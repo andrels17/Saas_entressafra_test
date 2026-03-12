@@ -69,7 +69,7 @@ def _fragment_auditoria(
             q = q.in_("evento", evento_selecionado)
         return q.order("created_at", desc=True)
 
-    with st.status("Carregando histórico…", expanded=False) as s:
+    with st.spinner("", show_time=False):
         rows = fetch_all(
             sb,
             "historico_eventos",
@@ -81,7 +81,6 @@ def _fragment_auditoria(
             page_size=2000,
             max_rows=int(limit),
         )
-        s.update(label=f"{len(rows)} eventos carregados", state="complete")
 
     if not rows:
         st.info("Nenhum evento para os filtros.")
@@ -237,7 +236,7 @@ def render_auditoria() -> None:
     scope_dept_ids, scope_grp_ids = get_user_scope(sb, tenant_id, user_id, role=role)
 
     # Seletor de revisão (fora do fragment para persistir no URL)
-    with st.status("Carregando revisões…", expanded=False) as s:
+    with st.spinner("", show_time=False):
         revisoes = (
             sb.table("revisoes")
             .select("id,titulo,status")
@@ -246,7 +245,6 @@ def render_auditoria() -> None:
             .execute()
             .data
         ) or []
-        s.update(state="complete")
 
     if not revisoes:
         st.info("Nenhuma revisão criada.")

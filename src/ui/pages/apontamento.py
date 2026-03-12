@@ -152,7 +152,12 @@ def _df_to_changes(edited: pd.DataFrame, original: pd.DataFrame, user_id: str | 
 def _fragment_seletores(revisoes: list[dict]) -> tuple[dict | None, str | None, str | None]:
     """Seletor de revisão + grupo + equipamento em fragment isolado."""
     if not revisoes:
-        st.info("Nenhuma revisão criada. Peça ao Admin para criar uma revisão.")
+        empty_state(
+            icon="◑", title="Nenhuma revisão criada",
+            description="Crie uma revisão para começar a registrar tarefas.",
+            action_label="Ir para Revisões", action_key="apt_goto_rev",
+            nav_to="Admin - Revisões",
+        )
         return None, None, None
 
     tenant_id = current_tenant_id()
@@ -183,7 +188,12 @@ def _fragment_seletores(revisoes: list[dict]) -> tuple[dict | None, str | None, 
     # Grupo
     grupos = _load_grupos(tenant_id, ver)
     if not grupos:
-        st.info("Nenhum grupo cadastrado.")
+        empty_state(
+            icon="⊕", title="Nenhum grupo cadastrado",
+            description="Cadastre grupos de equipamentos para organizar as tarefas.",
+            action_label="Ir para Grupos", action_key="apt_goto_grupos",
+            nav_to="Admin - Grupos",
+        )
         return None, None, None
 
     grupo_map   = {g["nome"]: g["id"] for g in grupos}
@@ -228,9 +238,8 @@ def _fragment_editor(tenant_id: str, revisao_id: str, equipamento_id: str) -> No
     """Editor de tarefas em fragment — reroda independentemente dos seletores."""
     ver = str(st.session_state.get("data_version", "0"))
 
-    with st.status("Carregando tarefas…", expanded=False) as s:
+    with st.spinner("", show_time=False):
         tarefas = _load_tarefas(tenant_id, revisao_id, equipamento_id, ver)
-        s.update(label=f"{len(tarefas)} tarefas carregadas", state="complete")
 
     if not tarefas:
         st.warning("Nenhuma tarefa encontrada para este equipamento nesta revisão. "
@@ -385,28 +394,25 @@ def _fragment_editor(tenant_id: str, revisao_id: str, equipamento_id: str) -> No
         import time as _time
         sb = sb_for_user()
         erros = 0
-        with st.status("Salvando...", expanded=True) as s:
+        with st.spinner("Salvando…", show_time=False):
             for ch in list(changes):
                 tid = ch.pop("id")
                 try:
                     sb.table("tarefas_servico").update(ch).eq("id", tid).execute()
-                    s.write("Tarefa salva.")
                 except Exception as e:
                     show_supabase_error(e, f"Tarefa {tid}")
                     erros += 1
-            if erros == 0:
-                s.update(label=f"{n_changes} alteracoes salvas.", state="complete")
-            else:
-                s.update(label=f"{erros} erros ao salvar.", state="error")
 
         st.cache_data.clear()
         st.session_state["data_version"] = str(_time.time())
         if erros == 0:
             st.toast(
-                f"{n_changes} {'alteracao salva' if n_changes == 1 else 'alteracoes salvas'}.",
+                f"✅ {n_changes} {'alteração salva' if n_changes == 1 else 'alterações salvas'}.",
                 icon=":material/check_circle:",
             )
-            st.rerun()
+        else:
+            st.toast(f"⚠️ {erros} erro(s) ao salvar.", icon=":material/error:")
+        st.rerun()
 
 
 # ── Ponto de entrada público ──────────────────────────────────────────────────

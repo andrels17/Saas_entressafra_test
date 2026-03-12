@@ -185,7 +185,7 @@ def _fragment_pendencias(
 
     # ── Query ─────────────────────────────────────────────────────────────────
     sb = sb_for_user()
-    with st.status("Carregando pendências…", expanded=False) as s:
+    with st.spinner("", show_time=False):
         q = (
             sb.table("tarefas_servico")
             .select(
@@ -199,7 +199,6 @@ def _fragment_pendencias(
         if statuses:
             q = q.in_("status", statuses)
         rows = q.order("updated_at", desc=False).limit(int(limit)).execute().data or []
-        s.update(label=f"{len(rows)} registros carregados", state="complete")
 
     # ── Transforma ────────────────────────────────────────────────────────────
     out = []
@@ -392,7 +391,7 @@ def render_gestor_painel() -> None:
     scope_dept_ids, scope_grp_ids = get_user_scope(sb, tenant_id, user_id, role=role)
 
     # Revisão ativa
-    with st.status("Verificando revisão ativa…", expanded=False) as s:
+    with st.spinner("", show_time=False):
         rev = (
             sb.table("revisoes")
             .select("id,titulo,status")
@@ -403,10 +402,14 @@ def render_gestor_painel() -> None:
             .execute()
             .data
         ) or []
-        s.update(state="complete")
 
     if not rev:
-        st.info("Nenhuma revisão ativa.")
+        empty_state(
+            icon="◑", title="Nenhuma revisão ativa",
+            description="Ative uma revisão existente ou crie uma nova para ver as pendências.",
+            action_label="Ir para Revisões", action_key="gestor_goto_rev",
+            nav_to="Admin - Revisões",
+        )
         return
 
     revisao_id = rev[0]["id"]
