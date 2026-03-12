@@ -152,36 +152,27 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
         return y - 8*mm
 
     def kpi_row(items: List[Tuple[str, str, colors.Color]], top_y: float, card_h: float = 20*mm) -> float:
-        """Renderiza uma linha de KPI cards. items = [(label, valor, cor_valor)]
-        Label pode conter emoji no início (ex: '🚫 Travados') — emoji é separado visualmente.
-        """
+        """Renderiza uma linha de KPI cards. items = [(label, valor, cor_valor)]"""
         n = len(items)
         gap = 4*mm
         card_w = (w - 32*mm - gap * (n - 1)) / n
         x0 = 16*mm
         for i, (label, val, val_color) in enumerate(items):
             cx = x0 + i * (card_w + gap)
-            cy = top_y - card_h
+            cy = top_y - card_h          # y base do card (baixo)
             # card base
             c.setFillColor(SURFACE); c.setStrokeColor(BORDER); c.setLineWidth(0.7)
             c.roundRect(cx, cy, card_w, card_h, 5, fill=1, stroke=1)
-            # barra superior colorida
-            c.setFillColor(PRIMARY); c.rect(cx, top_y - 2.5, card_w, 2.5, fill=1, stroke=0)
-            # separa emoji do texto para evitar colisão
-            parts  = label.split(" ", 1)
-            emoji  = parts[0] if len(parts) > 1 else ""
-            text   = parts[1] if len(parts) > 1 else parts[0]
-            # label texto (sem emoji) no topo do card
+            # barra superior colorida (topo absoluto do card)
+            c.setFillColor(PRIMARY)
+            c.rect(cx, cy + card_h - 2.5, card_w, 2.5, fill=1, stroke=0)
+            # label — posição fixa a 5mm abaixo do topo
             c.setFillColor(MUTED); c.setFont("Helvetica", 7.5)
-            c.drawString(cx + 6, top_y - 8*mm, text)
-            # valor numérico bem posicionado no centro-baixo
-            c.setFillColor(val_color); c.setFont("Helvetica-Bold", 16)
-            c.drawString(cx + 6, cy + 4*mm, val)
-            # emoji pequeno no canto superior direito do card
-            if emoji:
-                c.setFont("Helvetica", 9)
-                c.drawRightString(cx + card_w - 4, top_y - 6*mm, emoji)
-        return top_y - card_h - 6*mm
+            c.drawString(cx + 5, cy + card_h - 7*mm, label)
+            # valor numérico — posição fixa a 5mm acima da base
+            c.setFillColor(val_color); c.setFont("Helvetica-Bold", 15)
+            c.drawString(cx + 5, cy + 4*mm, val)
+        return top_y - card_h - 5*mm
 
     def progress_bar(x: float, y: float, bar_w: float, bar_h: float, pct: int):
         pct_c = max(0, min(100, pct))
@@ -244,10 +235,10 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
     # KPIs alertas
     y = kpi_row([
         ("Travados",    str(payload.n_travados),    RED   if payload.n_travados    else MUTED),
-        ("Sem início",  str(payload.n_sem_inicio),  YELLOW if payload.n_sem_inicio else MUTED),
+        ("Sem inicio",  str(payload.n_sem_inicio),  YELLOW if payload.n_sem_inicio else MUTED),
         ("Parados",     str(payload.n_parados),     YELLOW if payload.n_parados    else MUTED),
         ("Risco prazo", str(payload.n_risco_prazo), RED   if payload.n_risco_prazo else MUTED),
-    ], top_y=y, card_h=16*mm)
+    ], top_y=y, card_h=20*mm)
 
     # Comparativo S-1 vs S atual — inline na capa
     y -= 2*mm
