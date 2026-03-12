@@ -13,6 +13,7 @@ from src.ui.core.sidebar_display import get_display_names, role_label
 from src.ui.core.login import render_login
 from src.ui.core.setup_wizard import render_setup_wizard
 from src.ui.core.page_registry import PageKey, PAGES, NAV_CONFIG, get_pages_for_role, get_menu_pages
+from src.ui.core.sidebar_counts import sidebar_badges
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 from src.auth.roles import Role
@@ -82,11 +83,16 @@ def _render_sidebar(pages: list[str], current_page: str, role: str, user_id: str
         }.get(rnorm, "role-user")
         avatar = (uname[:1] or "U").upper()
 
-        # ── Logo clicável (#4) ── usa st.image(link=) se existir URL de logo do tenant
+        # ── Badges de contagem ────────────────────────────────────────────────
+        try:
+            badges = sidebar_badges()
+        except Exception:
+            badges = {"gestor_travados": 0, "apont_pendentes": 0, "auditoria_24h": 0}
+
+        # ── Logo clicável ─────────────────────────────────────────────────────
         logo_url = st.session_state.get("tenant_logo_url")
         if logo_url:
             st.image(logo_url, width=140, use_container_width=False)
-            # Botão transparente para navegar ao Início ao clicar na logo
             if st.button("🌾 " + app_name, key="sb_logo_home_btn", use_container_width=True, type="tertiary"):
                 st.session_state["__nav_to"] = "Início"
                 st.rerun()
@@ -105,6 +111,8 @@ def _render_sidebar(pages: list[str], current_page: str, role: str, user_id: str
                 """,
                 unsafe_allow_html=True,
             )
+
+        # ── Usuário + role ────────────────────────────────────────────────────
         st.markdown(
             f"""
             <div class="sb-userrow" style="margin-top:6px">
@@ -121,13 +129,20 @@ def _render_sidebar(pages: list[str], current_page: str, role: str, user_id: str
             unsafe_allow_html=True,
         )
 
-        current_label = NAV_CONFIG.get(current_page, ("", "core", current_page))[2]
-        st.markdown(f'<div class="sb-current">Página atual: <strong>{current_label}</strong></div>', unsafe_allow_html=True)
+        # ── Chip de revisão ativa ─────────────────────────────────────────────
+        _rev_titulo = st.session_state.get("_sidebar_rev_titulo")
+        _rev_semana = st.session_state.get("_sidebar_rev_semana")
+        if _rev_titulo:
+            sem_txt = f" · Sem. {_rev_semana}" if _rev_semana else ""
+            st.markdown(
+                f'<div class="sb-revisao-chip">📋 {_rev_titulo}{sem_txt}</div>',
+                unsafe_allow_html=True,
+            )
 
         if not mobile:
             st.markdown(
                 '<div class="sb-footer"><div class="sb-footer-title">Sessão</div>'
-                '<div class="sb-footer-text">Navegue pelo menu lateral e finalize sua sessão com segurança ao sair.</div></div>',
+                '<div class="sb-footer-text">Navegue pelo menu lateral e encerre sua sessão ao sair.</div></div>',
                 unsafe_allow_html=True,
             )
             if st.button("Sair", icon=":material/logout:", key="sidebar_logout", use_container_width=True, type="tertiary"):
@@ -136,9 +151,18 @@ def _render_sidebar(pages: list[str], current_page: str, role: str, user_id: str
         core_pages  = [p for p in pages if NAV_CONFIG.get(p, ("", "core", ""))[1] == "core"]
         admin_pages = [p for p in pages if NAV_CONFIG.get(p, ("", "core", ""))[1] == "admin"]
 
+        # Mapa de badges por página
+        _page_badges: dict[str, int] = {
+            "Painel do Gestor": badges.get("gestor_travados", 0),
+            "Apontamento":      badges.get("apont_pendentes", 0),
+            "Auditoria":        badges.get("auditoria_24h", 0),
+        }
+
         def _fmt(page: str) -> str:
             icon, _, label = NAV_CONFIG.get(page, ("•", "core", page))
-            return f"{icon}  {label}"
+            cnt = _page_badges.get(page, 0)
+            badge = f"  ({cnt})" if cnt > 0 else ""
+            return f"{icon}  {label}{badge}"
 
         def _nav_button(page: str, prefix: str) -> bool:
             return st.button(
