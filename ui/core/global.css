@@ -1,0 +1,444 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ── Variáveis ──────────────────────────────────────────────────── */
+:root {
+  --bg:        #0C1612;
+  --surface:   #0F3D2E;
+  --card:      #12251D;
+  --card-hi:   #145C43;
+  --border:    rgba(255,255,255,0.08);
+  --border-hi: rgba(255,255,255,0.14);
+  --text:      #F5F5F5;
+  --muted:     #B8C2BD;
+  --dim:       #6B7A73;
+  /* Mantemos vermelho apenas para erros/alertas (não como cor de marca) */
+  --danger:    #C53030;
+  --danger-glow:  rgba(197,48,48,0.16);
+  --danger-dark:  #7B1F1F;
+  --green:     #2F855A;
+  --yellow:    #FFD100;
+  --blue:      #2B6CB0;
+  --accent:    #FFD100;
+  --font:      'DM Sans', system-ui, sans-serif;
+  --mono:      'JetBrains Mono', monospace;
+}
+
+/* ── Reset / Base ───────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+.stApp {
+    background: var(--bg) !important;
+    color: var(--text) !important;
+    font-family: var(--font) !important;
+}
+.block-container {
+    padding-top: 0 !important;
+    padding-bottom: 2rem !important;
+    max-width: 1380px !important;
+}
+header[data-testid="stHeader"] { background: transparent !important; box-shadow: none !important; }
+#MainMenu, footer, .stDeployButton { visibility: hidden !important; display: none !important; }
+div[data-testid="stDecoration"] { display: none !important; }
+
+/* ── Sidebar ────────────────────────────────────────────────────── */
+section[data-testid="stSidebar"] {
+    background: var(--surface) !important;
+    border-right: 1px solid var(--border) !important;
+    width: 230px !important;
+}
+section[data-testid="stSidebar"] > div { padding: 0 !important; }
+/* Oculta o selectbox padrão (usamos nav customizada) */
+section[data-testid="stSidebar"] .stSelectbox { display: none !important; }
+section[data-testid="stSidebar"] .stCheckbox { display: none !important; }
+
+/* ── Nav Links (botões do sidebar) ──────────────────────────────── */
+.nav-logo {
+    padding: 20px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+}
+.nav-logo-inner {
+    display: flex; align-items: center; gap: 10px;
+}
+.nav-logo-icon {
+    width: 32px; height: 32px;
+    background: linear-gradient(135deg, #145C43, #0F3D2E);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.95rem;
+    box-shadow: 0 3px 12px rgba(255,209,0,0.18);
+    flex-shrink: 0;
+}
+.nav-logo-text {
+    font-size: 1rem; font-weight: 800;
+    color: var(--text); letter-spacing: -0.3px;
+}
+.nav-logo-text em { color: var(--accent); font-style: normal; }
+.nav-badge {
+    display: inline-block;
+    font-size: 0.58rem; font-weight: 700;
+    background: rgba(255,209,0,0.12);
+    border: 1px solid rgba(255,209,0,0.28);
+    color: var(--accent);
+    padding: 1px 6px; border-radius: 999px;
+    letter-spacing: 0.07em; margin-top: 3px;
+}
+.nav-section-label {
+    padding: 10px 20px 4px;
+    font-size: 0.60rem; font-weight: 700;
+    color: var(--dim); letter-spacing: 0.12em; text-transform: uppercase;
+}
+/* Item de nav — estilo via botão do Streamlit */
+section[data-testid="stSidebar"] .stButton > button {
+    width: 100% !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 8px !important;
+    padding: 0.42rem 0.75rem !important;
+    text-align: left !important;
+    color: var(--muted) !important;
+    font-size: 0.82rem !important;
+    font-weight: 500 !important;
+    font-family: var(--font) !important;
+    transition: background 0.15s, color 0.15s !important;
+    margin: 1px 10px !important;
+    width: calc(100% - 20px) !important;
+}
+section[data-testid="stSidebar"] .stButton > button:hover {
+    background: rgba(255,255,255,0.05) !important;
+    color: var(--text) !important;
+}
+/* Active nav item — classe injetada via HTML+JS via button label trick */
+section[data-testid="stSidebar"] .stButton > button.nav-active,
+section[data-testid="stSidebar"] .nav-btn-active > button {
+    background: linear-gradient(90deg, rgba(255,209,0,0.16), rgba(20,92,67,0.08)) !important;
+    color: var(--text) !important;
+    border-left: 2px solid var(--yellow) !important;
+    border-radius: 0 8px 8px 0 !important;
+    margin-left: 10px !important;
+    width: calc(100% - 10px) !important;
+}
+.nav-footer {
+    padding: 14px 20px;
+    border-top: 1px solid var(--border);
+    margin-top: auto;
+}
+.nav-user-info {
+    display: flex; align-items: center; gap: 9px;
+}
+.nav-avatar {
+    width: 28px; height: 28px;
+    background: linear-gradient(135deg, var(--card-hi), var(--card));
+    border: 1px solid var(--border-hi);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.70rem; font-weight: 700; color: var(--muted);
+    flex-shrink: 0;
+}
+.nav-user-name { font-size: 0.76rem; font-weight: 600; color: var(--text); }
+.nav-user-role { font-size: 0.68rem; color: var(--dim); }
+
+/* ── Topbar ─────────────────────────────────────────────────────── */
+.ea-topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px 12px;
+    background: linear-gradient(90deg, var(--surface) 0%, rgba(12,17,26,0.7) 100%);
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+}
+.ea-breadcrumb {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 0.78rem; color: var(--dim);
+}
+.ea-breadcrumb strong { color: var(--text); font-weight: 600; }
+.ea-breadcrumb .sep { color: var(--dim); }
+
+/* ── Page Header ────────────────────────────────────────────────── */
+.page-header {
+    display: flex; align-items: flex-start; gap: 14px;
+    padding: 0 0 20px 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 22px;
+}
+.page-header-icon {
+    width: 40px; height: 40px; flex-shrink: 0;
+    background: linear-gradient(135deg, rgba(255,209,0,0.18), rgba(20,92,67,0.06));
+    border: 1px solid rgba(255,209,0,0.22);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.2rem;
+    color: var(--accent);
+}
+.page-header-text {}
+.page-header-title {
+    font-size: 1.3rem; font-weight: 800;
+    color: var(--text); letter-spacing: -0.4px; line-height: 1.2;
+}
+.page-header-sub {
+    font-size: 0.78rem; color: var(--muted);
+    margin-top: 3px; line-height: 1.5;
+}
+
+/* ── Cards KPI ──────────────────────────────────────────────────── */
+.ea-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s, transform 0.2s;
+}
+.ea-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0;
+    width: 3px; height: 100%;
+    background: var(--accent-color, var(--accent));
+    border-radius: 12px 0 0 12px;
+}
+.ea-card:hover {
+    border-color: var(--border-hi);
+    transform: translateY(-1px);
+}
+.ea-title {
+    font-size: 0.70rem; font-weight: 600;
+    color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;
+    margin-bottom: 6px;
+}
+.ea-value {
+    font-size: 1.75rem; font-weight: 800;
+    color: var(--text); line-height: 1.1;
+    font-family: var(--mono);
+}
+.ea-sub { font-size: 0.74rem; color: var(--muted); margin-top: 5px; }
+
+/* ── Tabs ───────────────────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+    background: transparent !important;
+    gap: 4px;
+    border-bottom: 1px solid var(--border) !important;
+    padding-bottom: 0 !important;
+}
+.stTabs [data-baseweb="tab"] {
+    background: transparent !important;
+    border: none !important;
+    border-bottom: 2px solid transparent !important;
+    color: var(--muted) !important;
+    font-size: 0.82rem !important;
+    font-weight: 500 !important;
+    padding: 8px 14px !important;
+    border-radius: 0 !important;
+    margin-bottom: -1px !important;
+    font-family: var(--font) !important;
+    transition: color 0.15s !important;
+}
+.stTabs [data-baseweb="tab"]:hover { color: var(--text) !important; }
+.stTabs [aria-selected="true"] {
+    color: var(--text) !important;
+    border-bottom: 2px solid var(--accent) !important;
+    font-weight: 700 !important;
+}
+.stTabs [data-baseweb="tab-panel"] {
+    padding: 18px 0 0 0 !important;
+}
+
+/* ── Inputs ─────────────────────────────────────────────────────── */
+input, textarea, select {
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid var(--border-hi) !important;
+    border-radius: 8px !important;
+    color: var(--text) !important;
+    font-family: var(--font) !important;
+    font-size: 0.88rem !important;
+    transition: border-color 0.18s, box-shadow 0.18s !important;
+}
+input:focus, textarea:focus {
+    border-color: rgba(255,209,0,0.55) !important;
+    box-shadow: 0 0 0 3px rgba(255,209,0,0.12) !important;
+    outline: none !important;
+}
+.stSelectbox div[data-baseweb="select"] > div {
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid var(--border-hi) !important;
+    border-radius: 8px !important;
+}
+label { font-size: 0.78rem !important; color: var(--muted) !important; font-weight: 600 !important; letter-spacing: 0.02em !important; }
+
+/* ── Botões ─────────────────────────────────────────────────────── */
+/* ── Botões (Enterprise Açúcar Alegre) ─────────────────────────── */
+.stButton > button {
+    border-radius: 10px !important;
+    padding: 0.56rem 1.1rem !important;
+    font-weight: 650 !important;
+    font-size: 0.86rem !important;
+    font-family: var(--font) !important;
+    border: 1px solid var(--border-hi) !important;
+    background: var(--card) !important;
+    color: var(--text) !important;
+    min-height: 42px !important;
+    width: 100% !important;
+    transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease !important;
+}
+.stButton > button:hover {
+    border-color: rgba(255,209,0,0.35) !important;
+    background: rgba(255,209,0,0.10) !important;
+    color: var(--text) !important;
+}
+/* Primário: amarelo institucional */
+button[kind="primary"], .stButton > button[kind="primary"] {
+    background: var(--accent) !important;
+    border: 1px solid rgba(255,209,0,0.35) !important;
+    color: #0F3D2E !important;
+    box-shadow: 0 4px 16px rgba(255,209,0,0.20) !important;
+}
+button[kind="primary"]:hover, .stButton > button[kind="primary"]:hover {
+    background: #FFE55C !important;
+    box-shadow: 0 6px 22px rgba(255,209,0,0.28) !important;
+    transform: translateY(-1px) !important;
+}
+/* Secundário (ex.: desativar) */
+button[kind="secondary"], .stButton > button[kind="secondary"] {
+    background: rgba(20,92,67,0.35) !important;
+    border: 1px solid rgba(255,255,255,0.10) !important;
+    color: var(--text) !important;
+}
+button[kind="secondary"]:hover, .stButton > button[kind="secondary"]:hover {
+    background: rgba(20,92,67,0.55) !important;
+}
+
+/* ── Toggles / Progress (remover vermelho padrão) ─────────────── */
+div[data-baseweb="toggle"] > div { background-color: rgba(20,92,67,0.55) !important; }
+div[data-baseweb="toggle"][aria-checked="true"] > div { background-color: var(--accent) !important; }
+div[data-testid="stProgress"] > div > div > div { background-color: var(--accent) !important; }
+
+/* ── DataFrames ─────────────────────────────────────────────────── */
+[data-testid="stDataFrame"] {
+    border: 1px solid var(--border) !important;
+    border-radius: 10px !important;
+    overflow: hidden !important;
+}
+[data-testid="stDataFrame"] th {
+    background: var(--card) !important;
+    color: var(--muted) !important;
+    font-size: 0.74rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.06em !important;
+}
+[data-testid="stDataFrame"] td { font-size: 0.86rem !important; }
+
+/* ── Formulários ────────────────────────────────────────────────── */
+[data-testid="stForm"] {
+    background: var(--card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 12px !important;
+    padding: 18px 20px !important;
+}
+
+/* ── Expanders ──────────────────────────────────────────────────── */
+details {
+    background: var(--card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 10px !important;
+    padding: 4px 10px !important;
+}
+
+/* ── Info / Warning / Error / Success ───────────────────────────── */
+[data-testid="stAlert"] {
+    border-radius: 10px !important;
+    border-left: 3px solid !important;
+    font-size: 0.85rem !important;
+}
+
+/* ── Divider ────────────────────────────────────────────────────── */
+.ea-divider { height: 1px; background: var(--border); margin: 18px 0; }
+hr { border-color: var(--border) !important; margin: 18px 0 !important; }
+
+/* ── Pills ──────────────────────────────────────────────────────── */
+.ea-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 999px;
+    border: 1px solid var(--border-hi);
+    background: rgba(255,255,255,0.04);
+    color: var(--muted); font-size: 0.74rem; font-weight: 500;
+}
+.ea-pill-ok   { border-color:rgba(56,161,105,0.35); background:rgba(56,161,105,0.10); color:#68D391; }
+.ea-pill-warn { border-color:rgba(214,158,46,0.35); background:rgba(214,158,46,0.10); color:#F6E05E; }
+/* Evita vermelho na UI (use o vermelho apenas em st.error) */
+.ea-pill-err  { border-color:rgba(255,209,0,0.35);  background:rgba(255,209,0,0.10);  color:var(--accent); }
+.ea-pill-blue { border-color:rgba(49,130,206,0.35); background:rgba(49,130,206,0.10); color:#63B3ED; }
+
+/* ── Status chips ───────────────────────────────────────────────── */
+.chip { display:inline-block; padding:2px 9px; border-radius:6px; font-size:0.72rem; font-weight:600; }
+.chip-pend { background:rgba(214,158,46,0.15); color:#F6E05E; }
+.chip-ok   { background:rgba(56,161,105,0.15); color:#68D391; }
+.chip-run  { background:rgba(49,130,206,0.15); color:#63B3ED; }
+.chip-blk  { background:rgba(255,209,0,0.16);  color:var(--accent); }
+.chip-na   { background:rgba(74,85,104,0.30);  color:#718096; }
+
+/* ── Spacing ────────────────────────────────────────────────────── */
+div[data-testid="stVerticalBlock"] > div { margin-bottom: 0.45rem; }
+
+/* ── Mobile ─────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .block-container { padding-left: 0.8rem !important; padding-right: 0.8rem !important; }
+}
+
+/* ── Helpers ─────────────────────────────────────────────────────── */
+.muted  { color: var(--muted) !important; }
+.mono   { font-family: var(--mono) !important; }
+
+/* ── Nav item ativo (injetado via data-active no label do botao) ──── */
+/* A sidebar_display.py injeta um wrapper .nav-btn-active ao redor do
+   botao da pagina atual, ativando este estilo automaticamente.        */
+section[data-testid="stSidebar"] .nav-btn-active > div > button {
+    background: linear-gradient(90deg, rgba(255,209,0,0.16), rgba(20,92,67,0.06)) !important;
+    color: var(--text) !important;
+    border-left: 2px solid var(--yellow) !important;
+    border-radius: 0 8px 8px 0 !important;
+    margin-left: 10px !important;
+    width: calc(100% - 10px) !important;
+    font-weight: 700 !important;
+}
+
+/* ── Legenda de escala de risco ─────────────────────────────────── */
+.risk-legend {
+    display: flex; gap: 1rem; align-items: center;
+    font-size: 0.72rem; color: var(--dim);
+    padding: 6px 0;
+}
+.risk-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    display: inline-block; margin-right: 4px;
+}
+.risk-dot-low  { background: #38A169; }
+.risk-dot-mid  { background: #D69E2E; }
+.risk-dot-high { background: #C53030; }
+
+/* ── Empty state ────────────────────────────────────────────────── */
+.es-wrap {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 3rem 1rem; text-align: center;
+    border: 1px dashed var(--border-hi);
+    border-radius: 12px;
+    background: var(--card);
+    margin: 1rem 0;
+}
+.es-icon  { font-size: 1.8rem; color: var(--dim); margin-bottom: 0.8rem; opacity: 0.65; }
+.es-title { font-size: 1rem; font-weight: 700; color: var(--muted); margin-bottom: 0.3rem; }
+.es-desc  { font-size: 0.82rem; color: var(--dim); max-width: 380px; line-height: 1.55; margin-bottom: 1.2rem; }
+
+/* ── Page header actions slot ───────────────────────────────────── */
+.page-header-actions { display: flex; justify-content: flex-end; align-items: flex-start; gap: 6px; }
+
+/* ── Confirmacao dialog ─────────────────────────────────────────── */
+[data-testid="stModal"] .stButton > button[kind="primary"] {
+    background: var(--accent) !important;
+    color: #0F3D2E !important;
+}
+
+/* ── Mobile KPI columns: evita compressao com 5+ colunas ─────────── */
+@media (max-width: 768px) {
+    [data-testid="column"]:has(.stMetric) {
+        min-width: 120px !important;
+    }
+}
