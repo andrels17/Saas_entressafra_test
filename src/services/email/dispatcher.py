@@ -300,6 +300,7 @@ def _build_payload(
 
             all_equipamentos.append({
                 "frota": frota, "modelo": modelo, "grupo": grupo_nome,
+                "grupo_id": gid,
                 "pct": pct, "pct_anterior": pct_anterior, "status": status_eq,
             })
 
@@ -316,6 +317,22 @@ def _build_payload(
 
     pct_geral = max(0, min(100, round(total_done / max(total_expected, 1) * 100)))
     n_equipamentos = sum(len(v) for v in eq_por_grupo.values())
+
+    # pct por grupo — para cabeçalho de seção no PDF
+    grupo_pct: dict[str, int] = {}
+    for gid in grupo_ids:
+        eq_c  = len(eq_por_grupo.get(gid, []))
+        svc_c = svc_por_grupo.get(gid, 0)
+        if eq_c > 0 and svc_c > 0:
+            done_g     = done_by_grupo.get(gid, 0)
+            expected_g = eq_c * svc_c * 3
+            grupo_pct[gid] = max(0, min(100, round(done_g / expected_g * 100)))
+        else:
+            grupo_pct[gid] = 0
+
+    # injeta grupo_pct em cada equipamento
+    for eq in all_equipamentos:
+        eq["grupo_pct"] = grupo_pct.get(eq.get("grupo_id", ""), 0)
 
     # ── evolução semanal ───────────────────────────────────────────────────────
     evolucao: list[SemanaSnapshot] = []
