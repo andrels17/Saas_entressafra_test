@@ -152,23 +152,36 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
         return y - 8*mm
 
     def kpi_row(items: List[Tuple[str, str, colors.Color]], top_y: float, card_h: float = 20*mm) -> float:
-        """Renderiza uma linha de KPI cards. items = [(label, valor, cor_valor)]"""
+        """Renderiza uma linha de KPI cards. items = [(label, valor, cor_valor)]
+        Label pode conter emoji no início (ex: '🚫 Travados') — emoji é separado visualmente.
+        """
         n = len(items)
         gap = 4*mm
-        total_gap = gap * (n-1)
-        card_w = (w - 32*mm - total_gap) / n
+        card_w = (w - 32*mm - gap * (n - 1)) / n
         x0 = 16*mm
         for i, (label, val, val_color) in enumerate(items):
-            cx = x0 + i*(card_w + gap)
+            cx = x0 + i * (card_w + gap)
             cy = top_y - card_h
+            # card base
             c.setFillColor(SURFACE); c.setStrokeColor(BORDER); c.setLineWidth(0.7)
             c.roundRect(cx, cy, card_w, card_h, 5, fill=1, stroke=1)
-            c.setFillColor(PRIMARY); c.rect(cx, top_y-2.5, card_w, 2.5, fill=1, stroke=0)
-            c.setFillColor(MUTED); c.setFont("Helvetica", 8)
-            c.drawString(cx+6, top_y-8*mm, label)
-            c.setFillColor(val_color); c.setFont("Helvetica-Bold", 18)
-            c.drawString(cx+6, cy+5*mm, val)
-        return top_y - card_h - 8*mm
+            # barra superior colorida
+            c.setFillColor(PRIMARY); c.rect(cx, top_y - 2.5, card_w, 2.5, fill=1, stroke=0)
+            # separa emoji do texto para evitar colisão
+            parts  = label.split(" ", 1)
+            emoji  = parts[0] if len(parts) > 1 else ""
+            text   = parts[1] if len(parts) > 1 else parts[0]
+            # label texto (sem emoji) no topo do card
+            c.setFillColor(MUTED); c.setFont("Helvetica", 7.5)
+            c.drawString(cx + 6, top_y - 8*mm, text)
+            # valor numérico bem posicionado no centro-baixo
+            c.setFillColor(val_color); c.setFont("Helvetica-Bold", 16)
+            c.drawString(cx + 6, cy + 4*mm, val)
+            # emoji pequeno no canto superior direito do card
+            if emoji:
+                c.setFont("Helvetica", 9)
+                c.drawRightString(cx + card_w - 4, top_y - 6*mm, emoji)
+        return top_y - card_h - 6*mm
 
     def progress_bar(x: float, y: float, bar_w: float, bar_h: float, pct: int):
         pct_c = max(0, min(100, pct))
@@ -230,10 +243,10 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
 
     # KPIs alertas
     y = kpi_row([
-        ("🚫 Travados",    str(payload.n_travados),   RED   if payload.n_travados   else MUTED),
-        ("⬜ Sem início",  str(payload.n_sem_inicio), MUTED if not payload.n_sem_inicio else YELLOW),
-        ("⏸ Parados",     str(payload.n_parados),    MUTED if not payload.n_parados    else YELLOW),
-        ("⚠️ Risco prazo", str(payload.n_risco_prazo),MUTED if not payload.n_risco_prazo else RED),
+        ("Travados",    str(payload.n_travados),    RED   if payload.n_travados    else MUTED),
+        ("Sem início",  str(payload.n_sem_inicio),  YELLOW if payload.n_sem_inicio else MUTED),
+        ("Parados",     str(payload.n_parados),     YELLOW if payload.n_parados    else MUTED),
+        ("Risco prazo", str(payload.n_risco_prazo), RED   if payload.n_risco_prazo else MUTED),
     ], top_y=y, card_h=16*mm)
 
     # Comparativo S-1 vs S atual — inline na capa
@@ -699,45 +712,67 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
                 y -= row_h
 
     # ── PÁGINA 4: Resumo de alertas ───────────────────────────────────────────
+    footer(); c.showPage()
     new_page("Resumo de Alertas")
     y = h - 52*mm
 
     alert_items = [
-        ("🚫 Travados sem resolução",      payload.n_travados,   RED,   "Tarefas com status travado sem atualização recente."),
-        ("⬜ Sem nenhum apontamento",      payload.n_sem_inicio, MUTED, "Tarefas onde D/R/M nunca foram marcados."),
-        ("⏸ Parados (sem atualização)",   payload.n_parados,    YELLOW,"Tarefas em andamento sem atualização no período."),
-        ("⚠️ Em risco de não concluir",   payload.n_risco_prazo,RED,   "Progresso abaixo da meta linear da semana."),
+        ("Travados",          payload.n_travados,    RED,    "Status travado sem atualização recente."),
+        ("Sem apontamento",   payload.n_sem_inicio,  YELLOW, "Etapas D/R/M nunca iniciadas."),
+        ("Parados",           payload.n_parados,     YELLOW, "Em andamento sem atualização no período."),
+        ("Risco de prazo",    payload.n_risco_prazo, RED,    "Progresso abaixo da meta linear da semana."),
     ]
 
-    for title_a, count, col, desc in alert_items:
-        if y < 40*mm:
-            footer(); c.showPage(); new_page("Alertas (cont.)"); y = h-52*mm
+    # Grid 2×2
+    card_w_a = (w - 36*mm) / 2
+    card_h_a = 24*mm
+    gap_a    = 4*mm
 
-        # card de alerta
-        card_h = 22*mm
+    for idx, (title_a, count, col, desc) in enumerate(alert_items):
+        col_i = idx % 2
+        row_i = idx // 2
+        cx = 16*mm + col_i * (card_w_a + gap_a)
+        cy = y - row_i * (card_h_a + gap_a) - card_h_a
+
         c.setFillColor(SURFACE); c.setStrokeColor(BORDER); c.setLineWidth(0.7)
-        c.roundRect(16*mm, y-card_h, w-32*mm, card_h, 5, fill=1, stroke=1)
-        # borda colorida lateral esquerda
+        c.roundRect(cx, cy, card_w_a, card_h_a, 5, fill=1, stroke=1)
+        # barra superior colorida
         c.setFillColor(col)
-        c.rect(16*mm, y-card_h, 3, card_h, fill=1, stroke=0)
+        c.rect(cx, cy + card_h_a - 3, card_w_a, 3, fill=1, stroke=0)
+        # número grande
+        c.setFillColor(col); c.setFont("Helvetica-Bold", 26)
+        c.drawString(cx + 6, cy + 6*mm, str(count))
+        # título
+        c.setFillColor(FG); c.setFont("Helvetica-Bold", 9)
+        c.drawString(cx + 6, cy + card_h_a - 8*mm, title_a)
+        # descrição
+        c.setFillColor(MUTED); c.setFont("Helvetica", 7.5)
+        c.drawString(cx + 6, cy + 3*mm, desc)
+        # badge OK
+        if count == 0:
+            c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 8)
+            c.drawRightString(cx + card_w_a - 5, cy + 6*mm, "OK")
 
-        # número
-        c.setFillColor(col); c.setFont("Helvetica-Bold", 22)
-        c.drawString(24*mm, y-15*mm, str(count))
+    y -= 2 * (card_h_a + gap_a) + 4*mm
 
-        # título e descrição
-        c.setFillColor(FG); c.setFont("Helvetica-Bold", 10)
-        c.drawString(40*mm, y-7*mm, title_a)
-        c.setFillColor(MUTED); c.setFont("Helvetica", 8.5)
-        c.drawString(40*mm, y-13*mm, desc)
-
-        # badge ok/alerta
-        badge_txt = "OK" if count == 0 else f"{count} item{'s' if count > 1 else ''}"
-        badge_col = GREEN if count == 0 else col
-        c.setFillColor(badge_col); c.setFont("Helvetica-Bold", 8.5)
-        c.drawRightString(w-20*mm, y-10*mm, badge_txt)
-
-        y -= card_h + 4*mm
+    # Legenda de status inline abaixo dos cards
+    y -= 4*mm
+    c.setFillColor(FG); c.setFont("Helvetica-Bold", 9)
+    c.drawString(16*mm, y, "Legenda de status — faixa lateral nas listas de equipamentos")
+    y -= 7*mm
+    for s_col, s_label, s_desc in [
+        (RED,    "Crítico",       "0% ou travado — requer ação imediata"),
+        (YELLOW, "Em andamento",  "Iniciado mas não concluído"),
+        (GREEN,  "Concluído",     "100% das etapas D+R+M finalizadas"),
+        (MUTED,  "Sem template",  "Grupo sem serviços configurados"),
+    ]:
+        c.setFillColor(s_col)
+        c.roundRect(16*mm, y - 4*mm, 8, 4*mm, 2, fill=1, stroke=0)
+        c.setFillColor(FG); c.setFont("Helvetica-Bold", 8)
+        c.drawString(20*mm, y - 1*mm, s_label)
+        c.setFillColor(MUTED); c.setFont("Helvetica", 8)
+        c.drawString(40*mm, y - 1*mm, s_desc)
+        y -= 7*mm
 
     # Rodapé da página de alertas
     y -= 4*mm
