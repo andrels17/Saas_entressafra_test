@@ -378,6 +378,8 @@ def _build_payload(
         n_equipamentos=n_equipamentos,
         n_concluidos=n_concluidos,
         n_alertas_total=n_alertas_total,
+        done_steps=total_done,
+        expected_steps=total_expected,
         evolucao=evolucao,
         pct_semana_anterior=pct_semana_anterior,
         pct_semana_atual=pct_semana_atual,
@@ -589,14 +591,21 @@ def dispatch_relatorio_semanal(
                         top_criticos=top_criticos,
                         top_melhores=top_melhores,
                         maiores_evolucoes=maiores_evolucoes,
+                        _done_steps=p.done_steps,
+                        _expected_steps=p.expected_steps,
                     ))
                 except Exception as e_g:
                     _log(f"    ↳ Aviso: erro ao montar snapshot de {grp.departamento_nome}: {e_g}")
 
             if dept_snapshots:
+                # pct_global ponderado: sum(done_steps) / sum(expected_steps)
+                # idêntico à fórmula do kpi_engine — evita distorção por deptos de tamanhos diferentes
+                total_done_g     = sum(getattr(s, "_done_steps",     0) for s in dept_snapshots)
+                total_expected_g = sum(getattr(s, "_expected_steps", 0) for s in dept_snapshots)
                 pct_global = (
-                    round(sum(d.pct_geral for d in dept_snapshots) / len(dept_snapshots))
-                    if dept_snapshots else 0
+                    max(0, min(100, round(total_done_g / total_expected_g * 100)))
+                    if total_expected_g > 0
+                    else round(sum(d.pct_geral for d in dept_snapshots) / max(len(dept_snapshots), 1))
                 )
                 n_equip_total   = sum(d.n_equipamentos for d in dept_snapshots)
                 n_equip_concl   = sum(d.n_concluidos   for d in dept_snapshots)

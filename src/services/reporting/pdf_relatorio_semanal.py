@@ -80,6 +80,8 @@ class RelatorioDeptPayload:
     n_equipamentos: int
     n_concluidos: int               # equipamentos 100%
     n_alertas_total: int
+    done_steps: int = 0             # etapas concluídas (para pct_global ponderado)
+    expected_steps: int = 0         # etapas esperadas  (para pct_global ponderado)
     # evolução semanal
     evolucao: List[SemanaSnapshot]
     # comparativo

@@ -55,6 +55,8 @@ class DeptSnapshot:
     top_criticos: list[dict]       # [{frota, modelo, pct, status}] — menor %
     top_melhores: list[dict]       # [{frota, modelo, pct, pct_anterior}] — maior %, quase concluídos
     maiores_evolucoes: list[dict]  # [{frota, modelo, pct, pct_anterior}] — maior delta semana
+    _done_steps: int = 0           # para cálculo ponderado do pct_global
+    _expected_steps: int = 0       # para cálculo ponderado do pct_global
 
 
 @dataclass
