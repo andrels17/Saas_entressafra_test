@@ -569,6 +569,10 @@ def dispatch_relatorio_semanal(
                         [e for e in todos if e.get("pct", 0) < 100],
                         key=lambda e: e.get("pct", 0)
                     )[:3]
+                    top_melhores = sorted(
+                        [e for e in todos if e.get("pct", 0) < 100],
+                        key=lambda e: -e.get("pct", 0)
+                    )[:3]
                     maiores_evolucoes = sorted(
                         [e for e in todos if e.get("pct", 0) - int(e.get("pct_anterior", 0)) > 0],
                         key=lambda e: -(e.get("pct", 0) - int(e.get("pct_anterior", 0)))
@@ -583,6 +587,7 @@ def dispatch_relatorio_semanal(
                         n_sem_inicio=p.n_sem_inicio,
                         n_risco_prazo=p.n_risco_prazo,
                         top_criticos=top_criticos,
+                        top_melhores=top_melhores,
                         maiores_evolucoes=maiores_evolucoes,
                     ))
                 except Exception as e_g:

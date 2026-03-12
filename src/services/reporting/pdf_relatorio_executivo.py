@@ -52,8 +52,9 @@ class DeptSnapshot:
     n_travados: int
     n_sem_inicio: int
     n_risco_prazo: int
-    top_criticos: list[dict]       # [{frota, modelo, pct, status}]
-    maiores_evolucoes: list[dict]  # [{frota, modelo, pct, pct_anterior}]
+    top_criticos: list[dict]       # [{frota, modelo, pct, status}] — menor %
+    top_melhores: list[dict]       # [{frota, modelo, pct, pct_anterior}] — maior %, quase concluídos
+    maiores_evolucoes: list[dict]  # [{frota, modelo, pct, pct_anterior}] — maior delta semana
 
 
 @dataclass
@@ -105,6 +106,13 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
 
     def delta_str(d: int) -> str:
         return f"+{d}p.p." if d > 0 else f"{d}p.p."
+
+    def section_title(txt: str, y: float) -> float:
+        c.setFillColor(accent)
+        c.rect(16*mm, y - 0.8*mm, 3, 5*mm, fill=1, stroke=0)
+        c.setFillColor(FG); c.setFont("Helvetica-Bold", 10)
+        c.drawString(21*mm, y, txt)
+        return y - 9*mm
 
     deptos = sorted(payload.departamentos, key=lambda d: -d.pct_geral)
     n_verde    = sum(1 for d in deptos if d.pct_geral >= 80)
@@ -243,7 +251,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     ci     = 0   # coluna atual (0=esquerda, 1=direita)
 
     def dept_block_height(dept: DeptSnapshot) -> float:
-        items = min(len(dept.top_criticos), 3) + min(len(dept.maiores_evolucoes), 3)
+        items = min(len(dept.top_criticos), 3) + min(len(dept.top_melhores), 3) + min(len(dept.maiores_evolucoes), 3)
         return 14*mm + items * 6.5*mm + 3*mm
 
     for dept in deptos:
@@ -253,8 +261,6 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         if y - bh < 18*mm:
             if ci == 0:
                 ci = 1
-                # reseta y para o topo da página na coluna direita
-                # mas só se não começamos uma página nova
             else:
                 footer(); c.showPage()
                 page_header("Destaques por Departamento (cont.)")
@@ -272,18 +278,16 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
 
         # cabeçalho do bloco
         c.setFillColor(FG); c.setFont("Helvetica-Bold", 8.5)
-        nome_trunc = dept.nome[:22]
-        c.drawString(bx + 7, y - 6*mm, nome_trunc)
+        c.drawString(bx + 7, y - 6*mm, dept.nome[:22])
         c.setFillColor(col_dep); c.setFont("Helvetica-Bold", 9)
         c.drawRightString(bx + col_w - 4, y - 6*mm, f"{dept.pct_geral}%")
 
-        # linha separadora
         c.setStrokeColor(BORDER); c.setLineWidth(0.5)
         c.line(bx + 4, y - 9*mm, bx + col_w - 4, y - 9*mm)
 
         iy = y - 11*mm
 
-        # piores
+        # ── piores ───────────────────────────────────────────────────────────
         if dept.top_criticos:
             c.setFillColor(RED); c.setFont("Helvetica-Bold", 7)
             c.drawString(bx + 6, iy, "⚠ Piores:")
@@ -293,21 +297,38 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
                 frota  = str(eq.get("frota") or "—")[:7]
                 modelo = str(eq.get("modelo") or "")[:13]
                 eq_col = _risk_color(pct_eq)
-
                 c.setFillColor(FG); c.setFont("Helvetica-Bold", 7.5)
                 c.drawString(bx + 8, iy, frota)
                 c.setFillColor(MUTED); c.setFont("Helvetica", 7)
                 c.drawString(bx + 20*mm, iy, modelo)
-
                 pb_x = bx + col_w - 26*mm
                 pbar(pb_x, iy - 1.5*mm, 18*mm, 3.5*mm, pct_eq)
                 c.setFillColor(eq_col); c.setFont("Helvetica-Bold", 7.5)
                 c.drawRightString(bx + col_w - 4, iy, f"{pct_eq}%")
                 iy -= 6*mm
 
-        # maiores evoluções
-        if dept.maiores_evolucoes:
+        # ── melhores (quase concluídos) ───────────────────────────────────────
+        if dept.top_melhores:
             c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 7)
+            c.drawString(bx + 6, iy, "✅ Quase concluídos:")
+            iy -= 5.5*mm
+            for eq in dept.top_melhores[:3]:
+                pct_eq = int(eq.get("pct", 0))
+                frota  = str(eq.get("frota") or "—")[:7]
+                modelo = str(eq.get("modelo") or "")[:13]
+                c.setFillColor(FG); c.setFont("Helvetica-Bold", 7.5)
+                c.drawString(bx + 8, iy, frota)
+                c.setFillColor(MUTED); c.setFont("Helvetica", 7)
+                c.drawString(bx + 20*mm, iy, modelo)
+                pb_x = bx + col_w - 26*mm
+                pbar(pb_x, iy - 1.5*mm, 18*mm, 3.5*mm, pct_eq)
+                c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 7.5)
+                c.drawRightString(bx + col_w - 4, iy, f"{pct_eq}%")
+                iy -= 6*mm
+
+        # ── maiores evoluções ─────────────────────────────────────────────────
+        if dept.maiores_evolucoes:
+            c.setFillColor(colors.HexColor("#6366F1")); c.setFont("Helvetica-Bold", 7)
             c.drawString(bx + 6, iy, "📈 Evoluções:")
             iy -= 5.5*mm
             for eq in dept.maiores_evolucoes[:3]:
@@ -316,12 +337,10 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
                 delta_v = pct_eq - pct_ant
                 frota   = str(eq.get("frota") or "—")[:7]
                 modelo  = str(eq.get("modelo") or "")[:13]
-
                 c.setFillColor(FG); c.setFont("Helvetica-Bold", 7.5)
                 c.drawString(bx + 8, iy, frota)
                 c.setFillColor(MUTED); c.setFont("Helvetica", 7)
                 c.drawString(bx + 20*mm, iy, modelo)
-
                 pb_x = bx + col_w - 26*mm
                 pbar(pb_x, iy - 1.5*mm, 18*mm, 3.5*mm, pct_eq)
                 c.setFillColor(_risk_color(pct_eq)); c.setFont("Helvetica-Bold", 7.5)
@@ -331,16 +350,114 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
                     c.drawRightString(bx + col_w - 4, iy, f"+{delta_v}p")
                 iy -= 6*mm
 
-        # avança para a próxima posição
+        # avança coluna/linha
         if ci == 0:
             ci = 1
-            # y_right tracked separately
             y_right = y - bh - 3*mm
         else:
-            # ambas colunas usadas: avança y pelo maior dos dois blocos
             y = min(y - bh - 3*mm, y_right)
             ci = 0
 
     footer(); c.showPage()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PÁGINA BÔNUS — Ranking de melhores equipamentos (top 20 cross-deptos)
+    # ══════════════════════════════════════════════════════════════════════════
+    # Coleta todos os melhores de todos os deptos (quase concluídos + evoluções)
+    todos_melhores = []
+    todos_evolucoes = []
+    for dept in deptos:
+        for eq in dept.top_melhores:
+            todos_melhores.append({**eq, "_dept": dept.nome})
+        for eq in dept.maiores_evolucoes:
+            todos_evolucoes.append({**eq, "_dept": dept.nome})
+
+    # Top 20 por % (quase concluídos) e top 20 por delta
+    top20_pct   = sorted(todos_melhores,   key=lambda e: -e.get("pct", 0))[:20]
+    top20_delta = sorted(todos_evolucoes,  key=lambda e: -(e.get("pct", 0) - int(e.get("pct_anterior", 0))))[:20]
+
+    if top20_pct or top20_delta:
+        page_header("Destaques Positivos — Melhores Equipamentos")
+        y = h - 20*mm
+        row_h2 = 9*mm
+
+        def _eq_row(eq: dict, idx: int, show_delta: bool, y_cur: float) -> float:
+            pct_eq  = int(eq.get("pct", 0))
+            frota   = str(eq.get("frota") or "—")[:10]
+            modelo  = str(eq.get("modelo") or "")[:18]
+            dept_n  = str(eq.get("_dept") or "")[:16]
+            col_eq  = _risk_color(pct_eq)
+
+            c.setFillColor(SURFACE if idx % 2 == 0 else WHITE)
+            c.rect(16*mm, y_cur - row_h2, w - 32*mm, row_h2, fill=1, stroke=0)
+
+            c.setFillColor(FG); c.setFont("Helvetica-Bold", 8)
+            c.drawString(18*mm, y_cur - row_h2*0.38, frota)
+            c.setFillColor(MUTED); c.setFont("Helvetica", 7)
+            c.drawString(18*mm, y_cur - row_h2*0.72, modelo)
+
+            c.setFillColor(MUTED); c.setFont("Helvetica", 7.5)
+            c.drawString(50*mm, y_cur - row_h2/2, dept_n)
+
+            bar_x = w/2
+            bar_ww = w - 32*mm - (bar_x - 16*mm) - 20*mm
+            pbar(bar_x, y_cur - row_h2 + 2*mm, bar_ww, 5*mm, pct_eq)
+
+            c.setFillColor(col_eq); c.setFont("Helvetica-Bold", 8.5)
+            c.drawRightString(w - 18*mm, y_cur - row_h2*0.38, f"{pct_eq}%")
+
+            if show_delta:
+                delta_v = pct_eq - int(eq.get("pct_anterior", pct_eq))
+                if delta_v > 0:
+                    c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 7)
+                    c.drawRightString(w - 18*mm, y_cur - row_h2*0.72, f"+{delta_v}p.p.")
+
+            c.setStrokeColor(BORDER); c.setLineWidth(0.3)
+            c.line(16*mm, y_cur - row_h2, w - 16*mm, y_cur - row_h2)
+            return y_cur - row_h2
+
+        # Seção 1 — quase concluídos
+        if top20_pct:
+            y = section_title("✅ Equipamentos mais próximos de concluir", y)
+            # cabeçalho
+            c.setFillColor(DARK)
+            c.rect(16*mm, y - 6*mm, w - 32*mm, 6*mm, fill=1, stroke=0)
+            c.setFillColor(colors.Color(0.6, 0.65, 0.7)); c.setFont("Helvetica-Bold", 7)
+            c.drawString(18*mm, y - 4*mm, "Frota / Modelo")
+            c.drawString(50*mm, y - 4*mm, "Departamento")
+            c.drawString(w/2 + 2*mm, y - 4*mm, "Progresso")
+            c.drawRightString(w - 18*mm, y - 4*mm, "%")
+            y -= 6*mm
+            for i, eq in enumerate(top20_pct):
+                if y - row_h2 < 18*mm:
+                    footer(); c.showPage()
+                    page_header("Destaques Positivos (cont.)")
+                    y = h - 20*mm
+                y = _eq_row(eq, i, False, y)
+
+        # Seção 2 — maiores evoluções da semana
+        if top20_delta:
+            y -= 6*mm
+            if y < 50*mm:
+                footer(); c.showPage()
+                page_header("Destaques Positivos — Maiores Evoluções")
+                y = h - 20*mm
+            y = section_title("📈 Maiores evoluções da semana (cross-departamentos)", y)
+            c.setFillColor(DARK)
+            c.rect(16*mm, y - 6*mm, w - 32*mm, 6*mm, fill=1, stroke=0)
+            c.setFillColor(colors.Color(0.6, 0.65, 0.7)); c.setFont("Helvetica-Bold", 7)
+            c.drawString(18*mm, y - 4*mm, "Frota / Modelo")
+            c.drawString(50*mm, y - 4*mm, "Departamento")
+            c.drawString(w/2 + 2*mm, y - 4*mm, "Progresso atual")
+            c.drawRightString(w - 18*mm, y - 4*mm, "% / Δ")
+            y -= 6*mm
+            for i, eq in enumerate(top20_delta):
+                if y - row_h2 < 18*mm:
+                    footer(); c.showPage()
+                    page_header("Maiores Evoluções (cont.)")
+                    y = h - 20*mm
+                y = _eq_row(eq, i, True, y)
+
+        footer(); c.showPage()
     c.save()
     return buf.getvalue()
