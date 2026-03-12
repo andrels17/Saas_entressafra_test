@@ -456,14 +456,20 @@ def dispatch_relatorio_semanal(
         result.errors.append("Revisão não encontrada.")
         return result
 
-    # Grupos de destinatários
+    # Grupos de destinatários (gestores — para envio de PDF por departamento)
     groups = get_recipient_groups(tenant_id)
     if dept_ids_filter:
         groups = [g for g in groups if g.departamento_id in dept_ids_filter]
 
-    if not groups:
+    # Todos os departamentos ativos — para o relatório executivo (independente de ter gestor)
+    from src.services.email.recipients import _build_all_dept_groups
+    all_dept_groups = _build_all_dept_groups(tenant_id)
+    if dept_ids_filter:
+        all_dept_groups = [g for g in all_dept_groups if g.departamento_id in dept_ids_filter]
+
+    if not groups and not all_dept_groups:
         result.skipped += 1
-        result.errors.append("Nenhum departamento com responsável e-mail válido encontrado.")
+        result.errors.append("Nenhum departamento ativo encontrado.")
         return result
 
     _log(f"Iniciando disparo para {len(groups)} departamento(s)…")
@@ -548,7 +554,7 @@ def dispatch_relatorio_semanal(
             sem_atual_rev = _semana_atual(revisao.get("data_inicio"),
                                           int(revisao.get("semanas_total") or 1))
 
-            for grp in groups:
+            for grp in all_dept_groups:  # TODOS os deptos, não só os com gestores
                 try:
                     tarefas_g = _load_tarefas(sb, tenant_id, revisao_id, grp.grupo_ids)
                     p, eq_list_g = _build_payload(

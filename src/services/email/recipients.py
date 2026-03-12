@@ -302,3 +302,45 @@ def get_all_users_with_prefs(tenant_id: str) -> list[dict]:
             "override":       uid in prefs,
         })
     return sorted(result, key=lambda x: (x["role"], x["nome"]))
+
+
+def _build_all_dept_groups(tenant_id: str) -> list[RecipientGroup]:
+    """Retorna RecipientGroup para TODOS os departamentos ativos do tenant,
+    independente de terem gestores vinculados. Usado pelo relatório executivo
+    para garantir que todos os deptos apareçam no PDF consolidado.
+    """
+    svc = get_supabase_service()
+
+    deps = (
+        svc.table("departamentos")
+        .select("id,nome")
+        .eq("tenant_id", tenant_id)
+        .eq("ativo", True)
+        .execute()
+        .data
+    ) or []
+    if not deps:
+        return []
+
+    grupos = (
+        svc.table("equip_grupos")
+        .select("id,departamento_id")
+        .eq("tenant_id", tenant_id)
+        .execute()
+        .data
+    ) or []
+    dep_to_grupos: dict[str, list[str]] = {}
+    for g in grupos:
+        did = g.get("departamento_id")
+        if did:
+            dep_to_grupos.setdefault(did, []).append(g["id"])
+
+    return [
+        RecipientGroup(
+            departamento_id=d["id"],
+            departamento_nome=d["nome"],
+            recipients=[],          # sem destinatários — só para montar snapshot
+            grupo_ids=dep_to_grupos.get(d["id"], []),
+        )
+        for d in deps
+    ]
