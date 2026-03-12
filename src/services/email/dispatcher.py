@@ -225,6 +225,15 @@ def _build_payload(
         if eid:
             eq_tasks.setdefault(eid, []).append(t)
 
+    # done_steps até semana anterior por equipamento (para calcular evolução)
+    semana_anterior = max(semana_atual - 1, 0)
+    eq_done_anterior: dict[str, int] = {}
+    for eid, tasks in eq_tasks.items():
+        eq_done_anterior[eid] = sum(
+            int(bool(t.get("etapa_d"))) + int(bool(t.get("etapa_r"))) + int(bool(t.get("etapa_m")))
+            for t in tasks if int(t.get("semana") or 0) <= semana_anterior
+        )
+
     # Acumula done_steps por grupo (para pct_geral com denominador correto)
     done_by_grupo: dict[str, int] = {}
     for gid in grupo_ids:
@@ -263,8 +272,11 @@ def _build_payload(
             # pct usando denominador correto (eq × svc × 3)
             if expected_per_eq > 0:
                 pct = max(0, min(100, round(done / expected_per_eq * 100)))
+                done_ant = eq_done_anterior.get(eid, 0)
+                pct_anterior = max(0, min(100, round(done_ant / expected_per_eq * 100)))
             else:
                 pct = 0
+                pct_anterior = 0
 
             if pct == 100:
                 n_concluidos += 1
@@ -288,7 +300,7 @@ def _build_payload(
 
             all_equipamentos.append({
                 "frota": frota, "modelo": modelo, "grupo": grupo_nome,
-                "pct": pct, "status": status_eq,
+                "pct": pct, "pct_anterior": pct_anterior, "status": status_eq,
             })
 
     # pct_geral ponderado (mesma fórmula do kpi_engine: sum(done) / sum(expected))
@@ -521,102 +533,120 @@ def dispatch_relatorio_semanal(
             result.errors.append(msg)
             _log(f"  ❌ {msg}")
 
-    # ── Relatório consolidado para admins ────────────────────────────────────
-    _log("  → Gerando relatório consolidado para admins…")
+    # ── Relatório executivo para supervisores/admins ──────────────────────────
+    _log("  → Gerando relatório executivo para supervisores…")
     try:
-        from src.services.email.recipients import get_admin_recipients
-        from src.services.reporting.pdf_relatorio_consolidado import (
-            build_consolidated_pdf, RelatorioConsolidadoPayload, DeptSummary,
+        from src.services.email.recipients import get_executive_recipients
+        from src.services.reporting.pdf_relatorio_executivo import (
+            build_executive_pdf, RelatorioExecutivoPayload, DeptSnapshot,
         )
-        from src.services.reporting.pdf_relatorio_semanal import EquipamentoCritico
 
-        admin_recs = get_admin_recipients(tenant_id)
-        if admin_recs:
-            # Monta payload consolidado a partir dos dados já calculados por grupo
-            dept_summaries: list[DeptSummary] = []
+        exec_recs = get_executive_recipients(tenant_id)
+        if exec_recs:
+            # Constrói DeptSnapshot para cada grupo de departamento já processado
+            dept_snapshots: list[DeptSnapshot] = []
+            sem_atual_rev = _semana_atual(revisao.get("data_inicio"),
+                                          int(revisao.get("semanas_total") or 1))
+
             for grp in groups:
                 try:
                     tarefas_g = _load_tarefas(sb, tenant_id, revisao_id, grp.grupo_ids)
-                    if not tarefas_g:
-                        continue
-                    p, _ = _build_payload(
+                    p, eq_list_g = _build_payload(
                         tarefas=tarefas_g, revisao=revisao,
                         departamento_nome=grp.departamento_nome,
                         tenant_nome=tenant_nome, branding=branding,
                         sb=sb, tenant_id=tenant_id, grupo_ids=grp.grupo_ids,
                         dias_travado=dias_travado, dias_sem_update=dias_sem_update,
                     )
-                    dept_summaries.append(DeptSummary(
+                    todos = p.todos_equipamentos or []
+                    top_criticos = sorted(
+                        [e for e in todos if e.get("pct", 0) < 100],
+                        key=lambda e: e.get("pct", 0)
+                    )[:3]
+                    maiores_evolucoes = sorted(
+                        [e for e in todos if e.get("pct", 0) - int(e.get("pct_anterior", 0)) > 0],
+                        key=lambda e: -(e.get("pct", 0) - int(e.get("pct_anterior", 0)))
+                    )[:3]
+                    dept_snapshots.append(DeptSnapshot(
                         nome=grp.departamento_nome,
                         pct_geral=p.pct_geral,
+                        pct_anterior=p.pct_semana_anterior,
                         n_equipamentos=p.n_equipamentos,
                         n_concluidos=p.n_concluidos,
                         n_travados=p.n_travados,
                         n_sem_inicio=p.n_sem_inicio,
-                        n_parados=p.n_parados,
                         n_risco_prazo=p.n_risco_prazo,
-                        pct_semana_anterior=p.pct_semana_anterior,
-                        pct_semana_atual=p.pct_semana_atual,
-                        criticos=p.criticos,
+                        top_criticos=top_criticos,
+                        maiores_evolucoes=maiores_evolucoes,
                     ))
                 except Exception as e_g:
-                    _log(f"    ↳ Aviso: erro ao montar resumo de {grp.departamento_nome}: {e_g}")
+                    _log(f"    ↳ Aviso: erro ao montar snapshot de {grp.departamento_nome}: {e_g}")
 
-            if dept_summaries:
-                consol_payload = RelatorioConsolidadoPayload(
+            if dept_snapshots:
+                pct_global = (
+                    round(sum(d.pct_geral for d in dept_snapshots) / len(dept_snapshots))
+                    if dept_snapshots else 0
+                )
+                n_equip_total   = sum(d.n_equipamentos for d in dept_snapshots)
+                n_equip_concl   = sum(d.n_concluidos   for d in dept_snapshots)
+                n_alertas_total = sum(d.n_travados + d.n_risco_prazo for d in dept_snapshots)
+
+                exec_payload = RelatorioExecutivoPayload(
                     tenant_nome=tenant_nome or "AgroSafra",
                     revisao_titulo=revisao.get("titulo") or "Revisão",
-                    semana_atual=_semana_atual(revisao.get("data_inicio"),
-                                               int(revisao.get("semanas_total") or 1)),
+                    semana_atual=sem_atual_rev,
                     semanas_total=int(revisao.get("semanas_total") or 1),
-                    departamentos=dept_summaries,
+                    pct_global=pct_global,
+                    n_equip_total=n_equip_total,
+                    n_equip_concluidos=n_equip_concl,
+                    n_alertas_total=n_alertas_total,
+                    departamentos=dept_snapshots,
                     primary_color=branding.get("primary_color") or "#FFD100",
                     logo_url=branding.get("logo_url"),
                 )
-                pdf_consol = build_consolidated_pdf(consol_payload)
-                pdf_name_c = (f"relatorio_consolidado_semana"
-                              f"{consol_payload.semana_atual}.pdf")
+                pdf_exec  = build_executive_pdf(exec_payload)
+                pdf_name_e = f"relatorio_executivo_semana{sem_atual_rev}.pdf"
 
-                for rec in admin_recs:
+                for rec in exec_recs:
                     result.total_emails += 1
-                    _log(f"    ↳ Consolidado → {rec.email} ({rec.nome})")
+                    _log(f"    ↳ Executivo → {rec.email} ({rec.nome})")
                     if dry_run:
                         _log("    ↳ [DRY RUN] — e-mail não enviado.")
                         result.sent += 1
                         continue
                     try:
                         from src.services.email.smtp_sender import build_html_body, EmailMessage, send_email
-                        html_c = build_html_body(
+                        html_e = build_html_body(
                             destinatario_nome=rec.nome,
-                            departamento_nome="Todos os departamentos",
-                            revisao_titulo=consol_payload.revisao_titulo,
-                            semana_atual=consol_payload.semana_atual,
-                            semanas_total=consol_payload.semanas_total,
-                            pct_geral=consol_payload.pct_geral,
-                            n_alertas=consol_payload.n_alertas_total,
-                            primary_color=consol_payload.primary_color,
+                            departamento_nome="Visão geral — todos os departamentos",
+                            revisao_titulo=exec_payload.revisao_titulo,
+                            semana_atual=exec_payload.semana_atual,
+                            semanas_total=exec_payload.semanas_total,
+                            pct_geral=exec_payload.pct_global,
+                            n_alertas=exec_payload.n_alertas_total,
+                            primary_color=exec_payload.primary_color,
                         )
                         send_email(EmailMessage(
                             to=[rec.email],
-                            subject=(f"[{consol_payload.revisao_titulo}] Relatório Consolidado — "
-                                     f"Todos os Departamentos · Semana {consol_payload.semana_atual}"),
-                            html_body=html_c,
-                            pdf_bytes=pdf_consol,
-                            pdf_filename=pdf_name_c,
+                            subject=(f"[{exec_payload.revisao_titulo}] Visão Executiva — "
+                                     f"Semana {exec_payload.semana_atual}/{exec_payload.semanas_total}"),
+                            html_body=html_e,
+                            pdf_bytes=pdf_exec,
+                            pdf_filename=pdf_name_e,
                         ), cfg=smtp_cfg)
                         result.sent += 1
-                        _log("    ↳ ✅ Consolidado enviado.")
+                        _log("    ↳ ✅ Executivo enviado.")
                     except Exception as e_send:
                         result.failed += 1
-                        msg = f"Falha ao enviar consolidado para {rec.email}: {e_send}"
+                        msg = f"Falha ao enviar executivo para {rec.email}: {e_send}"
                         result.errors.append(msg)
                         _log(f"    ↳ ❌ {msg}")
             else:
-                _log("    ↳ Sem dados para consolidado — pulando.")
+                _log("    ↳ Sem dados para executivo — pulando.")
         else:
-            _log("    ↳ Nenhum admin com e-mail válido — relatório consolidado não enviado.")
-    except Exception as e_consol:
-        _log(f"  ⚠️ Erro ao gerar consolidado: {e_consol}")
+            _log("    ↳ Nenhum supervisor/admin com e-mail — relatório executivo não enviado.")
+    except Exception as e_exec:
+        _log(f"  ⚠️ Erro ao gerar executivo: {e_exec}")
 
     _log(f"Concluído: {result.sent} enviados, {result.failed} falhas, {result.skipped} pulados.")
     return result

@@ -128,23 +128,6 @@ def send_email(msg: EmailMessage, cfg: SmtpConfig | None = None) -> None:
             server.sendmail(cfg.user, all_to, mime.as_bytes())
 
 
-def _eq_color(pct: int) -> str:
-    if pct >= 80: return "#12B76A"
-    if pct >= 50: return "#F59E0B"
-    return "#EF4444"
-
-
-def _eq_bar_html(pct: int) -> str:
-    """Mini barra de progresso inline para tabela de e-mail."""
-    color = _eq_color(pct)
-    filled = min(pct, 100)
-    return (
-        f'<div style="background:#E5E7EB;border-radius:3px;height:8px;width:100%;min-width:80px;">'
-        f'<div style="width:{filled}%;background:{color};height:8px;border-radius:3px;"></div>'
-        f'</div>'
-    )
-
-
 def build_html_body(
     *,
     destinatario_nome: str,
@@ -155,67 +138,14 @@ def build_html_body(
     pct_geral: int,
     n_alertas: int,
     primary_color: str = "#FFD100",
-    equipamentos: list | None = None,  # lista de dicts: {frota, modelo, grupo, pct, status}
+    equipamentos: list | None = None,  # mantido na assinatura por compatibilidade, não usado no corpo
 ) -> str:
-    """Gera o corpo HTML do e-mail — com tabela de progresso de equipamentos."""
+    """Gera o corpo HTML do e-mail — objetivo, sem tabela de equipamentos (está no PDF)."""
     bar_color = _eq_color(pct_geral)
     now = datetime.now().strftime("%d/%m/%Y")
     alerta_txt = (f"{n_alertas} alerta{'s' if n_alertas != 1 else ''} "
                   f"ativo{'s' if n_alertas != 1 else ''}") if n_alertas else "sem alertas"
     alerta_color = "#EF4444" if n_alertas else "#12B76A"
-
-    # ── Tabela de equipamentos ─────────────────────────────────────────────────
-    eq_rows_html = ""
-    if equipamentos:
-        rows_html = ""
-        for i, eq in enumerate(equipamentos):
-            pct  = int(eq.get("pct", 0))
-            frota  = eq.get("frota") or "—"
-            modelo = (eq.get("modelo") or "—")[:22]
-            grupo  = (eq.get("grupo")  or "—")[:20]
-            status = eq.get("status") or ""
-            cor_pct = _eq_color(pct)
-            bg = "#FAFAFA" if i % 2 == 0 else "#FFFFFF"
-
-            # Badge de status
-            if status == "travado":
-                badge = '<span style="font-size:10px;background:#FEE2E2;color:#DC2626;padding:1px 6px;border-radius:10px;">travado</span>'
-            elif status == "zero":
-                badge = '<span style="font-size:10px;background:#FEE2E2;color:#DC2626;padding:1px 6px;border-radius:10px;">sem início</span>'
-            elif pct == 100:
-                badge = '<span style="font-size:10px;background:#D1FAE5;color:#059669;padding:1px 6px;border-radius:10px;">concluído</span>'
-            else:
-                badge = ""
-
-            rows_html += f"""
-            <tr style="background:{bg};">
-              <td style="padding:7px 10px;font-size:12px;font-weight:600;color:#111827;border-bottom:1px solid #F3F4F6;">{frota}</td>
-              <td style="padding:7px 10px;font-size:11px;color:#6B7280;border-bottom:1px solid #F3F4F6;">{modelo}</td>
-              <td style="padding:7px 10px;font-size:11px;color:#6B7280;border-bottom:1px solid #F3F4F6;">{grupo}</td>
-              <td style="padding:7px 14px;border-bottom:1px solid #F3F4F6;min-width:110px;">
-                {_eq_bar_html(pct)}
-              </td>
-              <td style="padding:7px 10px;font-size:12px;font-weight:700;color:{cor_pct};border-bottom:1px solid #F3F4F6;white-space:nowrap;">{pct}% {badge}</td>
-            </tr>"""
-
-        eq_rows_html = f"""
-      <!-- Tabela de Equipamentos -->
-      <tr><td style="padding:0 32px 24px;">
-        <div style="font-size:13px;font-weight:700;color:#111827;margin-bottom:10px;">
-          📋 Progresso dos equipamentos
-        </div>
-        <table width="100%" cellpadding="0" cellspacing="0"
-               style="border:1px solid #E5E7EB;border-radius:8px;overflow:hidden;font-family:Arial,sans-serif;">
-          <tr style="background:#111827;">
-            <th style="padding:8px 10px;font-size:11px;color:#9CA3AF;text-align:left;font-weight:600;">Frota</th>
-            <th style="padding:8px 10px;font-size:11px;color:#9CA3AF;text-align:left;font-weight:600;">Modelo</th>
-            <th style="padding:8px 10px;font-size:11px;color:#9CA3AF;text-align:left;font-weight:600;">Grupo</th>
-            <th style="padding:8px 10px;font-size:11px;color:#9CA3AF;text-align:left;font-weight:600;">Progresso</th>
-            <th style="padding:8px 10px;font-size:11px;color:#9CA3AF;text-align:left;font-weight:600;">%</th>
-          </tr>
-          {rows_html}
-        </table>
-      </td></tr>"""
 
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
@@ -237,44 +167,39 @@ def build_html_body(
         <div style="font-size:15px;color:#374151;">Olá, <b>{destinatario_nome}</b>!</div>
         <div style="font-size:14px;color:#6B7280;margin-top:6px;">
           Segue o resumo semanal do departamento <b>{departamento_nome}</b>.
-          O PDF completo com evolução, comparativos e análise detalhada está anexo.
+          O PDF com análise detalhada, ranking de equipamentos e alertas está anexo.
         </div>
       </td></tr>
 
       <!-- KPI cards -->
-      <tr><td style="padding:24px 32px 20px;">
+      <tr><td style="padding:24px 32px 28px;">
         <table width="100%" cellpadding="0" cellspacing="0" style="background:#F9FAFB;border-radius:10px;border:1px solid #E5E7EB;">
           <tr>
-            <td style="padding:18px 24px;" width="50%">
+            <td style="padding:20px 24px;" width="50%">
               <div style="font-size:12px;color:#6B7280;margin-bottom:4px;">Progresso geral</div>
-              <div style="font-size:28px;font-weight:700;color:{bar_color};">{pct_geral}%</div>
-              <div style="background:#E5E7EB;border-radius:4px;height:6px;margin-top:8px;">
-                <div style="width:{min(pct_geral,100)}%;background:{bar_color};height:6px;border-radius:4px;"></div>
+              <div style="font-size:32px;font-weight:700;color:{bar_color};">{pct_geral}%</div>
+              <div style="background:#E5E7EB;border-radius:4px;height:8px;margin-top:10px;">
+                <div style="width:{min(pct_geral,100)}%;background:{bar_color};height:8px;border-radius:4px;"></div>
               </div>
+              <div style="font-size:11px;color:#9CA3AF;margin-top:6px;">Semana {semana_atual} de {semanas_total}</div>
             </td>
-            <td style="padding:18px 24px;border-left:1px solid #E5E7EB;" width="50%">
+            <td style="padding:20px 24px;border-left:1px solid #E5E7EB;" width="50%">
               <div style="font-size:12px;color:#6B7280;margin-bottom:4px;">Alertas ativos</div>
-              <div style="font-size:28px;font-weight:700;color:{alerta_color};">{alerta_txt}</div>
-              <div style="font-size:12px;color:#9CA3AF;margin-top:8px;">Semana {semana_atual} de {semanas_total}</div>
+              <div style="font-size:32px;font-weight:700;color:{alerta_color};">{n_alertas if n_alertas else "✓"}</div>
+              <div style="font-size:13px;color:{alerta_color};margin-top:4px;font-weight:600;">{alerta_txt}</div>
+              <div style="font-size:11px;color:#9CA3AF;margin-top:6px;">Veja detalhes no PDF anexo</div>
             </td>
           </tr>
         </table>
       </td></tr>
 
-      {eq_rows_html}
-
-      <!-- Rodapé informativo -->
-      <tr><td style="padding:0 32px 28px;">
-        <div style="font-size:13px;color:#6B7280;">
-          📎 O PDF anexo inclui: evolução semanal, comparativo com a semana anterior e detalhamento completo.
-        </div>
-      </td></tr>
-
       <!-- Footer -->
       <tr><td style="background:#F9FAFB;padding:16px 32px;border-top:1px solid #E5E7EB;">
-        <div style="font-size:11px;color:#9CA3AF;">
-          Este relatório foi gerado automaticamente pelo sistema de gestão de revisões.
-          Dúvidas? Entre em contato com o administrador do sistema.
+        <div style="font-size:12px;color:#6B7280;">
+          📎 O PDF anexo inclui ranking de equipamentos, maiores evoluções da semana, equipamentos críticos e análise de alertas.
+        </div>
+        <div style="font-size:11px;color:#9CA3AF;margin-top:8px;">
+          Relatório gerado automaticamente — sistema de gestão de revisões.
         </div>
       </td></tr>
 

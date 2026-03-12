@@ -19,6 +19,7 @@ from enum import Enum
 class Role(str, Enum):
     USER       = "user"
     GESTOR     = "gestor"
+    SUPERVISOR = "supervisor"   # diretor/supervisor — visão executiva cross-departamentos
     ADMIN      = "admin"
     SUPERADMIN = "superadmin"
 
@@ -30,14 +31,20 @@ class Role(str, Enum):
 
     @classmethod
     @property
+    def SUPERVISOR_ROLES(cls) -> frozenset[Role]:
+        """Roles que recebem relatório executivo consolidado."""
+        return frozenset({cls.SUPERVISOR, cls.ADMIN, cls.SUPERADMIN})
+
+    @classmethod
+    @property
     def MANAGER_ROLES(cls) -> frozenset[Role]:
         """Roles com acesso a painéis de gestão."""
-        return frozenset({cls.GESTOR, cls.ADMIN, cls.SUPERADMIN})
+        return frozenset({cls.GESTOR, cls.SUPERVISOR, cls.ADMIN, cls.SUPERADMIN})
 
     @classmethod
     @property
     def ALL_ROLES(cls) -> frozenset[Role]:
-        return frozenset({cls.USER, cls.GESTOR, cls.ADMIN, cls.SUPERADMIN})
+        return frozenset({cls.USER, cls.GESTOR, cls.SUPERVISOR, cls.ADMIN, cls.SUPERADMIN})
 
     # ── Helpers ───────────────────────────────────────────────────────────────
     @classmethod

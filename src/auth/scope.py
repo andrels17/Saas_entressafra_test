@@ -38,7 +38,7 @@ def get_user_scope(sb, tenant_id: str, user_id: str | None, role: str | None = N
       - Else fallback to tenant_user_scope => singletons as lists
     """
     try:
-        if (role or "") in ("admin", "superadmin"):
+        if (role or "") in ("admin", "superadmin", "supervisor"):
             return None, None
     except Exception:
         pass

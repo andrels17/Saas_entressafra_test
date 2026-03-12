@@ -364,72 +364,176 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
 
     footer(); c.showPage()
 
-    # ── PÁGINA 3b: Progresso de todos os equipamentos ─────────────────────────
+    # ── PÁGINA 3b: Resumo Executivo de Equipamentos ───────────────────────────
     todos = payload.todos_equipamentos or []
     if todos:
-        new_page("Progresso de Todos os Equipamentos")
+        new_page("Resumo de Equipamentos")
         y = h - 52*mm
 
-        y = section_title(f"Progresso individual — {len(todos)} equipamento(s)", y)
+        # ── helpers locais ────────────────────────────────────────────────────
+        def _mini_eq_row(eq: dict, idx: int, show_delta: bool = False):
+            nonlocal y
+            if y < 28*mm:
+                return False  # sinaliza que não coube
+            pct     = int(eq.get("pct", 0))
+            frota   = str(eq.get("frota") or "—")[:10]
+            modelo  = str(eq.get("modelo") or "")[:16]
+            grupo   = str(eq.get("grupo") or "")[:14]
+            col     = _risk_color(pct)
+            row_h_  = 7.5*mm
 
-        label_w  = 40*mm
-        pct_w    = 14*mm
-        bar_avail = w - 32*mm - label_w - pct_w - 6*mm
-        row_h    = 8*mm
+            bg = SURFACE if idx % 2 == 0 else WHITE
+            c.setFillColor(bg)
+            c.rect(16*mm, y - row_h_, w - 32*mm, row_h_, fill=1, stroke=0)
 
-        status_labels = {
-            "concluido":    "✓",
-            "travado":      "⚠",
-            "zero":         "—",
-            "em_andamento": "",
-            "sem_template": "?",
-        }
+            c.setFillColor(FG); c.setFont("Helvetica-Bold", 8)
+            c.drawString(17*mm, y - row_h_*0.35, frota)
+            c.setFillColor(MUTED); c.setFont("Helvetica", 7)
+            c.drawString(17*mm, y - row_h_*0.72, modelo)
 
-        for eq in todos:
+            c.setFillColor(MUTED); c.setFont("Helvetica", 7.5)
+            c.drawString(42*mm, y - row_h_/2, grupo)
+
+            bar_x  = 78*mm
+            bar_w_ = w - 32*mm - 62*mm - 16*mm
+            progress_bar(bar_x, y - row_h_ + 1.5*mm, bar_w_, row_h_ - 3*mm, pct)
+
+            c.setFillColor(col); c.setFont("Helvetica-Bold", 8.5)
+            c.drawRightString(w - 17*mm, y - row_h_*0.38, f"{pct}%")
+
+            if show_delta:
+                delta = pct - int(eq.get("pct_anterior", pct))
+                if delta != 0:
+                    d_col = GREEN if delta > 0 else RED
+                    d_str = f"+{delta}p.p." if delta > 0 else f"{delta}p.p."
+                    c.setFillColor(d_col); c.setFont("Helvetica-Bold", 7)
+                    c.drawRightString(w - 17*mm, y - row_h_*0.72, d_str)
+
+            c.setStrokeColor(BORDER); c.setLineWidth(0.3)
+            c.line(16*mm, y - row_h_, w - 16*mm, y - row_h_)
+            y -= row_h_
+            return True
+
+        # ── 1. Totais por faixa ───────────────────────────────────────────────
+        n_verde    = sum(1 for e in todos if e.get("pct", 0) >= 80)
+        n_amarelo  = sum(1 for e in todos if 50 <= e.get("pct", 0) < 80)
+        n_vermelho = sum(1 for e in todos if e.get("pct", 0) < 50)
+        total_eq   = len(todos)
+
+        y = section_title("Distribuição por faixa de progresso", y)
+        gap   = 4*mm
+        bw    = (w - 32*mm - gap * 2) / 3
+        bh    = 18*mm
+        x0    = 16*mm
+        for label, count, col, sub in [
+            ("✅  ≥ 80% — Em dia",     n_verde,    GREEN,  f"{round(n_verde/max(total_eq,1)*100)}% dos equipamentos"),
+            ("⚠️  50–79% — Atenção",   n_amarelo,  YELLOW, f"{round(n_amarelo/max(total_eq,1)*100)}% dos equipamentos"),
+            ("🔴  < 50% — Crítico",    n_vermelho, RED,    f"{round(n_vermelho/max(total_eq,1)*100)}% dos equipamentos"),
+        ]:
+            cx = x0
+            c.setFillColor(SURFACE); c.setStrokeColor(BORDER); c.setLineWidth(0.7)
+            c.roundRect(cx, y - bh, bw, bh, 4, fill=1, stroke=1)
+            c.setFillColor(col); c.rect(cx, y - 2.5, bw, 2.5, fill=1, stroke=0)
+            c.setFillColor(col); c.setFont("Helvetica-Bold", 20)
+            c.drawString(cx + 5, y - bh + 5*mm, str(count))
+            c.setFillColor(MUTED); c.setFont("Helvetica", 7)
+            c.drawString(cx + 5, y - bh + 2*mm, sub)
+            c.setFillColor(FG); c.setFont("Helvetica-Bold", 7.5)
+            c.drawString(cx + 5, y - 7*mm, label)
+            x0 += bw + gap
+
+        y -= bh + 8*mm
+
+        # ── 2. Top 5 piores ───────────────────────────────────────────────────
+        piores = sorted([e for e in todos if e.get("status") != "sem_template"],
+                        key=lambda e: e.get("pct", 0))[:5]
+        if piores:
+            y -= 2*mm
+            y = section_title("🔴 5 equipamentos com menor progresso", y)
+            for i, eq in enumerate(piores):
+                if not _mini_eq_row(eq, i):
+                    break
+
+        # ── 3. Top 5 melhores (quase concluídos) ─────────────────────────────
+        melhores = sorted([e for e in todos if e.get("pct", 0) < 100 and e.get("status") != "sem_template"],
+                          key=lambda e: -e.get("pct", 0))[:5]
+        if melhores:
+            y -= 4*mm
+            if y < 60*mm:
+                footer(); c.showPage()
+                new_page("Resumo de Equipamentos (cont.)")
+                y = h - 52*mm
+            y = section_title("✅ 5 equipamentos mais próximos de concluir", y)
+            for i, eq in enumerate(melhores):
+                if not _mini_eq_row(eq, i):
+                    break
+
+        # ── 4. Top 5 maiores evoluções ────────────────────────────────────────
+        com_delta = [e for e in todos if e.get("pct_anterior") is not None
+                     and e.get("pct", 0) - int(e.get("pct_anterior", 0)) > 0]
+        maiores_evolucao = sorted(com_delta, key=lambda e: -(e.get("pct", 0) - int(e.get("pct_anterior", 0))))[:5]
+        if maiores_evolucao:
+            y -= 4*mm
+            if y < 60*mm:
+                footer(); c.showPage()
+                new_page("Resumo de Equipamentos (cont.)")
+                y = h - 52*mm
+            y = section_title("📈 5 equipamentos com maior evolução na semana", y)
+            for i, eq in enumerate(maiores_evolucao):
+                if not _mini_eq_row(eq, i, show_delta=True):
+                    break
+
+        # ── Tabela completa em páginas seguintes ──────────────────────────────
+        footer(); c.showPage()
+        new_page("Progresso Completo — Todos os Equipamentos")
+        y = h - 52*mm
+        y = section_title(f"Todos os {len(todos)} equipamento(s) — ordenado por progresso", y)
+
+        row_h = 7.5*mm
+        for i, eq in enumerate(todos):
             if y < 25*mm:
                 footer(); c.showPage()
-                new_page("Progresso de Todos os Equipamentos (cont.)")
+                new_page("Progresso Completo (cont.)")
                 y = h - 52*mm
                 y = section_title("continuação", y)
 
             pct    = int(eq.get("pct", 0))
-            frota  = str(eq.get("frota") or "—")
-            modelo = str(eq.get("modelo") or "")[:18]
-            grupo  = str(eq.get("grupo") or "")[:16]
+            frota  = str(eq.get("frota") or "—")[:10]
+            modelo = str(eq.get("modelo") or "")[:16]
+            grupo  = str(eq.get("grupo") or "")[:14]
             status = eq.get("status") or ""
             col    = _risk_color(pct)
 
-            # linha de fundo alternada
-            c.setFillColor(SURFACE if todos.index(eq) % 2 == 0 else WHITE)
+            c.setFillColor(SURFACE if i % 2 == 0 else WHITE)
             c.rect(16*mm, y - row_h, w - 32*mm, row_h, fill=1, stroke=0)
 
-            # frota (bold) + modelo
             c.setFillColor(FG); c.setFont("Helvetica-Bold", 8)
-            c.drawString(17*mm, y - row_h*0.38, frota)
+            c.drawString(17*mm, y - row_h*0.35, frota)
             c.setFillColor(MUTED); c.setFont("Helvetica", 7)
             c.drawString(17*mm, y - row_h*0.72, modelo)
 
-            # grupo
             c.setFillColor(MUTED); c.setFont("Helvetica", 7.5)
-            c.drawString(17*mm + label_w, y - row_h/2, grupo)
+            c.drawString(42*mm, y - row_h/2, grupo)
 
-            # barra de progresso
-            bx = 17*mm + label_w + 28*mm
-            progress_bar(bx, y - row_h + 1.5*mm, bar_avail, row_h - 3*mm, pct)
+            bar_x  = 78*mm
+            bar_w_ = w - 32*mm - 62*mm - 16*mm
+            progress_bar(bar_x, y - row_h + 1.5*mm, bar_w_, row_h - 3*mm, pct)
 
-            # %
-            badge = status_labels.get(status, "")
             c.setFillColor(col); c.setFont("Helvetica-Bold", 8)
-            c.drawRightString(w - 17*mm, y - row_h*0.4, f"{pct}%")
-            if badge:
-                c.setFillColor(RED if status in ("travado","zero") else MUTED)
-                c.setFont("Helvetica-Bold", 7)
-                c.drawRightString(w - 17*mm, y - row_h*0.72, badge)
+            c.drawRightString(w - 17*mm, y - row_h*0.38, f"{pct}%")
 
-            # divisor leve
+            # delta se disponível
+            pct_ant = eq.get("pct_anterior")
+            if pct_ant is not None:
+                delta = pct - int(pct_ant)
+                if delta != 0:
+                    d_col = GREEN if delta > 0 else RED
+                    c.setFillColor(d_col); c.setFont("Helvetica-Bold", 7)
+                    d_str = f"+{delta}" if delta > 0 else str(delta)
+                    c.drawRightString(w - 17*mm, y - row_h*0.72, d_str)
+
             c.setStrokeColor(BORDER); c.setLineWidth(0.3)
             c.line(16*mm, y - row_h, w - 16*mm, y - row_h)
-
             y -= row_h
 
     footer(); c.showPage()
