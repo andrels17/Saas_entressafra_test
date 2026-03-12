@@ -1,0 +1,34 @@
+/* ── Layout ───────────────────────────────────────────────────── */
+section[data-testid="stSidebar"] { display: none !important; }
+.block-container {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+    padding-bottom: 5.5rem !important; /* respiro para dedos */
+    max-width: 980px !important;
+}
+
+/* ── Tipografia ───────────────────────────────────────────────── */
+.stMarkdown, .stText, .stCaption, p, div { -webkit-text-size-adjust: 100%; }
+h1, h2, h3 { letter-spacing: -0.2px; }
+
+/* ── Inputs grandes ───────────────────────────────────────────── */
+div[data-testid="stTextInput"] input,
+div[data-testid="stNumberInput"] input,
+div[data-testid="stDateInput"] input,
+div[data-testid="stTextArea"] textarea,
+div[data-testid="stSelectbox"] div[role="combobox"],
+div[data-testid="stMultiSelect"] div[role="combobox"] {
+    min-height: 46px !important;
+    font-size: 1rem !important;
+}
+
+/* ── Botões com alvo de toque ─────────────────────────────────── */
+.stButton > button {
+    min-height: 46px !important;
+    padding: 0.65rem 0.9rem !important;
+    font-size: 1rem !important;
+    border-radius: 14px !important;
+}
+
+/* ── Dataframes: scroll horizontal no mobile ──────────────────── */
+div[data-testid="stDataFrame"] { overflow-x: auto !important; }
