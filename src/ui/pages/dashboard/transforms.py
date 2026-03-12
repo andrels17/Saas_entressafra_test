@@ -1,8 +1,4 @@
-"""Dashboard — camada de transformação (normalização + cálculos).
 
-Responsabilidade única: receber DataFrames brutos e devolver estruturas
-prontas para renderização. Sem I/O, sem Streamlit.
-"""
 from __future__ import annotations
 
 from typing import Any
@@ -174,6 +170,9 @@ def equipment_progress(base: pd.DataFrame) -> pd.DataFrame:
             "done_steps", "expected_steps"]
     if base is None or base.empty:
         return pd.DataFrame(columns=cols)
+    base = base.copy()
+    base["frota"] = base.get("frota", pd.Series(index=base.index, dtype=object)).fillna("—").astype(str).str.strip()
+    base["modelo"] = base.get("modelo", pd.Series(index=base.index, dtype=object)).fillna("—").astype(str).str.strip()
     rows = []
     for (eid, gid, grupo, dept, frota, modelo), sub in base.groupby(
         ["equipamento_id", "grupo_id", "grupo", "departamento_id", "frota", "modelo"], dropna=False
