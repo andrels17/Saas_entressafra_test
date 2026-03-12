@@ -86,23 +86,34 @@ def _fetch_profiles(svc, user_ids: list[str]) -> dict[str, str]:
 
 
 def _fetch_email_prefs(svc, tenant_id: str) -> dict[str, str]:
+    """Retorna {user_id: tipo_relatorio} para todos os registros salvos.
+    Usuários com ativo=False ficam mapeados como 'nenhum' para serem excluídos.
+    """
     try:
         rows = (
             svc.table("tenant_email_prefs")
             .select("user_id,tipo_relatorio,ativo")
             .eq("tenant_id", tenant_id)
-            .eq("ativo", True)
             .execute()
             .data
         ) or []
-        return {r["user_id"]: r["tipo_relatorio"] for r in rows if r.get("tipo_relatorio")}
+        out = {}
+        for r in rows:
+            uid  = r.get("user_id")
+            tipo = r.get("tipo_relatorio") or ""
+            ativo = r.get("ativo", True)
+            if uid:
+                # ativo=False significa "não enviar" — marca como nenhum
+                out[uid] = tipo if ativo else "nenhum"
+        return out
     except Exception:
         return {}
 
 
 def _resolve_tipo(user_id: str, role: str, prefs: dict[str, str]) -> str:
+    """Resolve tipo_relatorio. 'nenhum' = não enviar (override explícito)."""
     if user_id in prefs:
-        return prefs[user_id]
+        return prefs[user_id]   # pode ser 'gestor', 'executivo' ou 'nenhum'
     return ROLE_DEFAULT.get(role or "", TIPO_GESTOR)
 
 
@@ -250,14 +261,16 @@ def get_admin_recipients(tenant_id: str) -> list[Recipient]:
 
 
 def save_email_pref(tenant_id: str, user_id: str, tipo_relatorio: str, ativo: bool = True) -> bool:
-    """Salva override manual de tipo de relatório para um usuário."""
+    """Salva override manual de tipo de relatório para um usuário.
+    Se tipo_relatorio == 'nenhum', salva com ativo=False automaticamente.
+    """
     svc = get_supabase_service()
     try:
         svc.table("tenant_email_prefs").upsert({
             "tenant_id":      tenant_id,
             "user_id":        user_id,
             "tipo_relatorio": tipo_relatorio,
-            "ativo":          ativo,
+            "ativo":          False if tipo_relatorio == "nenhum" else ativo,
         }, on_conflict="tenant_id,user_id").execute()
         return True
     except Exception:
