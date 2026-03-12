@@ -321,7 +321,10 @@ def render_home_overview() -> None:
     week = current_week(rev_start, semanas_total)
 
     if rev.get("id"):
-        set_current_revisao(rev["id"], titulo=rev.get("titulo"), semana=week)
+        # Compatível com versões antigas de set_current_revisao que não aceitam
+        # o parâmetro `semana`.
+        set_current_revisao(rev["id"], titulo=rev.get("titulo"))
+        st.session_state["_sidebar_rev_semana"] = week
     grupos     = load_groups(tenant_id, ver)
     deps       = load_depts(tenant_id, ver)
     gid_to_name  = {g["id"]: (g.get("nome") or "—") for g in grupos if g.get("id")}
