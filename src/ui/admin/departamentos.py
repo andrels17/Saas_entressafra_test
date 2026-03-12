@@ -289,7 +289,7 @@ def _render_limpeza_total_departamentos(sb, tenant_id: str):
 
 def render_admin_departamentos():
     _ph("◩", "Departamentos", "Nível acima de grupos — organize seus grupos por departamento (ex.: Tratores, Caminhões, Colhedoras).")
-    _inject_enterprise_css()
+    inject_enterprise_css()
 
     role = current_role()
     if role not in ("admin", "superadmin"):

@@ -331,7 +331,7 @@ def _render_limpeza_total_grupos(sb, tenant_id: str):
 
 def render_admin_grupos():
     _ph("⊕", "Grupos de Equipamentos", "Crie e gerencie grupos. Mova equipamentos em lote para cada grupo.")
-    _inject_enterprise_css()
+    inject_enterprise_css()
 
     role = current_role()
     if role not in ("admin", "superadmin"):
