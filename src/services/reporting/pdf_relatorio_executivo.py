@@ -252,99 +252,82 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     col_x  = [16*mm, 16*mm + col_w + col_gap]
     ci     = 0   # coluna atual (0=esquerda, 1=direita)
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # PÁGINA 2+ — Destaques por departamento (2 colunas com y independente)
+    # ══════════════════════════════════════════════════════════════════════════
+    page_header("Destaques por Departamento")
+    PAGE_TOP = h - 20*mm
+    PAGE_BOT = 18*mm
+    col_w    = (w - 36*mm) / 2
+    col_gap  = 4*mm
+    col_x    = [16*mm, 16*mm + col_w + col_gap]
+
+    # y independente por coluna
+    y_col = [PAGE_TOP, PAGE_TOP]
+    ci    = 0
+
     def dept_block_height(dept: DeptSnapshot) -> float:
         items = min(len(dept.top_criticos), 3) + min(len(dept.top_melhores), 3) + min(len(dept.maiores_evolucoes), 3)
         return 14*mm + items * 6.5*mm + 3*mm
 
-    for dept in deptos:
-        bh = dept_block_height(dept)
-
-        # se não cabe na coluna atual, avança
-        if y - bh < 18*mm:
-            if ci == 0:
-                ci = 1
-            else:
-                footer(); c.showPage()
-                page_header("Destaques por Departamento (cont.)")
-                y = h - 20*mm
-                ci = 0
-
-        bx = col_x[ci]
+    def draw_dept_block(dept: DeptSnapshot, bx: float, by: float, bh: float):
         col_dep = _risk_color(dept.pct_geral)
-
-        # fundo do bloco
         c.setFillColor(SURFACE); c.setStrokeColor(BORDER); c.setLineWidth(0.5)
-        c.roundRect(bx, y - bh, col_w, bh, 3, fill=1, stroke=1)
+        c.roundRect(bx, by - bh, col_w, bh, 3, fill=1, stroke=1)
         c.setFillColor(col_dep)
-        c.rect(bx, y - bh, 3, bh, fill=1, stroke=0)
+        c.rect(bx, by - bh, 3, bh, fill=1, stroke=0)
 
-        # cabeçalho do bloco
         c.setFillColor(FG); c.setFont("Helvetica-Bold", 8.5)
-        c.drawString(bx + 7, y - 6*mm, dept.nome[:22])
+        c.drawString(bx + 7, by - 6*mm, dept.nome[:22])
         c.setFillColor(col_dep); c.setFont("Helvetica-Bold", 9)
-        c.drawRightString(bx + col_w - 4, y - 6*mm, f"{dept.pct_geral}%")
-
+        c.drawRightString(bx + col_w - 4, by - 6*mm, f"{dept.pct_geral}%")
         c.setStrokeColor(BORDER); c.setLineWidth(0.5)
-        c.line(bx + 4, y - 9*mm, bx + col_w - 4, y - 9*mm)
+        c.line(bx + 4, by - 9*mm, bx + col_w - 4, by - 9*mm)
 
-        iy = y - 11*mm
+        iy = by - 11*mm
 
-        # ── piores ───────────────────────────────────────────────────────────
         if dept.top_criticos:
             c.setFillColor(RED); c.setFont("Helvetica-Bold", 7)
             c.drawString(bx + 6, iy, "⚠ Piores:")
             iy -= 5.5*mm
             for eq in dept.top_criticos[:3]:
                 pct_eq = int(eq.get("pct", 0))
-                frota  = str(eq.get("frota") or "—")[:7]
-                modelo = str(eq.get("modelo") or "")[:13]
-                eq_col = _risk_color(pct_eq)
                 c.setFillColor(FG); c.setFont("Helvetica-Bold", 7.5)
-                c.drawString(bx + 8, iy, frota)
+                c.drawString(bx + 8, iy, str(eq.get("frota") or "—")[:7])
                 c.setFillColor(MUTED); c.setFont("Helvetica", 7)
-                c.drawString(bx + 20*mm, iy, modelo)
-                pb_x = bx + col_w - 26*mm
-                pbar(pb_x, iy - 1.5*mm, 18*mm, 3.5*mm, pct_eq)
-                c.setFillColor(eq_col); c.setFont("Helvetica-Bold", 7.5)
+                c.drawString(bx + 20*mm, iy, str(eq.get("modelo") or "")[:13])
+                pbar(bx + col_w - 26*mm, iy - 1.5*mm, 18*mm, 3.5*mm, pct_eq)
+                c.setFillColor(_risk_color(pct_eq)); c.setFont("Helvetica-Bold", 7.5)
                 c.drawRightString(bx + col_w - 4, iy, f"{pct_eq}%")
                 iy -= 6*mm
 
-        # ── melhores (quase concluídos) ───────────────────────────────────────
         if dept.top_melhores:
             c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 7)
             c.drawString(bx + 6, iy, "✅ Quase concluídos:")
             iy -= 5.5*mm
             for eq in dept.top_melhores[:3]:
                 pct_eq = int(eq.get("pct", 0))
-                frota  = str(eq.get("frota") or "—")[:7]
-                modelo = str(eq.get("modelo") or "")[:13]
                 c.setFillColor(FG); c.setFont("Helvetica-Bold", 7.5)
-                c.drawString(bx + 8, iy, frota)
+                c.drawString(bx + 8, iy, str(eq.get("frota") or "—")[:7])
                 c.setFillColor(MUTED); c.setFont("Helvetica", 7)
-                c.drawString(bx + 20*mm, iy, modelo)
-                pb_x = bx + col_w - 26*mm
-                pbar(pb_x, iy - 1.5*mm, 18*mm, 3.5*mm, pct_eq)
+                c.drawString(bx + 20*mm, iy, str(eq.get("modelo") or "")[:13])
+                pbar(bx + col_w - 26*mm, iy - 1.5*mm, 18*mm, 3.5*mm, pct_eq)
                 c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 7.5)
                 c.drawRightString(bx + col_w - 4, iy, f"{pct_eq}%")
                 iy -= 6*mm
 
-        # ── maiores evoluções ─────────────────────────────────────────────────
         if dept.maiores_evolucoes:
             c.setFillColor(colors.HexColor("#6366F1")); c.setFont("Helvetica-Bold", 7)
             c.drawString(bx + 6, iy, "📈 Evoluções:")
             iy -= 5.5*mm
             for eq in dept.maiores_evolucoes[:3]:
                 pct_eq  = int(eq.get("pct", 0))
-                pct_ant = int(eq.get("pct_anterior", pct_eq))
-                delta_v = pct_eq - pct_ant
-                frota   = str(eq.get("frota") or "—")[:7]
-                modelo  = str(eq.get("modelo") or "")[:13]
+                delta_v = pct_eq - int(eq.get("pct_anterior", pct_eq))
                 c.setFillColor(FG); c.setFont("Helvetica-Bold", 7.5)
-                c.drawString(bx + 8, iy, frota)
+                c.drawString(bx + 8, iy, str(eq.get("frota") or "—")[:7])
                 c.setFillColor(MUTED); c.setFont("Helvetica", 7)
-                c.drawString(bx + 20*mm, iy, modelo)
-                pb_x = bx + col_w - 26*mm
-                pbar(pb_x, iy - 1.5*mm, 18*mm, 3.5*mm, pct_eq)
+                c.drawString(bx + 20*mm, iy, str(eq.get("modelo") or "")[:13])
+                pbar(bx + col_w - 26*mm, iy - 1.5*mm, 18*mm, 3.5*mm, pct_eq)
                 c.setFillColor(_risk_color(pct_eq)); c.setFont("Helvetica-Bold", 7.5)
                 c.drawRightString(bx + col_w - 14*mm, iy, f"{pct_eq}%")
                 if delta_v > 0:
@@ -352,13 +335,36 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
                     c.drawRightString(bx + col_w - 4, iy, f"+{delta_v}p")
                 iy -= 6*mm
 
-        # avança coluna/linha
-        if ci == 0:
-            ci = 1
-            y_right = y - bh - 3*mm
-        else:
-            y = min(y - bh - 3*mm, y_right)
-            ci = 0
+    for dept in deptos:
+        bh = dept_block_height(dept)
+
+        # tenta colocar na coluna atual; se não cabe, tenta a outra; se nenhuma cabe, nova página
+        placed = False
+        for tentativa in range(3):
+            if y_col[ci] - bh >= PAGE_BOT:
+                draw_dept_block(dept, col_x[ci], y_col[ci], bh)
+                y_col[ci] -= bh + 3*mm
+                placed = True
+                ci = 1 - ci   # alterna coluna
+                break
+            else:
+                # coluna atual não cabe — tenta a outra
+                next_ci = 1 - ci
+                if y_col[next_ci] - bh >= PAGE_BOT:
+                    ci = next_ci
+                    # não alterna ainda — vai colocar no próximo loop
+                else:
+                    # nenhuma coluna cabe — nova página
+                    footer(); c.showPage()
+                    page_header("Destaques por Departamento (cont.)")
+                    y_col = [PAGE_TOP, PAGE_TOP]
+                    ci = 0
+
+        if not placed:
+            # fallback: força render mesmo que ultrapasse marginalmente
+            draw_dept_block(dept, col_x[ci], y_col[ci], bh)
+            y_col[ci] -= bh + 3*mm
+            ci = 1 - ci
 
     footer(); c.showPage()
 

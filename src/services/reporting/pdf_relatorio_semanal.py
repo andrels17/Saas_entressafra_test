@@ -220,26 +220,23 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
          RED if payload.n_alertas_total else GREEN),
     ], top_y=y)
 
-    # Barra de progresso geral grande
-    y -= 4*mm
-    c.setFillColor(FG); c.setFont("Helvetica-Bold", 10)
-    c.drawString(16*mm, y, "Progresso geral do departamento")
-    y -= 10*mm
+    # Barra de progresso geral
+    y -= 2*mm
     bar_w = w - 32*mm
-    progress_bar(16*mm, y, bar_w, 8*mm, payload.pct_geral)
-    c.setFillColor(_risk_color(payload.pct_geral)); c.setFont("Helvetica-Bold", 9)
-    c.drawRightString(w-16*mm, y+9*mm, f"{payload.pct_geral}%")
-    y -= 16*mm
+    progress_bar(16*mm, y, bar_w, 7*mm, payload.pct_geral)
+    c.setFillColor(_risk_color(payload.pct_geral)); c.setFont("Helvetica-Bold", 8.5)
+    c.drawRightString(w-16*mm, y + 8*mm, f"{payload.pct_geral}%")
+    y -= 12*mm
 
-    # KPIs linha 2 — alertas por tipo
+    # KPIs alertas
     y = kpi_row([
         ("🚫 Travados",    str(payload.n_travados),   RED   if payload.n_travados   else MUTED),
         ("⬜ Sem início",  str(payload.n_sem_inicio), MUTED if not payload.n_sem_inicio else YELLOW),
         ("⏸ Parados",     str(payload.n_parados),    MUTED if not payload.n_parados    else YELLOW),
         ("⚠️ Risco prazo", str(payload.n_risco_prazo),MUTED if not payload.n_risco_prazo else RED),
-    ], top_y=y, card_h=18*mm)
+    ], top_y=y, card_h=16*mm)
 
-    # Comparativo rápido S-1 vs S atual
+    # Comparativo S-1 vs S atual — inline na capa
     y -= 2*mm
     y = section_title("Comparativo — semana anterior vs. atual", y)
     delta = payload.pct_semana_atual - payload.pct_semana_anterior
@@ -247,77 +244,138 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
     delta_color = GREEN if delta >= 0 else RED
 
     box_w = (w - 32*mm - 8*mm) / 3
-    boxes = [
+    bx = 16*mm
+    for label, val, col in [
         ("Semana anterior", f"{payload.pct_semana_anterior}%", _risk_color(payload.pct_semana_anterior)),
         ("Semana atual",    f"{payload.pct_semana_atual}%",    _risk_color(payload.pct_semana_atual)),
         ("Variação",        delta_str,                          delta_color),
-    ]
-    bx = 16*mm
-    for label, val, col in boxes:
+    ]:
         c.setFillColor(SURFACE); c.setStrokeColor(BORDER); c.setLineWidth(0.7)
-        c.roundRect(bx, y-16*mm, box_w, 16*mm, 5, fill=1, stroke=1)
+        c.roundRect(bx, y-14*mm, box_w, 14*mm, 4, fill=1, stroke=1)
         c.setFillColor(MUTED); c.setFont("Helvetica", 8)
-        c.drawString(bx+6, y-6*mm, label)
-        c.setFillColor(col); c.setFont("Helvetica-Bold", 16)
-        c.drawString(bx+6, y-14*mm, val)
+        c.drawString(bx+6, y-5*mm, label)
+        c.setFillColor(col); c.setFont("Helvetica-Bold", 15)
+        c.drawString(bx+6, y-13*mm, val)
         bx += box_w + 4*mm
-    y -= 24*mm
+    y -= 20*mm
+
+    # Top 3 críticos inline na capa se houver espaço
+    piores_capa = sorted(
+        [e for e in (payload.todos_equipamentos or []) if e.get("pct", 0) < 50],
+        key=lambda e: e.get("pct", 0)
+    )[:3]
+    if piores_capa and y > 60*mm:
+        y -= 2*mm
+        y = section_title("🔴 Equipamentos críticos em destaque", y)
+        row_hc = 7*mm
+        for i, eq in enumerate(piores_capa):
+            if y - row_hc < 18*mm:
+                break
+            pct = int(eq.get("pct", 0))
+            frota  = str(eq.get("frota") or "—")[:10]
+            modelo = str(eq.get("modelo") or "")[:20]
+            grupo  = str(eq.get("grupo") or "")[:14]
+            col    = _risk_color(pct)
+            c.setFillColor(SURFACE if i % 2 == 0 else WHITE)
+            c.rect(16*mm, y - row_hc, w - 32*mm, row_hc, fill=1, stroke=0)
+            c.setFillColor(FG); c.setFont("Helvetica-Bold", 8)
+            c.drawString(18*mm, y - row_hc*0.38, frota)
+            c.setFillColor(MUTED); c.setFont("Helvetica", 7.5)
+            c.drawString(32*mm, y - row_hc*0.38, modelo)
+            c.drawString(80*mm, y - row_hc*0.38, grupo)
+            progress_bar(w/2 + 10*mm, y - row_hc + 1.5*mm, 35*mm, row_hc - 3*mm, pct)
+            c.setFillColor(col); c.setFont("Helvetica-Bold", 8.5)
+            c.drawRightString(w - 17*mm, y - row_hc*0.38, f"{pct}%")
+            c.setStrokeColor(BORDER); c.setLineWidth(0.3)
+            c.line(16*mm, y - row_hc, w - 16*mm, y - row_hc)
+            y -= row_hc
 
     footer(); c.showPage()
 
-    # ── PÁGINA 2: Evolução semanal ────────────────────────────────────────────
+    # ── PÁGINA 2: Evolução semanal + top equipamentos ─────────────────────────
     new_page("Evolução Semanal")
     y = h - 52*mm
 
-    y = section_title("Progresso acumulado por semana", y)
+    # Layout 2 colunas: esquerda = gráfico evolução, direita = top piores/melhores
+    left_w  = (w - 36*mm) * 0.55
+    right_w = (w - 36*mm) * 0.42
+    left_x  = 16*mm
+    right_x = left_x + left_w + 4*mm
+    y_left  = y
+    y_right = y
+
+    # Coluna esquerda: evolução semanal em barras horizontais
+    c.setFillColor(FG); c.setFont("Helvetica-Bold", 9)
+    c.drawString(left_x, y_left, "Progresso acumulado por semana")
+    y_left -= 7*mm
 
     if payload.evolucao:
-        # Mini barras horizontais por semana
-        bar_area_w = w - 32*mm
-        label_w    = 18*mm
-        pct_w      = 12*mm
-        bar_avail  = bar_area_w - label_w - pct_w - 6*mm
-        row_h      = 7*mm
         sem_atual  = payload.semana_atual
+        bar_label_w = 16*mm
+        bar_pct_w   = 10*mm
+        bar_avail   = left_w - bar_label_w - bar_pct_w - 4*mm
+        row_h       = 6*mm
 
         for snap in payload.evolucao:
-            if y < 30*mm:
-                footer(); c.showPage(); new_page("Evolução Semanal (cont.)"); y = h-52*mm
-
+            if y_left - row_h < 24*mm:
+                break
             is_current = snap.semana == sem_atual
-            label = f"Semana {snap.semana}"
             if is_current:
-                c.setFillColor(PRIMARY); c.setFont("Helvetica-Bold", 8.5)
+                c.setFillColor(PRIMARY); c.setFont("Helvetica-Bold", 8)
             else:
-                c.setFillColor(MUTED); c.setFont("Helvetica", 8.5)
-            c.drawString(16*mm, y - row_h/2, label)
-
-            bx = 16*mm + label_w
-            progress_bar(bx, y - row_h + 1*mm, bar_avail, row_h - 3*mm, snap.pct)
-
-            pct_col = _risk_color(snap.pct)
-            c.setFillColor(pct_col); c.setFont("Helvetica-Bold", 8.5)
-            c.drawRightString(w - 16*mm, y - row_h/2, f"{snap.pct}%")
-
-            y -= row_h + 1.5*mm
-
-        y -= 6*mm
-
-        # Tabela resumo evolução
-        y = section_title("Tabela de evolução", y)
-        rows = [["Semana", "Etapas feitas", "Total possível", "%"]]
-        for snap in payload.evolucao:
-            rows.append([
-                f"Sem. {snap.semana}" + (" ◀ atual" if snap.semana == sem_atual else ""),
-                str(snap.concluidos),
-                str(snap.total),
-                f"{snap.pct}%",
-            ])
-        col_w = bar_area_w / 4
-        y = platypus_table(rows, [col_w*1.4, col_w*1.0, col_w*1.0, col_w*0.6], y)
+                c.setFillColor(MUTED); c.setFont("Helvetica", 8)
+            c.drawString(left_x, y_left - row_h/2, f"Sem.{snap.semana}")
+            bx = left_x + bar_label_w
+            progress_bar(bx, y_left - row_h + 1*mm, bar_avail, row_h - 2*mm, snap.pct)
+            c.setFillColor(_risk_color(snap.pct)); c.setFont("Helvetica-Bold", 8)
+            c.drawRightString(left_x + left_w, y_left - row_h/2, f"{snap.pct}%")
+            y_left -= row_h + 1*mm
     else:
-        c.setFillColor(MUTED); c.setFont("Helvetica", 10)
-        c.drawString(16*mm, y-10*mm, "Sem dados de evolução semanal para esta revisão.")
+        c.setFillColor(MUTED); c.setFont("Helvetica", 9)
+        c.drawString(left_x, y_left - 8*mm, "Sem dados de evolução.")
+        y_left -= 14*mm
+
+    # Coluna direita: top piores + top melhores
+    todos = payload.todos_equipamentos or []
+    c.setFillColor(FG); c.setFont("Helvetica-Bold", 9)
+    c.drawString(right_x, y_right, "Destaques de equipamentos")
+    y_right -= 7*mm
+
+    def _right_eq_row(eq: dict, col_label_color, y_r: float) -> float:
+        if y_r - 6*mm < 24*mm:
+            return y_r
+        pct_eq = int(eq.get("pct", 0))
+        frota  = str(eq.get("frota") or "—")[:8]
+        modelo = str(eq.get("modelo") or "")[:12]
+        col    = _risk_color(pct_eq)
+        c.setFillColor(FG); c.setFont("Helvetica-Bold", 7.5)
+        c.drawString(right_x + 2, y_r - 3*mm, frota)
+        c.setFillColor(MUTED); c.setFont("Helvetica", 7)
+        c.drawString(right_x + 16*mm, y_r - 3*mm, modelo)
+        pb_x = right_x + right_w - 22*mm
+        progress_bar(pb_x, y_r - 5*mm, 14*mm, 3.5*mm, pct_eq)
+        c.setFillColor(col); c.setFont("Helvetica-Bold", 7.5)
+        c.drawRightString(right_x + right_w, y_r - 3*mm, f"{pct_eq}%")
+        c.setStrokeColor(BORDER); c.setLineWidth(0.3)
+        c.line(right_x, y_r - 6*mm, right_x + right_w, y_r - 6*mm)
+        return y_r - 6*mm
+
+    piores_pg2 = sorted([e for e in todos if e.get("pct", 0) < 100], key=lambda e: e.get("pct", 0))[:5]
+    if piores_pg2:
+        c.setFillColor(RED); c.setFont("Helvetica-Bold", 7.5)
+        c.drawString(right_x, y_right, "⚠ Piores:")
+        y_right -= 5*mm
+        for eq in piores_pg2:
+            y_right = _right_eq_row(eq, RED, y_right)
+
+    melhores_pg2 = sorted([e for e in todos if e.get("pct", 0) < 100], key=lambda e: -e.get("pct", 0))[:5]
+    if melhores_pg2:
+        y_right -= 3*mm
+        c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 7.5)
+        c.drawString(right_x, y_right, "✅ Mais avançados:")
+        y_right -= 5*mm
+        for eq in melhores_pg2:
+            y_right = _right_eq_row(eq, GREEN, y_right)
 
     footer(); c.showPage()
 
