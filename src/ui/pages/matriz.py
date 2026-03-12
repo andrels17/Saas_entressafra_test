@@ -1232,6 +1232,10 @@ def render_matriz():
                     with sv1: save_now=st.button("💾 Salvar alterações",key=f"save_{kb}",type="primary",use_container_width=True)
                     with sv2: st.caption("Marque/desmarque etapas acima e clique em Salvar.")
 
+                    _pending_changes_key=f"pending_changes_{kb}"
+                    _pending_preview_key=f"pending_preview_{kb}"
+                    _field_lbl={"etapa_d":"D","etapa_r":"R","etapa_m":"M"}
+
                     if save_now:
                         if edited is None:
                             st.warning("Troque para o modo **Editar** para poder salvar alterações.")
@@ -1244,53 +1248,64 @@ def render_matriz():
                                     if ov!=nv:
                                         sid,field=col_meta[col]; changes.append((equip_id,sid,field,nv))
                             if not changes:
+                                st.session_state.pop(_pending_changes_key, None)
+                                st.session_state.pop(_pending_preview_key, None)
                                 st.info("Nenhuma alteração detectada — faça alguma marcação antes de salvar.")
                             else:
-                                # FIX #2: Preview das mudanças antes de confirmar
-                                _field_lbl={"etapa_d":"D","etapa_r":"R","etapa_m":"M"}
                                 _prev_lines=[]
                                 for eid,sid,field,nv in changes[:8]:
                                     _eq_n=eq_label_short.get(eid,str(eid))
                                     _sv_n=next((s.get("nome","") for s in svs if s.get("id")==sid),sid)
                                     _icon="✅" if nv else "☐"
                                     _prev_lines.append(f"- Frota **{_eq_n}** · {_sv_n} · **{_field_lbl.get(field,field)}** → {_icon}")
-                                if len(changes)>8: _prev_lines.append(f"- _...e mais {len(changes)-8} alterações_")
-                                _confirm_key=f"confirm_{kb}"
-                                st.session_state.setdefault(_confirm_key,False)
-                                with st.container(border=True):
-                                    st.markdown(f"**{len(changes)} alteração(ões) a salvar:**")
-                                    st.markdown("\n".join(_prev_lines))
-                                    c_yes,c_no,_=st.columns([1,1,2])
-                                    with c_yes:
-                                        if st.button("✅ Confirmar",key=f"yes_{kb}",type="primary",use_container_width=True):
-                                            st.session_state[_confirm_key]=True
-                                    with c_no:
-                                        if st.button("✖ Cancelar",key=f"no_{kb}",use_container_width=True):
-                                            st.session_state[_confirm_key]=False
-                                            st.rerun()
+                                if len(changes)>8:
+                                    _prev_lines.append(f"- _...e mais {len(changes)-8} alterações_")
+                                st.session_state[_pending_changes_key]=changes
+                                st.session_state[_pending_preview_key]=_prev_lines
+                                st.rerun()
 
-                                if st.session_state.get(_confirm_key):
-                                    st.session_state[_confirm_key]=False
-                                    now_iso=datetime.now(timezone.utc).isoformat(); ok=missing=0; pb=st.empty()
-                                    with st.spinner(f"Aplicando {len(changes)} alterações..."):
-                                        for ic,(eid,sid,field,nv) in enumerate(changes,1):
-                                            t=task_map.get((eid,sid)) or {}; tid=t.get("id")
-                                            if not tid: missing+=1; continue
-                                            upd={field:bool(nv),"updated_by":current_user_id() or None}
-                                            dtf={"etapa_d":"dt_etapa_d","etapa_r":"dt_etapa_r","etapa_m":"dt_etapa_m"}.get(field)
-                                            if dtf: upd[dtf]=now_iso if nv else None
-                                            try: sb.table("tarefas_servico").update(upd).eq("id",tid).execute(); ok+=1
-                                            except Exception: pass
-                                            if ic%15==0 or ic==len(changes): pb.info(f"Processando {ic}/{len(changes)}  ✓ {ok}")
-                                    pb.success(f"✅ {ok} etapas salvas" + (f"  ·  {missing} não encontradas" if missing else ""))
-                                    st.toast("✅ Alterações aplicadas com sucesso!")
-                                    st.session_state["data_version"]=str(time.time())
-                                    try: _load_payload.clear()
+                    pending_changes=st.session_state.get(_pending_changes_key) or []
+                    pending_preview=st.session_state.get(_pending_preview_key) or []
+                    if pending_changes:
+                        with st.container(border=True):
+                            st.markdown(f"**{len(pending_changes)} alteração(ões) a salvar:**")
+                            st.markdown("
+".join(pending_preview))
+                            c_yes,c_no,_=st.columns([1,1,2])
+                            with c_yes:
+                                confirm_now=st.button("✅ Confirmar",key=f"yes_{kb}",type="primary",use_container_width=True)
+                            with c_no:
+                                cancel_now=st.button("✖ Cancelar",key=f"no_{kb}",use_container_width=True)
+
+                        if cancel_now:
+                            st.session_state.pop(_pending_changes_key, None)
+                            st.session_state.pop(_pending_preview_key, None)
+                            st.rerun()
+
+                        if confirm_now:
+                            now_iso=datetime.now(timezone.utc).isoformat(); ok=missing=0; pb=st.empty()
+                            with st.spinner(f"Aplicando {len(pending_changes)} alterações..."):
+                                for ic,(eid,sid,field,nv) in enumerate(pending_changes,1):
+                                    t=task_map.get((eid,sid)) or {}; tid=t.get("id")
+                                    if not tid: missing+=1; continue
+                                    upd={field:bool(nv),"updated_by":current_user_id() or None}
+                                    dtf={"etapa_d":"dt_etapa_d","etapa_r":"dt_etapa_r","etapa_m":"dt_etapa_m"}.get(field)
+                                    if dtf: upd[dtf]=now_iso if nv else None
+                                    try: sb.table("tarefas_servico").update(upd).eq("id",tid).execute(); ok+=1
                                     except Exception: pass
-                                    try: _group_kpis.clear()
-                                    except Exception: pass
-                                    try: nav.rerun_keep_menu()
-                                    except Exception: st.rerun()
+                                    if ic%15==0 or ic==len(pending_changes):
+                                        pb.info(f"Processando {ic}/{len(pending_changes)}  ✓ {ok}")
+                            st.session_state.pop(_pending_changes_key, None)
+                            st.session_state.pop(_pending_preview_key, None)
+                            pb.success(f"✅ {ok} etapas salvas" + (f"  ·  {missing} não encontradas" if missing else ""))
+                            st.toast("✅ Alterações aplicadas com sucesso!")
+                            st.session_state["data_version"]=str(time.time())
+                            try: _load_payload.clear()
+                            except Exception: pass
+                            try: _group_kpis.clear()
+                            except Exception: pass
+                            try: nav.rerun_keep_menu()
+                            except Exception: st.rerun()
 
                     exp_df=df_display.reset_index(drop=True).copy()
                     for c in [c for c in exp_df.columns if c not in ("%","Equipamento","Status")]:
