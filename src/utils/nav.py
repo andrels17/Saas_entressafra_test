@@ -28,11 +28,19 @@ def get_current_revisao() -> str | None:
     return None
 
 
-def set_current_revisao(revisao_id: str | None) -> None:
-    """Persiste o revisao_id canônico e mantém aliases sincronizados."""
+def set_current_revisao(revisao_id: str | None, titulo: str | None = None, semana: int | None = None) -> None:
+    """Persiste o revisao_id canônico e mantém aliases sincronizados.
+
+    titulo e semana, quando fornecidos, são gravados no session_state
+    para o chip de revisão ativa na sidebar.
+    """
     st.session_state[_REVISAO_KEY] = revisao_id
     for alias in _REVISAO_ALIASES:
         st.session_state[alias] = revisao_id
+    if titulo is not None:
+        st.session_state["_sidebar_rev_titulo"] = titulo
+    if semana is not None:
+        st.session_state["_sidebar_rev_semana"] = semana
 
 
 # ── Navegação ─────────────────────────────────────────────────────────────────
