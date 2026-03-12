@@ -1269,8 +1269,7 @@ def render_matriz():
                     if pending_changes:
                         with st.container(border=True):
                             st.markdown(f"**{len(pending_changes)} alteração(ões) a salvar:**")
-                            st.markdown("
-".join(pending_preview))
+                            st.markdown("\n".join(pending_preview))
                             c_yes,c_no,_=st.columns([1,1,2])
                             with c_yes:
                                 confirm_now=st.button("✅ Confirmar",key=f"yes_{kb}",type="primary",use_container_width=True)
