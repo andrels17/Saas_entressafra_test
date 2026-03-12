@@ -1,7 +1,7 @@
 """Tab 1 — Criar usuário manualmente ou via convite."""
 import streamlit as st
 
-ROLES = ["admin", "gestor", "executor", "viewer"]
+ROLES = ["admin", "supervisor", "gestor", "executor", "viewer"]
 
 
 def render_tab_criar(svc, tenant_id: str, rerun_fn, safe_json_fn):

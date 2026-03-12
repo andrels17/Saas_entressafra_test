@@ -2,8 +2,8 @@
 import streamlit as st
 from postgrest.exceptions import APIError
 
-ROLES = ["admin", "gestor", "executor", "viewer"]
-ROLE_ICONS = {"admin": "🔴", "gestor": "🟠", "executor": "🟡", "viewer": "⚪"}
+ROLES = ["admin", "supervisor", "gestor", "executor", "viewer"]
+ROLE_ICONS = {"admin": "🔴", "supervisor": "🟣", "gestor": "🟠", "executor": "🟡", "viewer": "⚪"}
 
 
 def _load_tenant_users(svc, tenant_id: str) -> list[dict]:

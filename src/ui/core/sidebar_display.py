@@ -9,9 +9,10 @@ from src.utils.supabase_helpers import sb_for_user
 def _role_pretty(role: str) -> str:
     r = (role or "").strip().lower()
     mapping = {
-        "admin": "Admin",
+        "admin":      "Admin",
         "superadmin": "Super Admin",
-        "gestor": "Gestor",
+        "supervisor": "Supervisor",
+        "gestor":     "Gestor",
         "user": "Usuário",
         "usuario": "Usuário",
         "membro": "Membro",

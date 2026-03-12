@@ -587,20 +587,86 @@ def _fragment_disparo_manual(tenant_id: str, revisao_id: str, is_admin: bool,
     # ── 2. Destinatários ──────────────────────────────────────────────────────
     with col_dest:
         try:
-            from src.services.email.recipients import get_recipient_groups
-            groups = get_recipient_groups(tenant_id)
-            if groups:
-                total_dest = sum(len(g.recipients) for g in groups)
-                st.success(f"✅ {len(groups)} departamento(s) · {total_dest} destinatário(s)")
-                with st.expander("Ver destinatários", expanded=False):
-                    for g in groups:
-                        emails = ", ".join(f"`{r.email}`" for r in g.recipients)
-                        st.markdown(f"**{g.departamento_nome}:** {emails}")
+            from src.services.email.recipients import get_recipient_groups, get_executive_recipients
+            groups_dest  = get_recipient_groups(tenant_id)
+            exec_recs    = get_executive_recipients(tenant_id)
+            total_gestor = sum(len(g.recipients) for g in groups_dest)
+            total_exec   = len(exec_recs)
+            total_dest   = total_gestor + total_exec
+            if total_dest:
+                st.success(f"✅ {total_gestor} gestor(es) · {total_exec} supervisor(es)/admin(s)")
             else:
                 st.warning("⚠️ Nenhum destinatário encontrado")
-                st.caption("Vincule gestores a departamentos em Admin → Usuários.")
         except Exception as e:
             st.warning(f"Não foi possível carregar destinatários: {e}")
+
+    # ── 2b. Configuração de destinatários ─────────────────────────────────────
+    with st.expander("👥 Configurar destinatários e tipo de relatório", expanded=False):
+        st.caption(
+            "**Tipo padrão por role:** gestor → relatório de departamento · "
+            "supervisor/admin → relatório executivo consolidado.\n\n"
+            "Altere individualmente abaixo para sobrescrever o padrão."
+        )
+        try:
+            from src.services.email.recipients import get_all_users_with_prefs, save_email_pref
+            users_prefs = get_all_users_with_prefs(tenant_id)
+            if users_prefs:
+                role_icons = {"admin": "🔴", "supervisor": "🟣", "gestor": "🟠",
+                              "executor": "🟡", "viewer": "⚪"}
+                tipo_opts  = ["gestor", "executivo", "nenhum"]
+                tipo_labels = {"gestor": "📋 Departamento", "executivo": "📊 Executivo", "nenhum": "🚫 Não enviar"}
+
+                changed = {}
+                for u in users_prefs:
+                    icon  = role_icons.get(u["role"], "⚪")
+                    label = f"{icon} **{u['nome']}** `{u['role']}` — {u['email']}"
+                    override_note = " _(override manual)_" if u["override"] else ""
+                    col_u, col_sel = st.columns([3, 2])
+                    with col_u:
+                        st.markdown(label + override_note)
+                    with col_sel:
+                        cur_tipo = u["tipo_relatorio"]
+                        novo = st.selectbox(
+                            "Tipo",
+                            options=tipo_opts,
+                            index=tipo_opts.index(cur_tipo) if cur_tipo in tipo_opts else 0,
+                            format_func=lambda t: tipo_labels.get(t, t),
+                            key=f"emailpref_{u['user_id']}",
+                            label_visibility="collapsed",
+                        )
+                        if novo != cur_tipo:
+                            changed[u["user_id"]] = novo
+
+                if changed:
+                    if st.button("💾 Salvar preferências", key="save_email_prefs"):
+                        from src.services.email.recipients import save_email_pref
+                        ok = all(
+                            save_email_pref(tenant_id, uid, tipo, ativo=(tipo != "nenhum"))
+                            for uid, tipo in changed.items()
+                        )
+                        if ok:
+                            st.success("✅ Preferências salvas!")
+                            st.rerun()
+                        else:
+                            st.error("Erro ao salvar. Verifique se a tabela `tenant_email_prefs` existe no Supabase.")
+                            with st.expander("📋 SQL para criar a tabela", expanded=True):
+                                st.code("""
+CREATE TABLE tenant_email_prefs (
+  tenant_id       uuid NOT NULL,
+  user_id         uuid NOT NULL,
+  tipo_relatorio  text NOT NULL DEFAULT 'gestor',
+  ativo           boolean NOT NULL DEFAULT true,
+  updated_at      timestamptz DEFAULT now(),
+  PRIMARY KEY (tenant_id, user_id)
+);
+ALTER TABLE tenant_email_prefs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "service_role_all" ON tenant_email_prefs
+  USING (true) WITH CHECK (true);
+""", language="sql")
+            else:
+                st.info("Nenhum usuário encontrado para este tenant.")
+        except Exception as e_prefs:
+            st.warning(f"Não foi possível carregar preferências: {e_prefs}")
 
     st.divider()
 
