@@ -334,7 +334,8 @@ def render_dashboard() -> None:
         return
 
     revisao_id = rev["id"]
-    set_current_revisao(revisao_id, titulo=rev.get("titulo"))
+    set_current_revisao(revisao_id)
+    st.session_state["_sidebar_rev_titulo"] = rev.get("titulo")
 
     # Header
     h1, h2 = st.columns([0.82, 0.18])
