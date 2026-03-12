@@ -131,7 +131,7 @@ def _render_pct_rank_chart(df: pd.DataFrame, category_col: str, value_col: str, 
         height=max(380, 42 * len(chart_df) + 80),
         margin=dict(l=10, r=90, t=48, b=10),
         xaxis=dict(range=[0, 100], title="% Concluído"),
-        yaxis=dict(title=""),
+        yaxis=dict(title="", type="category"),
         paper_bgcolor="#06080B",
         plot_bgcolor="#0C111A",
         font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=11),
@@ -229,21 +229,54 @@ def _fragment_equipamentos(base: pd.DataFrame, dept_map: dict, top_n: int = 10) 
     if edf.empty:
         st.info("Sem dados de equipamentos.")
         return
+
     edf = edf.copy()
+    edf["Frota"] = edf["Frota"].fillna("—").astype(str).str.strip()
+    edf["Modelo"] = edf["Modelo"].fillna("—").astype(str).str.strip()
     edf["Departamento"] = edf["departamento_id"].map(dept_map).fillna("—")
 
     busca = st.text_input("Buscar frota / modelo", placeholder="Ex.: 2055, JD 6190…", key="dash_busca_eq")
     if busca.strip():
-        mask = edf["Frota"].astype(str).str.lower().str.contains(busca.lower(), na=False) | edf["Modelo"].astype(str).str.lower().str.contains(busca.lower(), na=False)
+        termo = busca.strip().lower()
+        mask = (
+            edf["Frota"].str.lower().str.contains(termo, na=False)
+            | edf["Modelo"].str.lower().str.contains(termo, na=False)
+        )
         edf = edf[mask]
 
-    edf["% Concluído"] = pd.to_numeric(edf["% Concluído"], errors="coerce").fillna(0).clip(0, 100)
-    _render_pct_rank_chart(edf, "Frota", "% Concluído", f"Top {top_n} equipamentos por % de conclusão", top_n=top_n)
+    if edf.empty:
+        st.info("Nenhum equipamento encontrado para o filtro informado.")
+        return
 
-    cols = ["Frota", "Modelo", "Departamento", "Total", "% Concluído", "Pendentes", "Em andamento", "Travados", "Não aplica", "Concluídos"]
-    present = [c for c in cols if c in edf.columns]
+    # Consolida por código de frota + modelo para evitar linhas duplicadas no gráfico.
+    agg = (
+        edf.groupby(["Frota", "Modelo", "Departamento"], dropna=False, as_index=False)
+        .agg({
+            "Total": "sum",
+            "Pendentes": "sum",
+            "Em andamento": "sum",
+            "Travados": "sum",
+            "Não aplica": "sum",
+            "Concluídos": "sum",
+            "done_steps": "sum",
+            "expected_steps": "sum",
+        })
+    )
+    agg["% Concluído"] = (
+        (pd.to_numeric(agg["done_steps"], errors="coerce").fillna(0)
+         / pd.to_numeric(agg["expected_steps"], errors="coerce").replace(0, pd.NA)) * 100
+    ).fillna(0).clip(0, 100).round(1)
+    agg["Equipamento"] = agg.apply(
+        lambda r: f"{r['Frota']} — {r['Modelo']}" if str(r["Modelo"]).strip() not in {"", "—"} else str(r["Frota"]),
+        axis=1,
+    )
+
+    rank_df = agg.sort_values(["% Concluído", "Concluídos", "Equipamento"], ascending=[False, False, True]).head(top_n)
+    _render_pct_rank_chart(rank_df, "Equipamento", "% Concluído", f"Top {top_n} equipamentos por % de conclusão", top_n=top_n)
+
+    cols = ["Equipamento", "Frota", "Modelo", "Departamento", "Total", "% Concluído", "Pendentes", "Em andamento", "Travados", "Não aplica", "Concluídos"]
     st.dataframe(
-        edf[present].sort_values(["% Concluído", "Frota"], ascending=[False, True]).head(top_n),
+        rank_df[cols],
         use_container_width=True,
         hide_index=True,
         column_config={"% Concluído": st.column_config.ProgressColumn("% Concluído", min_value=0, max_value=100, format="%.1f%%")},
