@@ -677,6 +677,9 @@ def dispatch_relatorio_semanal(
             dept_snapshots: list[DeptSnapshot] = []
             sem_atual_rev = _semana_atual(revisao.get("data_inicio"),
                                           int(revisao.get("semanas_total") or 1))
+            trend_acc: dict[int, dict[str, int]] = {}
+            heatmap_semanal: list[dict] = []
+            alertas_parados = {"atencao": 0, "critico": 0, "urgente": 0}
 
             for grp in all_dept_groups:  # TODOS os deptos, não só os com gestores
                 try:
@@ -710,14 +713,36 @@ def dispatch_relatorio_semanal(
                         n_travados=p.n_travados,
                         n_sem_inicio=p.n_sem_inicio,
                         n_risco_prazo=p.n_risco_prazo,
-                        n_parados=p.n_parados,
-                        max_dias_parado=max([int(x.get("dias_parado") or 0) for x in (p.parados_detalhe or [])] or [0]),
                         top_criticos=top_criticos,
                         top_melhores=top_melhores,
                         maiores_evolucoes=maiores_evolucoes,
+                        n_parados=p.n_parados,
+                        max_dias_parado=max([int(x.get("dias_parado") or 0) for x in (p.parados_detalhe or [])] or [0]),
                         _done_steps=p.done_steps,
                         _expected_steps=p.expected_steps,
                     ))
+
+                    for wk in (p.evolucao or []):
+                        sem = int(getattr(wk, "semana", 0) or 0)
+                        if sem <= 0:
+                            continue
+                        acc = trend_acc.setdefault(sem, {"done": 0, "total": 0})
+                        acc["done"] += int(getattr(wk, "concluidos", 0) or 0)
+                        acc["total"] += int(getattr(wk, "total", 0) or 0)
+                        heatmap_semanal.append({
+                            "departamento": grp.departamento_nome,
+                            "semana": sem,
+                            "pct": int(getattr(wk, "pct", 0) or 0),
+                        })
+
+                    for par in (p.parados_detalhe or []):
+                        dias = int(par.get("dias_parado") or 0)
+                        if dias > 21:
+                            alertas_parados["urgente"] += 1
+                        elif dias > 14:
+                            alertas_parados["critico"] += 1
+                        elif dias > 7:
+                            alertas_parados["atencao"] += 1
                 except Exception as e_g:
                     _log(f"    ↳ Aviso: erro ao montar snapshot de {grp.departamento_nome}: {e_g}")
 
@@ -735,6 +760,14 @@ def dispatch_relatorio_semanal(
                 n_equip_concl   = sum(d.n_concluidos   for d in dept_snapshots)
                 n_alertas_total = sum(d.n_travados + d.n_risco_prazo + d.n_parados + d.n_sem_inicio for d in dept_snapshots)
 
+                trend_semanal = []
+                for sem in sorted(trend_acc):
+                    total_sem = int(trend_acc[sem].get("total") or 0)
+                    done_sem = int(trend_acc[sem].get("done") or 0)
+                    pct_sem = max(0, min(100, round(done_sem / total_sem * 100))) if total_sem > 0 else 0
+                    trend_semanal.append({"semana": sem, "pct": pct_sem})
+                trend_semanal = trend_semanal[-4:]
+
                 exec_payload = RelatorioExecutivoPayload(
                     tenant_nome=tenant_nome or "AgroSafra",
                     revisao_titulo=revisao.get("titulo") or "Revisão",
@@ -747,6 +780,9 @@ def dispatch_relatorio_semanal(
                     departamentos=dept_snapshots,
                     primary_color=branding.get("primary_color") or "#FFD100",
                     logo_url=branding.get("logo_url"),
+                    trend_semanal=trend_semanal,
+                    heatmap_semanal=heatmap_semanal,
+                    alertas_parados=alertas_parados,
                 )
                 pdf_exec  = build_executive_pdf(exec_payload)
                 pdf_name_e = f"relatorio_executivo_semana{sem_atual_rev}.pdf"
