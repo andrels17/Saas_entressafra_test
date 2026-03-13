@@ -401,18 +401,18 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
                 c.setFillColor(MUTED); c.setFont("Helvetica", 6.2)
                 c.drawString(bx + 20*mm, iy, str(eq.get("modelo") or "")[:8])
 
-                # layout mais conservador para manter tudo dentro do card
-                bar_x = bx + col_w - 39*mm
-                bar_w = 8*mm
-                pct_x = bx + col_w - 13*mm
-                delta_x = bx + col_w - 7*mm
+                # alinhado com os blocos acima, mas com espaço reservado para o delta
+                bar_x = bx + col_w - 26*mm
+                bar_w = 12*mm
+                delta_x = bx + col_w - 8*mm
+                pct_x = bx + col_w - 4
 
                 pbar(bar_x, iy - 1.5*mm, bar_w, 3.3*mm, pct_eq)
+                if delta_v > 0:
+                    c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 5.8)
+                    c.drawRightString(delta_x, iy, f"+{delta_v}p")
                 c.setFillColor(_risk_color(pct_eq)); c.setFont("Helvetica-Bold", 6.2)
                 c.drawRightString(pct_x, iy, f"{pct_eq}%")
-                if delta_v > 0:
-                    c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 5.6)
-                    c.drawRightString(delta_x, iy, f"+{delta_v}p")
                 iy -= 6.5*mm
 
     for dept in deptos:
