@@ -53,11 +53,11 @@ class DeptSnapshot:
     n_travados: int
     n_sem_inicio: int
     n_risco_prazo: int
+    n_parados: int = 0
+    max_dias_parado: int = 0
     top_criticos: list[dict]       # [{frota, modelo, pct, status}] — menor %
     top_melhores: list[dict]       # [{frota, modelo, pct, pct_anterior}] — maior %, quase concluídos
     maiores_evolucoes: list[dict]  # [{frota, modelo, pct, pct_anterior}] — maior delta semana
-    n_parados: int = 0
-    max_dias_parado: int = 0
     _done_steps: int = 0           # para cálculo ponderado do pct_global
     _expected_steps: int = 0       # para cálculo ponderado do pct_global
 
@@ -398,14 +398,21 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
                 delta_v = pct_eq - int(eq.get("pct_anterior", pct_eq))
                 c.setFillColor(FG); c.setFont("Helvetica-Bold", 7.5)
                 c.drawString(bx + 8, iy, str(eq.get("frota") or "—")[:7])
-                c.setFillColor(MUTED); c.setFont("Helvetica", 7)
-                c.drawString(bx + 20*mm, iy, str(eq.get("modelo") or "")[:13])
-                pbar(bx + col_w - 26*mm, iy - 1.5*mm, 18*mm, 3.5*mm, pct_eq)
-                c.setFillColor(_risk_color(pct_eq)); c.setFont("Helvetica-Bold", 7.5)
-                c.drawRightString(bx + col_w - 14*mm, iy, f"{pct_eq}%")
+                c.setFillColor(MUTED); c.setFont("Helvetica", 6.8)
+                c.drawString(bx + 20*mm, iy, str(eq.get("modelo") or "")[:11])
+
+                # reserva mais espaço à direita para o delta não escapar do box
+                bar_x = bx + col_w - 31*mm
+                bar_w = 12*mm
+                pct_x = bx + col_w - 8*mm
+                delta_x = bx + col_w - 4.5*mm
+
+                pbar(bar_x, iy - 1.5*mm, bar_w, 3.5*mm, pct_eq)
+                c.setFillColor(_risk_color(pct_eq)); c.setFont("Helvetica-Bold", 7.1)
+                c.drawRightString(pct_x, iy, f"{pct_eq}%")
                 if delta_v > 0:
-                    c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 6.5)
-                    c.drawRightString(bx + col_w - 4, iy, f"+{delta_v}p")
+                    c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 6.1)
+                    c.drawRightString(delta_x, iy, f"+{delta_v}p")
                 iy -= 6*mm
 
     for dept in deptos:
