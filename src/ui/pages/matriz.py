@@ -15,8 +15,9 @@ from __future__ import annotations
 import io
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
-from src.utils.timezone import now_utc as _now_utc
+from datetime import datetime, date, timezone
+from src.utils.timezone import now_utc as _now_utc, now_brt as _now_brt
+from src.utils.weeks import week_from_revisao as _week_from_revisao
 
 import pandas as pd
 import streamlit as st
@@ -971,6 +972,17 @@ def render_matriz():
         svc_ids_all=[s.get("id") for s in all_services if s.get("id")]
         semanas_disp=sorted({int(t.get("semana") or 0) for t in tarefas if t.get("semana")})
 
+        # Semana sugerida: calculada a partir da data_inicio da revisão (BRT)
+        _rev_data_inicio = None
+        _rev_semanas_total = None
+        try:
+            if rev_row and rev_row.get("data_inicio"):
+                _rev_data_inicio = date.fromisoformat(str(rev_row["data_inicio"])[:10])
+            _rev_semanas_total = int(rev_row.get("semanas_total") or 0) or None if rev_row else None
+        except Exception:
+            pass
+        _semana_sugerida = _week_from_revisao(_now_brt().date(), _rev_data_inicio, _rev_semanas_total)
+
         total_per_eq=max(len(all_services),1)*3; resumo_rows=[]; tok_g=0; eq100_g=0
         for e in eqs:
             done=sum(int(bool((task_map.get((e["id"],s.get("id"))) or {}).get(f)))
@@ -1115,7 +1127,15 @@ def render_matriz():
                 sem_pick=st.selectbox("Filtrar por semana",sem_opts,index=0,key="mtz_sem_pick")
                 semana_filtro=None if sem_pick=="Todas as semanas" else int(sem_pick.split()[-1])
             with fc3:
-                st.caption("Atraso aparece como ! na coluna M (modo Visual).")
+                semana_lote=st.number_input(
+                    "📅 Semana do apontamento",
+                    min_value=0, max_value=99,
+                    value=int(_semana_sugerida),
+                    step=1, key="mtz_semana_lote",
+                    help=f"Semana sugerida automaticamente ({_semana_sugerida}) com base na data de início da revisão. "
+                         "Altere se estiver registrando uma etapa de outra semana. "
+                         "Aplicada apenas em tarefas que ainda não têm semana definida."
+                )
 
             rev_start=pd.to_datetime((rev_row or {}).get("data_inicio") or (rev_row or {}).get("created_at"),errors="coerce",utc=True)
             if pd.isna(rev_start): rev_start=pd.Timestamp(_now_utc()).normalize()
@@ -1291,6 +1311,9 @@ def render_matriz():
                                     upd={field:bool(nv),"updated_by":current_user_id() or None}
                                     dtf={"etapa_d":"dt_etapa_d","etapa_r":"dt_etapa_r","etapa_m":"dt_etapa_m"}.get(field)
                                     if dtf: upd[dtf]=now_iso if nv else None
+                                    # Preenche semana se a tarefa ainda não tiver uma definida
+                                    if nv and not t.get("semana") and int(semana_lote) > 0:
+                                        upd["semana"] = int(semana_lote)
                                     try: sb.table("tarefas_servico").update(upd).eq("id",tid).execute(); ok+=1
                                     except Exception: pass
                                     if ic%15==0 or ic==len(pending_changes):
@@ -1570,9 +1593,11 @@ def render_matriz():
                 with cR: etapa_r=st.checkbox("✅ Revisou (R)",value=cur_r,key="mat_ed_r")
                 with cM: etapa_m=st.checkbox("✅ Montou (M)",value=cur_m,key="mat_ed_m")
                 with cSem:
+                    _semana_ed_default = int(task_ed.get("semana") or _semana_sugerida)
                     nsem=st.number_input("📅 Semana",min_value=0,
-                        value=int(task_ed.get("semana") or 0),step=1,key="mat_sem",
-                        help="Semana em que esta etapa foi executada")
+                        value=_semana_ed_default,step=1,key="mat_sem",
+                        help=f"Semana sugerida automaticamente: {_semana_sugerida}. "
+                             "Altere se precisar registrar em outra semana.")
 
                 st.caption("Marcar D+R+M atualiza o status para Concluído automaticamente.")
 
