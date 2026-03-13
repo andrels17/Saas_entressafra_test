@@ -15,6 +15,8 @@ import pandas as pd
 from collections import defaultdict
 from datetime import date
 
+from src.utils.timezone import now_brt as _now_brt
+
 from src.ui.core.styles import page_header as _ph
 from src.ui.core.confirm_dialog import confirm_dialog
 from src.ui.core.empty_state import empty_state
@@ -183,7 +185,7 @@ def _fragment_seletores(revisoes: list[dict]) -> tuple[dict | None, str | None, 
     except Exception:
         pass
 
-    semana_default = week_from_revisao(date.today(), data_inicio, semanas_total)
+    semana_default = week_from_revisao(_now_brt().date(), data_inicio, semanas_total)
 
     # Grupo
     grupos = _load_grupos(tenant_id, ver)

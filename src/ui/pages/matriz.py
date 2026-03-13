@@ -16,6 +16,7 @@ import io
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
+from src.utils.timezone import now_utc as _now_utc
 
 import pandas as pd
 import streamlit as st
@@ -136,8 +137,8 @@ def _reportlab_available() -> bool:
 
 
 def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
-    from datetime import datetime as _dt
     from reportlab.lib import colors
+    from src.utils.timezone import fmt_brt as _fmt_brt
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -546,7 +547,7 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
     eq_100 = int((rv["%"] >= 100).sum()) if not rv.empty else 0
     avg_pct = int(round(rv["%"].mean())) if not rv.empty else 0
     eq_zero = int((rv["%"] <= 0).sum()) if not rv.empty else 0
-    emitido = _dt.now().strftime("%d/%m/%Y %H:%M")
+    emitido = _fmt_brt("%d/%m/%Y %H:%M")
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -1117,7 +1118,7 @@ def render_matriz():
                 st.caption("Atraso aparece como ! na coluna M (modo Visual).")
 
             rev_start=pd.to_datetime((rev_row or {}).get("data_inicio") or (rev_row or {}).get("created_at"),errors="coerce",utc=True)
-            if pd.isna(rev_start): rev_start=pd.Timestamp.utcnow().normalize()
+            if pd.isna(rev_start): rev_start=pd.Timestamp(_now_utc()).normalize()
 
             # FIX #6: chips clicáveis — se o usuário clicou num chip, pular direto para aquele setor
             _chip_target=st.session_state.pop("mtz_chip_jump",None)
@@ -1213,7 +1214,7 @@ def render_matriz():
                     mode=st.radio("Visualização",["Editar","Visual"],horizontal=True,key=f"mtz_mode_{kb}")
 
                     if mode=="Visual":
-                        days_since=int((pd.Timestamp.utcnow()-rev_start).days) if isinstance(rev_start,pd.Timestamp) else 0
+                        days_since=int((pd.Timestamp(_now_utc())-rev_start).days) if isinstance(rev_start,pd.Timestamp) else 0
                         df_vis=df_display.copy()
                         for c in svc_bool: df_vis[c]=df_vis[c].apply(lambda v:"OK" if bool(v) else "")
                         if days_since>atraso_dias:
@@ -1341,7 +1342,7 @@ def render_matriz():
                 if sid and sid not in seen_e: seen_e.add(sid); svc_ids_rank.append(sid)
             total_cells_rank=int(len(eqs)*max(len(svc_ids_rank),1)*3)
             rev_start2=pd.to_datetime((rev_row or {}).get("data_inicio") or (rev_row or {}).get("created_at"),errors="coerce",utc=True)
-            if pd.isna(rev_start2): rev_start2=pd.Timestamp.utcnow().normalize()
+            if pd.isna(rev_start2): rev_start2=pd.Timestamp(_now_utc()).normalize()
             df_tasks=pd.DataFrame(tarefas)
             if not df_tasks.empty:
                 has_dt=any((c in df_tasks.columns and df_tasks[c].notna().any()) for c in ["dt_etapa_d","dt_etapa_r","dt_etapa_m"])
