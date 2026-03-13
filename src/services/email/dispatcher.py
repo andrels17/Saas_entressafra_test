@@ -388,22 +388,37 @@ def _build_payload(
         eq["grupo_pct"] = grupo_pct.get(eq.get("grupo_id", ""), 0)
 
     # ── evolução semanal ───────────────────────────────────────────────────────
+    # Usa o cronograma real das tarefas (semana do serviço), e não uma projeção
+    # linear do calendário. Isso evita 0% artificiais no gráfico e no heatmap.
     evolucao: list[SemanaSnapshot] = []
-    semana_counts: dict[int, int] = {}
+    semana_done_steps: dict[int, int] = {}
+    semana_expected_steps: dict[int, int] = {}
+
     for t in tarefas:
         sem = int(t.get("semana") or 0)
         if sem <= 0:
             continue
-        done_t = _sum_done_steps(t)
-        semana_counts[sem] = semana_counts.get(sem, 0) + done_t
+        semana_done_steps[sem] = semana_done_steps.get(sem, 0) + _sum_done_steps(t)
+        semana_expected_steps[sem] = semana_expected_steps.get(sem, 0) + 3
 
-    cumulative = 0
+    # fallback: se por algum motivo não houver semana nas tarefas, mantém uma
+    # distribuição linear para não quebrar o relatório.
+    if not semana_expected_steps and total_expected > 0:
+        for sem in range(1, semana_atual + 1):
+            semana_expected_steps[sem] = round(total_expected / max(semanas_total, 1))
+
+    cumulative_done = 0
+    cumulative_expected = 0
     for sem in range(1, semana_atual + 1):
-        cumulative += semana_counts.get(sem, 0)
-        expected_until_sem = round(total_expected * (sem / max(semanas_total, 1)))
-        pct_sem = max(0, min(100, round(cumulative / max(expected_until_sem, 1) * 100)))
-        evolucao.append(SemanaSnapshot(semana=sem, concluidos=cumulative,
-                                       total=expected_until_sem, pct=pct_sem))
+        cumulative_done += semana_done_steps.get(sem, 0)
+        cumulative_expected += semana_expected_steps.get(sem, 0)
+        pct_sem = max(0, min(100, round(cumulative_done / max(cumulative_expected, 1) * 100)))
+        evolucao.append(SemanaSnapshot(
+            semana=sem,
+            concluidos=cumulative_done,
+            total=cumulative_expected,
+            pct=pct_sem,
+        ))
 
     pct_semana_atual    = evolucao[-1].pct if evolucao else pct_geral
     pct_semana_anterior = evolucao[-2].pct if len(evolucao) >= 2 else 0
@@ -509,7 +524,7 @@ class DispatchResult:
     sent: int = 0
     failed: int = 0
     skipped: int = 0
-    errors: list[str] | None = None
+    errors: list[str] = None
 
     def __post_init__(self):
         if self.errors is None:
@@ -658,139 +673,67 @@ def dispatch_relatorio_semanal(
 
         exec_recs = get_executive_recipients(tenant_id)
         if exec_recs:
-            # Constrói snapshots e séries auxiliares do executivo
+            # Constrói DeptSnapshot para cada grupo de departamento já processado
             dept_snapshots: list[DeptSnapshot] = []
-            sem_atual_rev = _semana_atual(
-                revisao.get("data_inicio"),
-                int(revisao.get("semanas_total") or 1),
-            )
-            trend_acc: dict[int, dict[str, int]] = {}
-            heatmap_semanal: list[dict] = []
-            alertas_parados = {"atencao": 0, "critico": 0, "urgente": 0}
+            sem_atual_rev = _semana_atual(revisao.get("data_inicio"),
+                                          int(revisao.get("semanas_total") or 1))
 
             for grp in all_dept_groups:  # TODOS os deptos, não só os com gestores
                 try:
                     tarefas_g = _load_tarefas(sb, tenant_id, revisao_id, grp.grupo_ids)
-                    p, _eq_list_g = _build_payload(
-                        tarefas=tarefas_g,
-                        revisao=revisao,
+                    p, eq_list_g = _build_payload(
+                        tarefas=tarefas_g, revisao=revisao,
                         departamento_nome=grp.departamento_nome,
-                        tenant_nome=tenant_nome,
-                        branding=branding,
-                        sb=sb,
-                        tenant_id=tenant_id,
-                        grupo_ids=grp.grupo_ids,
-                        dias_travado=dias_travado,
-                        dias_sem_update=dias_sem_update,
+                        tenant_nome=tenant_nome, branding=branding,
+                        sb=sb, tenant_id=tenant_id, grupo_ids=grp.grupo_ids,
+                        dias_travado=dias_travado, dias_sem_update=dias_sem_update,
                     )
                     todos = p.todos_equipamentos or []
                     top_criticos = sorted(
                         [e for e in todos if e.get("pct", 0) < 100],
-                        key=lambda e: (e.get("pct", 0), str(e.get("frota") or "")),
-                    )[:5]
+                        key=lambda e: e.get("pct", 0)
+                    )[:3]
                     top_melhores = sorted(
                         [e for e in todos if e.get("pct", 0) < 100],
-                        key=lambda e: (-int(e.get("pct", 0) or 0), str(e.get("frota") or "")),
-                    )[:5]
+                        key=lambda e: -e.get("pct", 0)
+                    )[:3]
                     maiores_evolucoes = sorted(
-                        [e for e in todos if int(e.get("pct", 0) or 0) - int(e.get("pct_anterior", 0) or 0) > 0],
-                        key=lambda e: (-(int(e.get("pct", 0) or 0) - int(e.get("pct_anterior", 0) or 0)), str(e.get("frota") or "")),
-                    )[:5]
-                    max_dias_parado = max(
-                        [int(x.get("dias_parado") or 0) for x in (p.parados_detalhe or [])] or [0]
-                    )
-                    dept_snapshots.append(
-                        DeptSnapshot(
-                            nome=grp.departamento_nome,
-                            pct_geral=p.pct_geral,
-                            pct_anterior=p.pct_semana_anterior,
-                            n_equipamentos=p.n_equipamentos,
-                            n_concluidos=p.n_concluidos,
-                            n_travados=p.n_travados,
-                            n_sem_inicio=p.n_sem_inicio,
-                            n_risco_prazo=p.n_risco_prazo,
-                            top_criticos=top_criticos,
-                            top_melhores=top_melhores,
-                            maiores_evolucoes=maiores_evolucoes,
-                            n_parados=p.n_parados,
-                            max_dias_parado=max_dias_parado,
-                            _done_steps=p.done_steps,
-                            _expected_steps=p.expected_steps,
-                        )
-                    )
-
-                    for snap in p.evolucao or []:
-                        sem = int(getattr(snap, "semana", 0) or 0)
-                        if sem <= 0:
-                            continue
-                        acc = trend_acc.setdefault(sem, {"done": 0, "expected": 0})
-                        acc["done"] += int(getattr(snap, "concluidos", 0) or 0)
-                        acc["expected"] += int(getattr(snap, "total", 0) or 0)
-                        heatmap_semanal.append(
-                            {
-                                "departamento": grp.departamento_nome,
-                                "semana": sem,
-                                "pct": int(getattr(snap, "pct", 0) or 0),
-                            }
-                        )
-
-                    for item in p.parados_detalhe or []:
-                        dias_p = int(item.get("dias_parado") or 0)
-                        if dias_p > 21:
-                            alertas_parados["urgente"] += 1
-                        elif dias_p > 14:
-                            alertas_parados["critico"] += 1
-                        elif dias_p > 7:
-                            alertas_parados["atencao"] += 1
+                        [e for e in todos if e.get("pct", 0) - int(e.get("pct_anterior", 0)) > 0],
+                        key=lambda e: -(e.get("pct", 0) - int(e.get("pct_anterior", 0)))
+                    )[:3]
+                    dept_snapshots.append(DeptSnapshot(
+                        nome=grp.departamento_nome,
+                        pct_geral=p.pct_geral,
+                        pct_anterior=p.pct_semana_anterior,
+                        n_equipamentos=p.n_equipamentos,
+                        n_concluidos=p.n_concluidos,
+                        n_travados=p.n_travados,
+                        n_sem_inicio=p.n_sem_inicio,
+                        n_risco_prazo=p.n_risco_prazo,
+                        n_parados=p.n_parados,
+                        max_dias_parado=max([int(x.get("dias_parado") or 0) for x in (p.parados_detalhe or [])] or [0]),
+                        top_criticos=top_criticos,
+                        top_melhores=top_melhores,
+                        maiores_evolucoes=maiores_evolucoes,
+                        _done_steps=p.done_steps,
+                        _expected_steps=p.expected_steps,
+                    ))
                 except Exception as e_g:
                     _log(f"    ↳ Aviso: erro ao montar snapshot de {grp.departamento_nome}: {e_g}")
 
             if dept_snapshots:
                 # pct_global ponderado: sum(done_steps) / sum(expected_steps)
                 # idêntico à fórmula do kpi_engine — evita distorção por deptos de tamanhos diferentes
-                total_done_g = sum(getattr(s, "_done_steps", 0) for s in dept_snapshots)
+                total_done_g     = sum(getattr(s, "_done_steps",     0) for s in dept_snapshots)
                 total_expected_g = sum(getattr(s, "_expected_steps", 0) for s in dept_snapshots)
                 pct_global = (
                     max(0, min(100, round(total_done_g / total_expected_g * 100)))
                     if total_expected_g > 0
                     else round(sum(d.pct_geral for d in dept_snapshots) / max(len(dept_snapshots), 1))
                 )
-                n_equip_total = sum(d.n_equipamentos for d in dept_snapshots)
-                n_equip_concl = sum(d.n_concluidos for d in dept_snapshots)
-                n_alertas_total = sum(
-                    d.n_travados + d.n_risco_prazo + d.n_parados + d.n_sem_inicio
-                    for d in dept_snapshots
-                )
-
-                trend_semanal = [
-                    {
-                        "semana": sem,
-                        "pct": (
-                            max(0, min(100, round(vals["done"] / max(vals["expected"], 1) * 100)))
-                            if vals["expected"] > 0
-                            else 0
-                        ),
-                    }
-                    for sem, vals in sorted(trend_acc.items())
-                ][-4:]
-
-                heatmap_lookup: dict[tuple[str, int], int] = {
-                    (str(item.get("departamento") or ""), int(item.get("semana") or 0)): int(item.get("pct") or 0)
-                    for item in heatmap_semanal
-                }
-                semanas_heatmap = [int(item["semana"]) for item in trend_semanal]
-                if not semanas_heatmap:
-                    semanas_heatmap = sorted({int(item.get("semana") or 0) for item in heatmap_semanal if int(item.get("semana") or 0) > 0})[-4:]
-                heatmap_final: list[dict] = []
-                for dept in dept_snapshots:
-                    for sem in semanas_heatmap:
-                        heatmap_final.append(
-                            {
-                                "departamento": dept.nome,
-                                "semana": sem,
-                                "pct": heatmap_lookup.get((dept.nome, sem), 0),
-                            }
-                        )
+                n_equip_total   = sum(d.n_equipamentos for d in dept_snapshots)
+                n_equip_concl   = sum(d.n_concluidos   for d in dept_snapshots)
+                n_alertas_total = sum(d.n_travados + d.n_risco_prazo + d.n_parados + d.n_sem_inicio for d in dept_snapshots)
 
                 exec_payload = RelatorioExecutivoPayload(
                     tenant_nome=tenant_nome or "AgroSafra",
@@ -804,11 +747,8 @@ def dispatch_relatorio_semanal(
                     departamentos=dept_snapshots,
                     primary_color=branding.get("primary_color") or "#FFD100",
                     logo_url=branding.get("logo_url"),
-                    trend_semanal=trend_semanal,
-                    heatmap_semanal=heatmap_final,
-                    alertas_parados=alertas_parados,
                 )
-                pdf_exec = build_executive_pdf(exec_payload)
+                pdf_exec  = build_executive_pdf(exec_payload)
                 pdf_name_e = f"relatorio_executivo_semana{sem_atual_rev}.pdf"
 
                 for rec in exec_recs:
