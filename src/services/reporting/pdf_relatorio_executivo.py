@@ -53,11 +53,11 @@ class DeptSnapshot:
     n_travados: int
     n_sem_inicio: int
     n_risco_prazo: int
-    n_parados: int = 0
-    max_dias_parado: int = 0
     top_criticos: list[dict]       # [{frota, modelo, pct, status}] — menor %
     top_melhores: list[dict]       # [{frota, modelo, pct, pct_anterior}] — maior %, quase concluídos
     maiores_evolucoes: list[dict]  # [{frota, modelo, pct, pct_anterior}] — maior delta semana
+    n_parados: int = 0
+    max_dias_parado: int = 0
     _done_steps: int = 0           # para cálculo ponderado do pct_global
     _expected_steps: int = 0       # para cálculo ponderado do pct_global
 
