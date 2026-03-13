@@ -87,7 +87,7 @@ def _render_sidebar(pages: list[str], current_page: str, role: str, user_id: str
         try:
             badges = sidebar_badges()
         except Exception:
-            badges = {"gestor_travados": 0, "apont_pendentes": 0, "auditoria_24h": 0}
+            badges = {"gestor_travados": 0, "apont_pendentes": 0, "auditoria_24h": 0, "equip_parados": 0}
 
         # ── Logo clicável ─────────────────────────────────────────────────────
         logo_url = st.session_state.get("tenant_logo_url")
@@ -154,6 +154,7 @@ def _render_sidebar(pages: list[str], current_page: str, role: str, user_id: str
         # Mapa de badges por página
         _page_badges: dict[str, int] = {
             "Painel do Gestor": badges.get("gestor_travados", 0),
+            "Notificações":     badges.get("equip_parados", 0),
             "Apontamento":      badges.get("apont_pendentes", 0),
             "Auditoria":        badges.get("auditoria_24h", 0),
         }
