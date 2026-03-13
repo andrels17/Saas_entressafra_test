@@ -98,6 +98,7 @@ class RelatorioDeptPayload:
     n_sem_inicio: int = 0
     n_parados: int = 0
     n_risco_prazo: int = 0
+    parados_detalhe: List[dict] = field(default_factory=list)
     # branding
     primary_color: str = "#FFD100"
     logo_url: str | None = None
@@ -746,6 +747,26 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
             c.drawRightString(cx + card_w_a - 5, cy + 6*mm, "OK")
 
     y -= 2 * (card_h_a + gap_a) + 4*mm
+
+    # Detalhe dos equipamentos parados
+    if payload.parados_detalhe:
+        if y < 95*mm:
+            footer(); c.showPage(); new_page("Resumo de Alertas (cont.)"); y = h - 52*mm
+        y = section_title("Equipamentos sem movimentação recente", y)
+        rows = [["Frota", "Grupo", "Últ. semana", "Dias", "Progresso"]]
+        for item in payload.parados_detalhe[:18]:
+            rows.append([
+                str(item.get("frota") or "—"),
+                str(item.get("grupo") or "—")[:24],
+                f"S{item.get('ultima_semana')}" if item.get("ultima_semana") else "—",
+                str(item.get("dias_parado") or "—"),
+                f"{int(item.get('pct') or 0)}%",
+            ])
+        pw_useful = w - 32*mm
+        y = platypus_table(rows, [pw_useful*0.16, pw_useful*0.42, pw_useful*0.14, pw_useful*0.12, pw_useful*0.16], y)
+        c.setFillColor(MUTED); c.setFont("Helvetica", 7.5)
+        c.drawString(16*mm, y, "Parado = equipamento incompleto e sem movimentação recente nas etapas D/R/M.")
+        y -= 8*mm
 
     # Legenda de status inline abaixo dos cards
     y -= 4*mm
