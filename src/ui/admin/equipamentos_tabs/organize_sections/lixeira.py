@@ -16,6 +16,8 @@ from src.ui.admin.equipamentos_helpers import (
 
 
 def render_lixeira_section(sb, tenant_id: str):
+        grupo_opts, gid_to_name = _load_grupos(sb, tenant_id)
+        group_names = list(grupo_opts.keys())
         st.markdown("### Lixeira (equipamentos desativados)")
         st.caption("Aqui ficam equipamentos com `ativo = false`. Você pode **restaurar** ou **apagar definitivamente**.")
 

@@ -16,6 +16,8 @@ from src.ui.admin.equipamentos_helpers import (
 
 
 def render_ativos_section(sb, tenant_id: str):
+        grupo_opts, gid_to_name = _load_grupos(sb, tenant_id)
+        group_names = list(grupo_opts.keys())
         admin_block("Equipamentos ativos", "Edite, selecione e mova ativos em lote.")
         f_col1, f_col2, f_col3 = st.columns([0.4, 0.3, 0.3])
         with f_col1:

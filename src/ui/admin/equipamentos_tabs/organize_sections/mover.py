@@ -16,6 +16,8 @@ from src.ui.admin.equipamentos_helpers import (
 
 
 def render_mover_section(sb, tenant_id: str):
+        grupo_opts, gid_to_name = _load_grupos(sb, tenant_id)
+        group_names = list(grupo_opts.keys())
         st.markdown("### Mover em lote + Edição individual")
         rows = (
             sb.table("equipamentos")
