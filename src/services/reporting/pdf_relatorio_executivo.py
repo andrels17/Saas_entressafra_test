@@ -53,11 +53,11 @@ class DeptSnapshot:
     n_travados: int
     n_sem_inicio: int
     n_risco_prazo: int
+    n_parados: int = 0
+    max_dias_parado: int = 0
     top_criticos: list[dict]       # [{frota, modelo, pct, status}] — menor %
     top_melhores: list[dict]       # [{frota, modelo, pct, pct_anterior}] — maior %, quase concluídos
     maiores_evolucoes: list[dict]  # [{frota, modelo, pct, pct_anterior}] — maior delta semana
-    n_parados: int = 0
-    max_dias_parado: int = 0
     _done_steps: int = 0           # para cálculo ponderado do pct_global
     _expected_steps: int = 0       # para cálculo ponderado do pct_global
 
@@ -153,8 +153,8 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     kpi_h = 16*mm
     kpi_w = (w - 36*mm) / 4
     kpis = [
-        ("Departamentos",  str(n_deptos),                     FG),
-        ("Equipamentos",   str(payload.n_equip_total),         FG),
+        ("Departamentos",  str(n_deptos),                     WHITE),
+        ("Equipamentos",   str(payload.n_equip_total),         WHITE),
         ("Concluídos",     str(payload.n_equip_concluidos),    GREEN),
         ("Alertas",        str(payload.n_alertas_total),       RED if payload.n_alertas_total else GREEN),
     ]
@@ -340,8 +340,18 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     ci    = 0
 
     def dept_block_height(dept: DeptSnapshot) -> float:
-        items = min(len(dept.top_criticos), 3) + min(len(dept.top_melhores), 3) + min(len(dept.maiores_evolucoes), 3)
-        return 14*mm + items * 6.5*mm + 3*mm
+        base = 14 * mm
+        section_gap = 5.5 * mm
+        row_gap = 6 * mm
+        bottom_pad = 4 * mm
+
+        sections = [
+            min(len(dept.top_criticos), 3),
+            min(len(dept.top_melhores), 3),
+            min(len(dept.maiores_evolucoes), 3),
+        ]
+        active_sections = [n for n in sections if n > 0]
+        return base + sum(section_gap + (n * row_gap) for n in active_sections) + bottom_pad
 
     def draw_dept_block(dept: DeptSnapshot, bx: float, by: float, bh: float):
         col_dep = _risk_color(dept.pct_geral)
@@ -350,10 +360,10 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         c.setFillColor(col_dep)
         c.rect(bx, by - bh, 3, bh, fill=1, stroke=0)
 
-        c.setFillColor(FG); c.setFont("Helvetica-Bold", 8.2)
-        c.drawString(bx + 7, by - 6*mm, dept.nome[:20])
-        c.setFillColor(col_dep); c.setFont("Helvetica-Bold", 8.6)
-        c.drawRightString(bx + col_w - 7, by - 6*mm, f"{dept.pct_geral}%")
+        c.setFillColor(FG); c.setFont("Helvetica-Bold", 8.5)
+        c.drawString(bx + 7, by - 6*mm, dept.nome[:22])
+        c.setFillColor(col_dep); c.setFont("Helvetica-Bold", 9)
+        c.drawRightString(bx + col_w - 4, by - 6*mm, f"{dept.pct_geral}%")
         c.setStrokeColor(BORDER); c.setLineWidth(0.5)
         c.line(bx + 4, by - 9*mm, bx + col_w - 4, by - 9*mm)
 
@@ -361,7 +371,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
 
         if dept.top_criticos:
             c.setFillColor(RED); c.setFont("Helvetica-Bold", 7)
-            c.drawString(bx + 6, iy, "Piores:")
+            c.drawString(bx + 6, iy, "⚠ Piores:")
             iy -= 5.5*mm
             for eq in dept.top_criticos[:3]:
                 pct_eq = int(eq.get("pct", 0))
@@ -376,7 +386,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
 
         if dept.top_melhores:
             c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 7)
-            c.drawString(bx + 6, iy, "Quase concluidos:")
+            c.drawString(bx + 6, iy, "✅ Quase concluídos:")
             iy -= 5.5*mm
             for eq in dept.top_melhores[:3]:
                 pct_eq = int(eq.get("pct", 0))
@@ -391,27 +401,27 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
 
         if dept.maiores_evolucoes:
             c.setFillColor(colors.HexColor("#6366F1")); c.setFont("Helvetica-Bold", 7)
-            c.drawString(bx + 6, iy, "Evolucoes:")
+            c.drawString(bx + 6, iy, "Evoluções:")
             iy -= 5.5*mm
             for eq in dept.maiores_evolucoes[:3]:
                 pct_eq  = int(eq.get("pct", 0))
                 delta_v = pct_eq - int(eq.get("pct_anterior", pct_eq))
-                c.setFillColor(FG); c.setFont("Helvetica-Bold", 7.2)
+                c.setFillColor(FG); c.setFont("Helvetica-Bold", 7.3)
                 c.drawString(bx + 8, iy, str(eq.get("frota") or "—")[:7])
-                c.setFillColor(MUTED); c.setFont("Helvetica", 6.3)
-                c.drawString(bx + 16*mm, iy, str(eq.get("modelo") or "")[:12])
+                c.setFillColor(MUTED); c.setFont("Helvetica", 6.6)
+                c.drawString(bx + 20*mm, iy, str(eq.get("modelo") or "")[:9])
 
-                # mais margem interna para % e delta não vazarem
-                bar_x = bx + col_w - 28*mm
-                bar_w = 9*mm
-                pct_x = bx + col_w - 12*mm
-                delta_x = bx + col_w - 7*mm
+                # layout mais conservador para manter tudo dentro do card
+                bar_x = bx + col_w - 34*mm
+                bar_w = 10*mm
+                pct_x = bx + col_w - 10.5*mm
+                delta_x = bx + col_w - 5.5*mm
 
-                pbar(bar_x, iy - 1.4*mm, bar_w, 3.2*mm, pct_eq)
+                pbar(bar_x, iy - 1.5*mm, bar_w, 3.5*mm, pct_eq)
                 c.setFillColor(_risk_color(pct_eq)); c.setFont("Helvetica-Bold", 6.6)
                 c.drawRightString(pct_x, iy, f"{pct_eq}%")
                 if delta_v > 0:
-                    c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 5.7)
+                    c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 5.8)
                     c.drawRightString(delta_x, iy, f"+{delta_v}p")
                 iy -= 6*mm
 
