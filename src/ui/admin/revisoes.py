@@ -1,7 +1,5 @@
 import math
 import time
-from datetime import date, timedelta
-
 import streamlit as st
 from postgrest.exceptions import APIError
 
@@ -11,7 +9,6 @@ from src.utils import nav
 
 
 STATUSES = ["pendente", "em_andamento", "concluido", "travado", "nao_aplica"]
-
 
 def _fetch_revisoes(sb, tenant_id):
     """Fetch revisoes; if RLS/policy blocks, fallback to service role."""
@@ -37,7 +34,6 @@ def _fetch_revisoes(sb, tenant_id):
             ) or []
         except Exception:
             return []
-
 
 def _fetch_revisoes_min(sb, tenant_id):
     try:
@@ -66,35 +62,7 @@ def _fetch_revisoes_min(sb, tenant_id):
 
 def _chunk(lst, size):
     for i in range(0, len(lst), size):
-        yield lst[i:i + size]
-
-
-def _calc_weeks(dt_ini: date | None, dt_fim: date | None) -> int:
-    if not dt_ini or not dt_fim or dt_fim < dt_ini:
-        return 0
-    dias_total = (dt_fim - dt_ini).days + 1
-    return int(math.ceil(dias_total / 7))
-
-
-def _build_week_preview(dt_ini: date | None, dt_fim: date | None):
-    if not dt_ini or not dt_fim or dt_fim < dt_ini:
-        return []
-    semanas = []
-    atual = dt_ini
-    idx = 1
-    while atual <= dt_fim:
-        fim_semana = min(atual + timedelta(days=6), dt_fim)
-        semanas.append(
-            {
-                "Semana": f"Sem.{idx}",
-                "Início": atual.strftime("%d/%m/%Y"),
-                "Fim": fim_semana.strftime("%d/%m/%Y"),
-                "Dias": (fim_semana - atual).days + 1,
-            }
-        )
-        atual = fim_semana + timedelta(days=1)
-        idx += 1
-    return semanas
+        yield lst[i:i+size]
 
 
 def _load_grupos(sb, tenant_id):
@@ -165,8 +133,6 @@ def _update_tasks_status(sb, ids, status="nao_aplica"):
 
 
 from src.ui.core.styles import page_header as _ph
-
-
 def render_admin_revisoes():
     _ph("◑", "Revisões", "Gerencie revisões de entressafra e gere/sincronize a Matriz com base nos Templates de Grupo.")
 
@@ -182,53 +148,63 @@ def render_admin_revisoes():
 
     with tab1:
         st.markdown("### Criar revisão")
-        st.info(
-            "Se o seu banco tiver alguma política/trigger recursiva em `revisoes`, o insert pode estourar stack. "
-            "Para evitar travar o app, a criação aqui usa **Service Role** (bypassa RLS)."
-        )
+        st.info("Se o seu banco tiver alguma política/trigger recursiva em `revisoes`, o insert pode estourar stack. "
+                "Para evitar travar o app, a criação aqui usa **Service Role** (bypassa RLS).")
 
         titulo = st.text_input("Título", placeholder="Entressafra 2026", key="rev_titulo")
-        c1, c2, c3 = st.columns([1, 1, 0.9])
+        c1, c2, c3 = st.columns(3)
         with c1:
             dt_ini = st.date_input("Data início", value=None, key="rev_dt_ini")
         with c2:
             dt_fim = st.date_input("Data fim", value=None, key="rev_dt_fim")
 
-        semanas_total = _calc_weeks(dt_ini, dt_fim)
+        dias_total = 0
+        semanas_total = 0
+        pronto_heatmap = "Não"
+        if dt_ini and dt_fim and dt_fim >= dt_ini:
+            dias_total = (dt_fim - dt_ini).days + 1
+            semanas_total = int(math.ceil(dias_total / 7))
+            pronto_heatmap = "Sim"
 
         with c3:
             st.text_input(
                 "Nº semanas",
                 value=str(semanas_total),
                 disabled=True,
-                key="rev_total_weeks_display",
-                help="Calculado automaticamente com base nas datas da revisão.",
+                help="Calculado automaticamente a partir de Data início e Data fim.",
             )
 
-        if dt_ini and dt_fim and dt_fim < dt_ini:
-            st.error("A data fim não pode ser menor que a data início.")
-        elif dt_ini and dt_fim:
-            k1, k2, k3 = st.columns(3)
-            k1.metric("Período total", f"{(dt_fim - dt_ini).days + 1} dia(s)")
-            k2.metric("Semanas geradas", semanas_total)
-            k3.metric("Pronto para tendência/heatmap", "Sim")
-            st.caption(
-                "Ao sincronizar a matriz, as tarefas serão distribuídas por semana desta revisão. "
-                "Isso alimenta automaticamente a tendência semanal e o heatmap do relatório executivo."
-            )
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Período total", f"{dias_total} dia(s)")
+        m2.metric("Semanas geradas", semanas_total)
+        m3.metric("Pronto para tendência/heatmap", pronto_heatmap)
 
-            preview = _build_week_preview(dt_ini, dt_fim)
-            if preview:
-                with st.expander("Preview das semanas", expanded=True):
-                    st.dataframe(preview, use_container_width=True, hide_index=True)
+        if semanas_total > 0:
+            st.caption("Prévia das semanas da revisão")
+            semanas_preview = []
+            for idx in range(semanas_total):
+                ini_sem = dt_ini + __import__('datetime').timedelta(days=idx * 7)
+                fim_sem = min(ini_sem + __import__('datetime').timedelta(days=6), dt_fim)
+                dias_sem = (fim_sem - ini_sem).days + 1
+                semanas_preview.append(
+                    f"Sem.{idx + 1}: {ini_sem.strftime('%d/%m/%Y')} → {fim_sem.strftime('%d/%m/%Y')} ({dias_sem} dia(s))"
+                )
+            st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
+            for linha in [semanas_preview[i:i+3] for i in range(0, len(semanas_preview), 3)]:
+                cols = st.columns(len(linha))
+                for col, texto in zip(cols, linha):
+                    with col:
+                        st.caption(texto)
 
-        submitted = st.button("Criar revisão", use_container_width=True, key="rev_submit", type="primary")
+        submitted = st.button("Criar revisão", use_container_width=True, key="rev_submit")
 
         if submitted:
             t = (titulo or "").strip()
             if not t:
                 st.warning("Informe um título.")
                 st.stop()
+
+            payload = {"tenant_id": tenant_id, "titulo": t, "status": "ativa"}
             if not dt_ini:
                 st.warning("Informe a data de início.")
                 st.stop()
@@ -238,18 +214,11 @@ def render_admin_revisoes():
             if dt_fim < dt_ini:
                 st.warning("A data fim não pode ser menor que a data início.")
                 st.stop()
-            if semanas_total <= 0:
-                st.warning("Não foi possível calcular as semanas da revisão.")
-                st.stop()
 
-            payload = {
-                "tenant_id": tenant_id,
-                "titulo": t,
-                "status": "ativa",
-                "data_inicio": str(dt_ini),
-                "data_fim": str(dt_fim),
-                "semanas_total": int(semanas_total),
-            }
+            payload["data_inicio"] = str(dt_ini)
+            payload["data_fim"] = str(dt_fim)
+            if semanas_total > 0:
+                payload["semanas_total"] = int(semanas_total)
 
             try:
                 svc = get_supabase_service()
@@ -271,9 +240,7 @@ def render_admin_revisoes():
                     rc1, rc2 = st.columns([0.7, 0.3])
                     with rc1:
                         st.markdown(f"**{r['titulo']}**")
-                        st.caption(
-                            f"Início: {r.get('data_inicio') or '—'} · Fim: {r.get('data_fim') or '—'} · Semanas: {r.get('semanas_total') or '—'}"
-                        )
+                        st.caption(f"Início: {r.get('data_inicio') or '—'} · Fim: {r.get('data_fim') or '—'} · Semanas: {r.get('semanas_total') or '—'}")
                         from src.ui.core.styles import status_badge
                         status_badge(r.get("status"))
                     with rc2:
@@ -301,6 +268,7 @@ def render_admin_revisoes():
                                 except Exception as e:
                                     st.error(f"Erro: {e}")
 
+                    # ── Wizard de fechamento ──────────────────────────────────
                     if st.session_state.get(f"wiz_fechar_{r['id']}"):
                         st.markdown("---")
                         st.markdown("#### 🔒 Checklist de fechamento")
@@ -319,25 +287,24 @@ def render_admin_revisoes():
                             except Exception:
                                 tarefas_rev = []
 
-                        total_t = len(tarefas_rev)
+                        total_t   = len(tarefas_rev)
                         concluidos = sum(1 for t in tarefas_rev if t.get("status") == "concluido")
-                        travados = sum(1 for t in tarefas_rev if t.get("status") == "travado")
-                        pendentes = sum(1 for t in tarefas_rev if t.get("status") in ("pendente", "em_andamento"))
-                        pct_geral = round((concluidos / max(total_t, 1)) * 100)
+                        travados   = sum(1 for t in tarefas_rev if t.get("status") == "travado")
+                        pendentes  = sum(1 for t in tarefas_rev if t.get("status") in ("pendente", "em_andamento"))
+                        pct_geral  = round((concluidos / max(total_t, 1)) * 100)
 
                         wc1, wc2, wc3, wc4 = st.columns(4)
-                        wc1.metric("Total tarefas", total_t)
-                        wc2.metric("Concluídas", concluidos, delta=f"{pct_geral}%")
-                        wc3.metric("Pendentes/And.", pendentes, delta_color="inverse" if pendentes else "off")
-                        wc4.metric("Travadas", travados, delta_color="inverse" if travados else "off")
+                        wc1.metric("Total tarefas",   total_t)
+                        wc2.metric("Concluídas",      concluidos, delta=f"{pct_geral}%")
+                        wc3.metric("Pendentes/And.",  pendentes,  delta_color="inverse" if pendentes else "off")
+                        wc4.metric("Travadas",        travados,   delta_color="inverse" if travados  else "off")
 
+                        # Checklist visual
                         chk1 = pct_geral >= 80
                         chk2 = travados == 0
-                        chk3 = pendentes <= (total_t * 0.1)
+                        chk3 = pendentes <= (total_t * 0.1)  # até 10% pendente é tolerável
 
-                        def _chk_icon(ok):
-                            return "✅" if ok else "⚠️"
-
+                        def _chk_icon(ok): return "✅" if ok else "⚠️"
                         st.markdown(
                             f"{_chk_icon(chk1)} Progresso global ≥ 80% — **{pct_geral}%**\n\n"
                             f"{_chk_icon(chk2)} Nenhum item travado — **{travados} travado(s)**\n\n"
@@ -351,7 +318,7 @@ def render_admin_revisoes():
                                 "Recomendamos resolver antes de fechar, mas você pode forçar o fechamento se necessário."
                             )
 
-                        col_conf, _, col_cancel = st.columns([1, 1, 1])
+                        col_conf, col_forca, col_cancel = st.columns([1, 1, 1])
                         with col_conf:
                             _lbl_conf = "✅ Confirmar fechamento" if not tem_bloqueio else "✅ Fechar mesmo assim"
                             if st.button(_lbl_conf, key=f"wiz_conf_{r['id']}", type="primary", use_container_width=True):
@@ -400,101 +367,105 @@ def render_admin_revisoes():
         sem_grupo = [e for e in eqs if not e.get("grupo_id")]
         com_grupo = [e for e in eqs if e.get("grupo_id")]
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Grupos ativos", len(grupos))
-        c2.metric("Equipamentos ativos", total_eq)
-        c3.metric("Sem grupo", len(sem_grupo))
-        if sem_grupo:
-            st.warning("Há equipamentos sem grupo. Eles serão ignorados na geração da matriz.")
+        st.markdown(f"- Equipamentos ativos: **{total_eq:,}**")
+        st.markdown(f"- Com grupo: **{len(com_grupo):,}**")
+        st.markdown(f"- Sem grupo: **{len(sem_grupo):,}** (não entram na matriz)")
 
-        grupo_ids = [g["id"] for g in grupos]
-        gs_map = _load_grupo_servicos(sb, tenant_id, grupo_ids)
-        sem_template = [g for g in grupos if len(gs_map.get(g["id"], set())) == 0]
-        if sem_template:
-            st.warning(f"Grupos sem template: {', '.join(g['nome'] for g in sem_template[:8])}")
+        grupos_ids = {e["grupo_id"] for e in com_grupo if e.get("grupo_id")}
+        gs_map = _load_grupo_servicos(sb, tenant_id, grupos_ids)
+
+        grupos_sem_template = [gid for gid in grupos_ids if gid not in gs_map or not gs_map.get(gid)]
+        if grupos_sem_template:
+            st.warning("Há grupos sem template de serviços. Eles gerarão 0 tarefas até você configurar o Template.")
+        else:
+            st.toast("✓ Templates verificados", icon=":material/check_circle:")
 
         st.divider()
-        st.markdown("### Gerar / Sincronizar")
-        st.caption(
-            "A sincronização distribui tarefas por semana da revisão selecionada. Esses vínculos por semana são a base "
-            "da tendência semanal e do heatmap no relatório executivo."
-        )
+        st.markdown("### Ações")
 
-        modo = st.radio(
-            "Modo",
-            [
-                "Pré-visualizar impacto",
-                "Criar faltantes (não altera existentes)",
-                "Criar faltantes + marcar extras como Não se aplica",
-            ],
-            horizontal=False,
-        )
+        colA, colB = st.columns(2)
 
-        if st.button("Executar", type="primary", use_container_width=True):
-            if not com_grupo:
-                st.warning("Não há equipamentos com grupo para processar.")
-                st.stop()
+        with colA:
+            if st.button("Gerar Matriz (inserir faltantes)", icon=":material/grid_on:", type="primary", use_container_width=True):
+                if len(com_grupo) == 0:
+                    st.warning("Nenhum equipamento com grupo.")
+                    st.stop()
 
-            eq_ids = [e["id"] for e in com_grupo]
-            existing = _load_existing_tasks(sb, tenant_id, revisao_id, eq_ids)
-            all_payload = []
-            to_na = []
-            prev_new = prev_existing = 0
+                equipamento_ids = [e["id"] for e in com_grupo]
+                existing = _load_existing_tasks(sb, tenant_id, revisao_id, equipamento_ids)
 
-            week_total = max(1, int(revisao.get("semanas_total") or 1))
+                payload = []
+                for e in com_grupo:
+                    gid = e["grupo_id"]
+                    servs = gs_map.get(gid, set())
+                    if not servs:
+                        continue
+                    cur = existing.get(e["id"], {})
+                    for sid in servs:
+                        if sid in cur:
+                            continue
+                        payload.append({
+                            "tenant_id": tenant_id,
+                            "revisao_id": revisao_id,
+                            "equipamento_id": e["id"],
+                            "servico_id": sid,
+                            "status": "pendente",
+                        })
 
-            for e in com_grupo:
-                gid = e["grupo_id"]
-                servicos = gs_map.get(gid, set())
-                if not servicos:
-                    continue
-
-                eq_existing = existing.get(e["id"], {})
-                for idx, sid in enumerate(sorted(servicos), start=1):
-                    if sid in eq_existing:
-                        prev_existing += 1
-                    else:
-                        prev_new += 1
-                        semana_ref = ((idx - 1) % week_total) + 1
-                        all_payload.append(
-                            {
-                                "tenant_id": tenant_id,
-                                "revisao_id": revisao_id,
-                                "equipamento_id": e["id"],
-                                "servico_id": sid,
-                                "status": "pendente",
-                                "semana": semana_ref,
-                            }
-                        )
-
-                if modo == "Criar faltantes + marcar extras como Não se aplica":
-                    extras = [row["id"] for sid, row in eq_existing.items() if sid not in servicos]
-                    to_na.extend(extras)
-
-            pc1, pc2, pc3 = st.columns(3)
-            pc1.metric("Novas tarefas", prev_new)
-            pc2.metric("Já existentes", prev_existing)
-            pc3.metric("Extras → Não se aplica", len(to_na))
-
-            if all_payload:
-                weeks_dist = {}
-                for item in all_payload:
-                    s = int(item.get("semana") or 0)
-                    weeks_dist[s] = weeks_dist.get(s, 0) + 1
-                preview_rows = [{"Semana": f"Sem.{k}", "Tarefas previstas": v} for k, v in sorted(weeks_dist.items())]
-                st.dataframe(preview_rows, hide_index=True, use_container_width=True)
-
-            if modo == "Pré-visualizar impacto":
-                st.info("Pré-visualização concluída. Nada foi alterado.")
-            else:
-                with st.spinner("Sincronizando matriz..."):
+                st.info(f"Tarefas novas a inserir: **{len(payload):,}**")
+                if payload:
                     try:
-                        if all_payload:
-                            _insert_tasks(sb, all_payload)
-                        if to_na:
-                            _update_tasks_status(sb, to_na, status="nao_aplica")
-                        time.sleep(0.2)
-                        st.toast("✓ Matriz sincronizada.", icon=":material/check_circle:")
+                        with st.spinner("Inserindo tarefas..."):
+                            _insert_tasks(sb, payload)
+                        st.toast("✓ Matriz gerada/atualizada", icon=":material/check_circle:")
                         nav.rerun_keep_menu()
                     except Exception as e:
-                        st.error(f"Erro ao sincronizar: {e}")
+                        st.error(f"Erro ao inserir tarefas: {e}")
+                else:
+                    st.info("Nada a inserir: matriz já estava completa para os templates atuais.")
+
+        with colB:
+            if st.button("Sincronizar Matriz (add + marcar N/A)", use_container_width=True):
+                if len(com_grupo) == 0:
+                    st.warning("Nenhum equipamento com grupo.")
+                    st.stop()
+
+                equipamento_ids = [e["id"] for e in com_grupo]
+                existing = _load_existing_tasks(sb, tenant_id, revisao_id, equipamento_ids)
+
+                to_insert = []
+                to_na = []
+
+                for e in com_grupo:
+                    gid = e["grupo_id"]
+                    desired = gs_map.get(gid, set()) or set()
+                    cur_map = existing.get(e["id"], {})
+                    cur_servicos = set(cur_map.keys())
+
+                    for sid in (desired - cur_servicos):
+                        to_insert.append({
+                            "tenant_id": tenant_id,
+                            "revisao_id": revisao_id,
+                            "equipamento_id": e["id"],
+                            "servico_id": sid,
+                            "status": "pendente",
+                        })
+
+                    for sid in (cur_servicos - desired):
+                        row = cur_map.get(sid)
+                        if row and row.get("status") != "nao_aplica":
+                            to_na.append(row["id"])
+
+                st.markdown(f"- Inserir: **{len(to_insert):,}**")
+                st.markdown(f"- Marcar como não aplica: **{len(to_na):,}**")
+
+                try:
+                    with st.spinner("Sincronizando..."):
+                        if to_insert:
+                            _insert_tasks(sb, to_insert)
+                        if to_na:
+                            _update_tasks_status(sb, to_na, status="nao_aplica")
+                    st.toast("✓ Sincronização concluída", icon=":material/check_circle:")
+                    nav.rerun_keep_menu()
+                except Exception as e:
+                    st.error(f"Erro na sincronização: {e}")
