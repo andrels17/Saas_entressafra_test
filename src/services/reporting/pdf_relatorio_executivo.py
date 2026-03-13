@@ -53,11 +53,11 @@ class DeptSnapshot:
     n_travados: int
     n_sem_inicio: int
     n_risco_prazo: int
-    n_parados: int = 0
-    max_dias_parado: int = 0
     top_criticos: list[dict]       # [{frota, modelo, pct, status}] — menor %
     top_melhores: list[dict]       # [{frota, modelo, pct, pct_anterior}] — maior %, quase concluídos
     maiores_evolucoes: list[dict]  # [{frota, modelo, pct, pct_anterior}] — maior delta semana
+    n_parados: int = 0
+    max_dias_parado: int = 0
     _done_steps: int = 0           # para cálculo ponderado do pct_global
     _expected_steps: int = 0       # para cálculo ponderado do pct_global
 
@@ -153,8 +153,8 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     kpi_h = 16*mm
     kpi_w = (w - 36*mm) / 4
     kpis = [
-        ("Departamentos",  str(n_deptos),                     WHITE),
-        ("Equipamentos",   str(payload.n_equip_total),         WHITE),
+        ("Departamentos",  str(n_deptos),                     DARK),
+        ("Equipamentos",   str(payload.n_equip_total),         DARK),
         ("Concluídos",     str(payload.n_equip_concluidos),    GREEN),
         ("Alertas",        str(payload.n_alertas_total),       RED if payload.n_alertas_total else GREEN),
     ]
@@ -316,16 +316,6 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     footer(); c.showPage()
 
     # ══════════════════════════════════════════════════════════════════════════
-    # PÁGINA 3+ — Destaques por departamento (2 colunas)
-    # ══════════════════════════════════════════════════════════════════════════
-    page_header("Destaques por Departamento")
-    y = h - 20*mm
-    col_w  = (w - 36*mm) / 2
-    col_gap = 4*mm
-    col_x  = [16*mm, 16*mm + col_w + col_gap]
-    ci     = 0   # coluna atual (0=esquerda, 1=direita)
-
-    # ══════════════════════════════════════════════════════════════════════════
     # PÁGINA 2+ — Destaques por departamento (2 colunas com y independente)
     # ══════════════════════════════════════════════════════════════════════════
     page_header("Destaques por Departamento")
@@ -340,10 +330,10 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     ci    = 0
 
     def dept_block_height(dept: DeptSnapshot) -> float:
-        base = 14 * mm
-        section_gap = 5.5 * mm
-        row_gap = 6 * mm
-        bottom_pad = 4 * mm
+        base = 15 * mm
+        section_gap = 6.5 * mm
+        row_gap = 6.5 * mm
+        bottom_pad = 6 * mm
 
         sections = [
             min(len(dept.top_criticos), 3),
@@ -408,22 +398,22 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
                 delta_v = pct_eq - int(eq.get("pct_anterior", pct_eq))
                 c.setFillColor(FG); c.setFont("Helvetica-Bold", 7.3)
                 c.drawString(bx + 8, iy, str(eq.get("frota") or "—")[:7])
-                c.setFillColor(MUTED); c.setFont("Helvetica", 6.6)
-                c.drawString(bx + 20*mm, iy, str(eq.get("modelo") or "")[:9])
+                c.setFillColor(MUTED); c.setFont("Helvetica", 6.2)
+                c.drawString(bx + 20*mm, iy, str(eq.get("modelo") or "")[:8])
 
                 # layout mais conservador para manter tudo dentro do card
-                bar_x = bx + col_w - 34*mm
-                bar_w = 10*mm
-                pct_x = bx + col_w - 10.5*mm
-                delta_x = bx + col_w - 5.5*mm
+                bar_x = bx + col_w - 39*mm
+                bar_w = 8*mm
+                pct_x = bx + col_w - 13*mm
+                delta_x = bx + col_w - 7*mm
 
-                pbar(bar_x, iy - 1.5*mm, bar_w, 3.5*mm, pct_eq)
-                c.setFillColor(_risk_color(pct_eq)); c.setFont("Helvetica-Bold", 6.6)
+                pbar(bar_x, iy - 1.5*mm, bar_w, 3.3*mm, pct_eq)
+                c.setFillColor(_risk_color(pct_eq)); c.setFont("Helvetica-Bold", 6.2)
                 c.drawRightString(pct_x, iy, f"{pct_eq}%")
                 if delta_v > 0:
-                    c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 5.8)
+                    c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 5.6)
                     c.drawRightString(delta_x, iy, f"+{delta_v}p")
-                iy -= 6*mm
+                iy -= 6.5*mm
 
     for dept in deptos:
         bh = dept_block_height(dept)
