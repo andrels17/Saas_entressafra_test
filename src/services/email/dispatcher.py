@@ -22,6 +22,8 @@ from typing import Any
 
 import pandas as pd
 
+from src.utils.timezone import days_since_utc, semana_da_revisao
+
 log = logging.getLogger(__name__)
 
 
@@ -32,25 +34,13 @@ def _pct(done: int, total: int) -> int:
 
 
 def _dias_desde(ts_str: str | None) -> int | None:
-    if not ts_str:
-        return None
-    try:
-        ts = pd.to_datetime(ts_str, utc=True)
-        return int((pd.Timestamp.utcnow() - ts).total_seconds() // 86400)
-    except Exception:
-        return None
+    """Delega ao utilitário central — garante fuso consistente (UTC)."""
+    return days_since_utc(ts_str)
 
 
 def _semana_atual(data_inicio_str: str | None, semanas_total: int) -> int:
-    if not data_inicio_str:
-        return 1
-    try:
-        inicio = pd.to_datetime(data_inicio_str, utc=True)
-        agora = pd.Timestamp.utcnow()
-        semana = max(1, int((agora - inicio).days // 7) + 1)
-        return min(semana, semanas_total or semana)
-    except Exception:
-        return 1
+    """Delega ao utilitário central — usa BRT para alinhar com o calendário do usuário."""
+    return semana_da_revisao(data_inicio_str, semanas_total)
 
 
 # ── Carregamento de dados ─────────────────────────────────────────────────────

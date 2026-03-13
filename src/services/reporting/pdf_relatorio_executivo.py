@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass, field
 from datetime import datetime
+from src.utils.timezone import fmt_brt
 from typing import List
 
 from reportlab.lib import colors
@@ -79,7 +80,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     c   = canvas.Canvas(buf, pagesize=A4)
     w, h = A4
     accent = _hex(payload.primary_color)
-    now    = datetime.now().strftime("%d/%m/%Y %H:%M")
+    now    = fmt_brt()
 
     # ── helpers ───────────────────────────────────────────────────────────────
     def footer():

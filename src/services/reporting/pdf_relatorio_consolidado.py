@@ -12,6 +12,7 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass, field
 from datetime import datetime
+from src.utils.timezone import fmt_brt
 from typing import List
 
 from reportlab.lib import colors
@@ -128,7 +129,7 @@ def build_consolidated_pdf(payload: RelatorioConsolidadoPayload) -> bytes:
         c.line(16*mm, 14*mm, w - 16*mm, 14*mm)
         c.setFillColor(MUTED); c.setFont("Helvetica", 8)
         c.drawString(16*mm, 9*mm, "Relatório Consolidado — gerado automaticamente.")
-        now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+        now_str = fmt_brt()
         c.drawRightString(w - 16*mm, 9*mm, f"{now_str}  ·  pág. {page_no[0]}")
 
     def section_title(txt: str, y: float) -> float:

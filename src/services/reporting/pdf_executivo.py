@@ -6,6 +6,7 @@ import math
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
+from src.utils.timezone import fmt_brt
 from typing import Any, Dict, List, Optional, Tuple
 
 from reportlab.lib.pagesizes import A4
@@ -143,7 +144,7 @@ def build_executive_pdf(
         c.setFillColor(muted)
         c.setFont("Helvetica", 8)
         c.drawString(16*mm, 11*mm, branding.footer_note)
-        c.drawRightString(w-16*mm, 11*mm, f"{datetime.now().strftime('%d/%m/%Y %H:%M')}  •  pág. {page_no}")
+        c.drawRightString(w-16*mm, 11*mm, f"{fmt_brt()}  •  pág. {page_no}")
 
     def kpi_cards(kpis: Dict[str, Any], top_y: float):
         # 4 cards 2x2

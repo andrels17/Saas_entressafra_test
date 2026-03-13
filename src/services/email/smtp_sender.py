@@ -15,6 +15,7 @@ import smtplib
 import ssl
 from dataclasses import dataclass, field
 from datetime import datetime
+from src.utils.timezone import fmt_brt
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -147,7 +148,7 @@ def build_html_body(
         bar_color = "#F59E0B"
     else:
         bar_color = "#EF4444"
-    now = datetime.now().strftime("%d/%m/%Y")
+    now = fmt_brt("%d/%m/%Y")
     alerta_txt = (f"{n_alertas} alerta{'s' if n_alertas != 1 else ''} "
                   f"ativo{'s' if n_alertas != 1 else ''}") if n_alertas else "sem alertas"
     alerta_color = "#EF4444" if n_alertas else "#12B76A"

@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from src.utils.timezone import BRT, now_utc_iso
+
 DIAS_SEMANA_LABELS = [
     "Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira",
     "Quinta-feira", "Sexta-feira", "Sábado",
@@ -49,6 +51,7 @@ class ScheduleConfig:
     dias_parado: int = 5
     revisao_fixa: str | None = None
     id: str | None = None
+    last_dispatched_at: str | None = None  # ISO UTC — controla duplo disparo
 
     @property
     def hora_int(self) -> tuple[int, int]:
@@ -89,10 +92,18 @@ class ScheduleConfig:
                 hour=hh, minute=mm, second=0, microsecond=0)
 
         if self.periodicidade == "quinzenal":
-            # verifica se o último disparo foi há menos de 14 dias
-            # (simplificação: sempre avança mais 7 dias se semana par/ímpar não coincide)
-            # sem histórico real, retornamos apenas o próximo dia da semana
-            pass
+            # Avança mais 7 dias se o último disparo foi há menos de 14 dias
+            if self.last_dispatched_at:
+                try:
+                    from src.utils.timezone import UTC
+                    last = datetime.fromisoformat(
+                        self.last_dispatched_at.replace("Z", "+00:00")
+                    ).astimezone(BRT)
+                    days_since = (candidate - last).days
+                    if days_since < 14:
+                        candidate += timedelta(weeks=1)
+                except Exception:
+                    pass
 
         return candidate
 
@@ -118,6 +129,7 @@ def _row_to_config(row: dict) -> ScheduleConfig:
         dias_travado=int(row.get("dias_travado") or 2),
         dias_parado=int(row.get("dias_parado") or 5),
         revisao_fixa=row.get("revisao_fixa"),
+        last_dispatched_at=row.get("last_dispatched_at"),
     )
 
 
@@ -155,7 +167,7 @@ def save_schedule_config(cfg: ScheduleConfig) -> bool:
         "dias_travado": cfg.dias_travado,
         "dias_parado":  cfg.dias_parado,
         "revisao_fixa": cfg.revisao_fixa,
-        "updated_at":   datetime.utcnow().isoformat(),
+        "updated_at":   now_utc_iso(),
     }
     try:
         if cfg.id:
@@ -168,9 +180,17 @@ def save_schedule_config(cfg: ScheduleConfig) -> bool:
 
 
 def should_dispatch_now(cfg: ScheduleConfig, tolerance_minutes: int = 10) -> bool:
-    """Verifica se o agendamento deve disparar agora (±tolerance_minutes)."""
+    """Verifica se o agendamento deve disparar agora (±tolerance_minutes).
+
+    Proteção anti-duplo-disparo: se `last_dispatched_at` estiver preenchido
+    e o disparo tiver ocorrido dentro da janela de periodicidade mínima
+    (24h para semanal/mensal, 14 dias para quinzenal), retorna False mesmo
+    que o horário bata. Isso evita múltiplos disparos quando o scheduler
+    roda a cada minuto dentro da janela de tolerância.
+    """
     if not cfg.ativo:
         return False
+
     now = datetime.now(BRT)
     hh, mm = cfg.hora_int
     target_weekday_py = (cfg.dia_semana - 1) % 7   # conv. nossa → Python
@@ -185,4 +205,46 @@ def should_dispatch_now(cfg: ScheduleConfig, tolerance_minutes: int = 10) -> boo
     # Verifica faixa de horário
     target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
     diff_min = abs((now - target).total_seconds() / 60)
-    return diff_min <= tolerance_minutes
+    if diff_min > tolerance_minutes:
+        return False
+
+    # ── Proteção anti-duplo-disparo ───────────────────────────────────────────
+    if cfg.last_dispatched_at:
+        try:
+            last = datetime.fromisoformat(
+                cfg.last_dispatched_at.replace("Z", "+00:00")
+            ).astimezone(BRT)
+            hours_since = (now - last).total_seconds() / 3600
+            # Mínimo de horas entre disparos por periodicidade
+            min_hours = 23 * 24 if cfg.periodicidade == "quinzenal" else 23
+            if hours_since < min_hours:
+                return False
+        except Exception:
+            pass  # se não conseguir parsear, deixa disparar
+
+    return True
+
+
+def mark_dispatched(tenant_id: str) -> None:
+    """Registra o instante do último disparo no banco (campo last_dispatched_at).
+
+    Deve ser chamado pelo scheduler imediatamente após um disparo bem-sucedido.
+    Isso é a peça central da proteção anti-duplo-disparo.
+
+    O campo `last_dispatched_at` precisa existir na tabela `email_schedule_config`.
+    SQL de migração:
+        ALTER TABLE email_schedule_config
+        ADD COLUMN IF NOT EXISTS last_dispatched_at timestamptz;
+    """
+    from src.db.supabase_client import get_supabase_service
+    sb = get_supabase_service()
+    try:
+        sb.table("email_schedule_config") \
+          .update({"last_dispatched_at": now_utc_iso()}) \
+          .eq("tenant_id", tenant_id) \
+          .execute()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Falha ao registrar last_dispatched_at para tenant %s: %s", tenant_id, e
+        )

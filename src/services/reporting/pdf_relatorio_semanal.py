@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass, field
 from datetime import datetime
+from src.utils.timezone import fmt_brt
 from typing import Any, Dict, List, Optional, Tuple
 
 from reportlab.lib import colors
@@ -141,7 +142,7 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
         c.line(16*mm, 14*mm, w-16*mm, 14*mm)
         c.setFillColor(MUTED); c.setFont("Helvetica", 8)
         c.drawString(16*mm, 9*mm, "Relatório gerado automaticamente — sistema de gestão de revisões.")
-        now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+        now_str = fmt_brt()
         c.drawRightString(w-16*mm, 9*mm, f"{now_str}  ·  pág. {page_no[0]}")
 
     def section_title(txt: str, y: float) -> float:
@@ -768,7 +769,7 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
     # Rodapé da página de alertas
     y -= 4*mm
     c.setFillColor(MUTED); c.setFont("Helvetica", 8.5)
-    note = (f"Relatório gerado em {datetime.now().strftime('%d/%m/%Y às %H:%M')} "
+    note = (f"Relatório gerado em {fmt_brt('%d/%m/%Y às %H:%M')} "
             f"para a revisão '{payload.revisao_titulo}', "
             f"semana {payload.semana_atual} de {payload.semanas_total}.")
     c.drawString(16*mm, max(y, 30*mm), note)

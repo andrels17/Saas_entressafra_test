@@ -147,6 +147,7 @@ def main() -> int:
     log.info("Dias trav: %d | Dias upd: %d", dias_trav, dias_upd)
 
     from src.services.email.dispatcher import dispatch_relatorio_semanal
+    from src.services.email.email_schedule import mark_dispatched
 
     result = dispatch_relatorio_semanal(
         tenant_id=tenant_id,
@@ -164,6 +165,11 @@ def main() -> int:
     if result.errors:
         for err in result.errors:
             log.error("  • %s", err)
+
+    # Registra o disparo no banco para proteger contra duplo envio
+    if not dry_run and result.sent > 0:
+        mark_dispatched(tenant_id)
+        log.info("last_dispatched_at atualizado para tenant %s.", tenant_id)
 
     return 0 if result.failed == 0 else 1
 
