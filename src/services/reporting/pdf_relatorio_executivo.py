@@ -153,8 +153,8 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     kpi_h = 16*mm
     kpi_w = (w - 36*mm) / 4
     kpis = [
-        ("Departamentos",  str(n_deptos),                     WHITE),
-        ("Equipamentos",   str(payload.n_equip_total),         WHITE),
+        ("Departamentos",  str(n_deptos),                     FG),
+        ("Equipamentos",   str(payload.n_equip_total),         FG),
         ("Concluídos",     str(payload.n_equip_concluidos),    GREEN),
         ("Alertas",        str(payload.n_alertas_total),       RED if payload.n_alertas_total else GREEN),
     ]
@@ -350,10 +350,10 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         c.setFillColor(col_dep)
         c.rect(bx, by - bh, 3, bh, fill=1, stroke=0)
 
-        c.setFillColor(FG); c.setFont("Helvetica-Bold", 8.5)
-        c.drawString(bx + 7, by - 6*mm, dept.nome[:22])
-        c.setFillColor(col_dep); c.setFont("Helvetica-Bold", 9)
-        c.drawRightString(bx + col_w - 4, by - 6*mm, f"{dept.pct_geral}%")
+        c.setFillColor(FG); c.setFont("Helvetica-Bold", 8.2)
+        c.drawString(bx + 7, by - 6*mm, dept.nome[:20])
+        c.setFillColor(col_dep); c.setFont("Helvetica-Bold", 8.6)
+        c.drawRightString(bx + col_w - 7, by - 6*mm, f"{dept.pct_geral}%")
         c.setStrokeColor(BORDER); c.setLineWidth(0.5)
         c.line(bx + 4, by - 9*mm, bx + col_w - 4, by - 9*mm)
 
@@ -361,7 +361,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
 
         if dept.top_criticos:
             c.setFillColor(RED); c.setFont("Helvetica-Bold", 7)
-            c.drawString(bx + 6, iy, "⚠ Piores:")
+            c.drawString(bx + 6, iy, "Piores:")
             iy -= 5.5*mm
             for eq in dept.top_criticos[:3]:
                 pct_eq = int(eq.get("pct", 0))
@@ -376,7 +376,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
 
         if dept.top_melhores:
             c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 7)
-            c.drawString(bx + 6, iy, "✅ Quase concluídos:")
+            c.drawString(bx + 6, iy, "Quase concluidos:")
             iy -= 5.5*mm
             for eq in dept.top_melhores[:3]:
                 pct_eq = int(eq.get("pct", 0))
@@ -391,27 +391,27 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
 
         if dept.maiores_evolucoes:
             c.setFillColor(colors.HexColor("#6366F1")); c.setFont("Helvetica-Bold", 7)
-            c.drawString(bx + 6, iy, "📈 Evoluções:")
+            c.drawString(bx + 6, iy, "Evolucoes:")
             iy -= 5.5*mm
             for eq in dept.maiores_evolucoes[:3]:
                 pct_eq  = int(eq.get("pct", 0))
                 delta_v = pct_eq - int(eq.get("pct_anterior", pct_eq))
-                c.setFillColor(FG); c.setFont("Helvetica-Bold", 7.5)
+                c.setFillColor(FG); c.setFont("Helvetica-Bold", 7.2)
                 c.drawString(bx + 8, iy, str(eq.get("frota") or "—")[:7])
-                c.setFillColor(MUTED); c.setFont("Helvetica", 6.8)
-                c.drawString(bx + 20*mm, iy, str(eq.get("modelo") or "")[:11])
+                c.setFillColor(MUTED); c.setFont("Helvetica", 6.3)
+                c.drawString(bx + 16*mm, iy, str(eq.get("modelo") or "")[:12])
 
-                # reserva mais espaço à direita para o delta não escapar do box
-                bar_x = bx + col_w - 31*mm
-                bar_w = 12*mm
-                pct_x = bx + col_w - 8*mm
-                delta_x = bx + col_w - 4.5*mm
+                # mais margem interna para % e delta não vazarem
+                bar_x = bx + col_w - 28*mm
+                bar_w = 9*mm
+                pct_x = bx + col_w - 12*mm
+                delta_x = bx + col_w - 7*mm
 
-                pbar(bar_x, iy - 1.5*mm, bar_w, 3.5*mm, pct_eq)
-                c.setFillColor(_risk_color(pct_eq)); c.setFont("Helvetica-Bold", 7.1)
+                pbar(bar_x, iy - 1.4*mm, bar_w, 3.2*mm, pct_eq)
+                c.setFillColor(_risk_color(pct_eq)); c.setFont("Helvetica-Bold", 6.6)
                 c.drawRightString(pct_x, iy, f"{pct_eq}%")
                 if delta_v > 0:
-                    c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 6.1)
+                    c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 5.7)
                     c.drawRightString(delta_x, iy, f"+{delta_v}p")
                 iy -= 6*mm
 
