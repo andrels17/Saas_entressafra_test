@@ -151,34 +151,41 @@ def render_admin_revisoes():
         st.info("Se o seu banco tiver alguma política/trigger recursiva em `revisoes`, o insert pode estourar stack. "
                 "Para evitar travar o app, a criação aqui usa **Service Role** (bypassa RLS).")
 
-        with st.form("create_revisao"):
-            titulo = st.text_input("Título", placeholder="Entressafra 2026")
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                dt_ini = st.date_input("Data início", value=None)
-            with c2:
-                dt_fim = st.date_input("Data fim", value=None)
-            with c3:
-                # Calcula automaticamente a partir do intervalo (mais prático para medir tempos)
-                auto_weeks = 0
-                if dt_ini and dt_fim and dt_fim >= dt_ini:
-                    try:
-                        import math
-                        dias_total = (dt_fim - dt_ini).days + 1
-                        auto_weeks = int(math.ceil(dias_total / 7))
-                    except Exception:
-                        auto_weeks = 0
+        titulo = st.text_input("Título", placeholder="Entressafra 2026", key="revisao_titulo")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            dt_ini = st.date_input("Data início", value=None, key="revisao_dt_ini")
+        with c2:
+            dt_fim = st.date_input("Data fim", value=None, key="revisao_dt_fim")
+        with c3:
+            auto_weeks = 0
+            if dt_ini and dt_fim and dt_fim >= dt_ini:
+                try:
+                    import math
+                    dias_total = (dt_fim - dt_ini).days + 1
+                    auto_weeks = int(math.ceil(dias_total / 7))
+                except Exception:
+                    auto_weeks = 0
 
-                st.number_input("Nº semanas (automático)", min_value=0, value=int(auto_weeks), step=1, disabled=True)
-                allow_manual = st.checkbox("Ajustar manualmente", value=False)
-                semanas_total = st.number_input(
-                    "Nº semanas (manual)",
-                    min_value=0,
-                    value=int(auto_weeks),
-                    step=1,
-                    disabled=not allow_manual,
-                )
-            submitted = st.form_submit_button("Criar revisão", use_container_width=True)
+            st.number_input(
+                "Nº semanas (automático)",
+                min_value=0,
+                value=int(auto_weeks),
+                step=1,
+                disabled=True,
+                key="revisao_auto_weeks",
+            )
+            allow_manual = st.checkbox("Ajustar manualmente", value=False, key="revisao_allow_manual")
+            semanas_total = st.number_input(
+                "Nº semanas (manual)",
+                min_value=0,
+                value=int(auto_weeks),
+                step=1,
+                disabled=not allow_manual,
+                key="revisao_manual_weeks",
+            )
+
+        submitted = st.button("Criar revisão", use_container_width=True, key="revisao_submit")
 
         if submitted:
             t = (titulo or "").strip()
