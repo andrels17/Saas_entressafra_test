@@ -53,6 +53,8 @@ class DeptSnapshot:
     n_travados: int
     n_sem_inicio: int
     n_risco_prazo: int
+    n_parados: int = 0
+    max_dias_parado: int = 0
     top_criticos: list[dict]       # [{frota, modelo, pct, status}] — menor %
     top_melhores: list[dict]       # [{frota, modelo, pct, pct_anterior}] — maior %, quase concluídos
     maiores_evolucoes: list[dict]  # [{frota, modelo, pct, pct_anterior}] — maior delta semana
@@ -244,7 +246,77 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     footer(); c.showPage()
 
     # ══════════════════════════════════════════════════════════════════════════
-    # PÁGINA 2+ — Destaques por departamento (2 colunas)
+    # PÁGINA 2 — Equipamentos sem movimentação por departamento
+    # ══════════════════════════════════════════════════════════════════════════
+    page_header("Equipamentos sem movimentação")
+    y = h - 20*mm
+
+    total_parados = sum(int(getattr(d, "n_parados", 0) or 0) for d in deptos)
+    deptos_com_parados = [d for d in deptos if int(getattr(d, "n_parados", 0) or 0) > 0]
+    maior_dias = max([int(getattr(d, "max_dias_parado", 0) or 0) for d in deptos] or [0])
+
+    card_h = 16*mm
+    card_w = (w - 36*mm) / 3
+    for i, (lbl, val, col) in enumerate([
+        ("Equipamentos parados", str(total_parados), YELLOW if total_parados else GREEN),
+        ("Departamentos afetados", str(len(deptos_com_parados)), RED if deptos_com_parados else GREEN),
+        ("Maior tempo parado", f"{maior_dias}d" if maior_dias else "0d", RED if maior_dias >= 14 else YELLOW),
+    ]):
+        cx = 16*mm + i * (card_w + 2*mm)
+        c.setFillColor(SURFACE); c.setStrokeColor(BORDER); c.setLineWidth(0.6)
+        c.roundRect(cx, y - card_h, card_w, card_h, 3, fill=1, stroke=1)
+        c.setFillColor(col); c.setFont("Helvetica-Bold", 16)
+        c.drawString(cx + 4, y - 10*mm, val)
+        c.setFillColor(MUTED); c.setFont("Helvetica", 7.5)
+        c.drawString(cx + 4, y - 14*mm, lbl)
+    y -= card_h + 7*mm
+
+    c.setFillColor(FG); c.setFont("Helvetica-Bold", 9)
+    c.drawString(16*mm, y, "Resumo por departamento")
+    y -= 6*mm
+
+    c.setFillColor(DARK)
+    c.rect(16*mm, y - 7*mm, w - 32*mm, 7*mm, fill=1, stroke=0)
+    c.setFillColor(colors.Color(0.6, 0.65, 0.7)); c.setFont("Helvetica-Bold", 7.5)
+    c.drawString(20*mm, y - 5*mm, "Departamento")
+    c.drawString(105*mm, y - 5*mm, "Parados")
+    c.drawString(128*mm, y - 5*mm, "Maior tempo")
+    c.drawRightString(w - 18*mm, y - 5*mm, "Impacto")
+    y -= 7*mm
+
+    linhas = deptos_com_parados or deptos
+    row_h = 10*mm
+    max_parados = max([int(getattr(d, "n_parados", 0) or 0) for d in linhas] or [1])
+    for i, dept in enumerate(sorted(linhas, key=lambda d: (-int(getattr(d, "n_parados", 0) or 0), -int(getattr(d, "max_dias_parado", 0) or 0), d.nome))):
+        if y - row_h < 18*mm:
+            footer(); c.showPage()
+            page_header("Equipamentos sem movimentação (cont.)")
+            y = h - 20*mm
+        n_par = int(getattr(dept, "n_parados", 0) or 0)
+        max_d = int(getattr(dept, "max_dias_parado", 0) or 0)
+        c.setFillColor(SURFACE if i % 2 == 0 else WHITE)
+        c.rect(16*mm, y - row_h, w - 32*mm, row_h, fill=1, stroke=0)
+        bar_col = RED if max_d >= 14 else (YELLOW if n_par else GREEN)
+        c.setFillColor(bar_col); c.rect(16*mm, y - row_h, 3, row_h, fill=1, stroke=0)
+        c.setFillColor(FG); c.setFont("Helvetica-Bold", 8.2)
+        c.drawString(20*mm, y - row_h*0.38, dept.nome[:34])
+        c.setFillColor(MUTED); c.setFont("Helvetica", 7.2)
+        c.drawString(20*mm, y - row_h*0.72, f"{dept.n_equipamentos} equipamentos monitorados")
+        c.setFillColor(FG); c.setFont("Helvetica-Bold", 8.5)
+        c.drawString(105*mm, y - row_h*0.5, str(n_par))
+        c.drawString(128*mm, y - row_h*0.5, f"{max_d}d" if max_d else "—")
+        pbar(145*mm, y - row_h + 2.4*mm, 42*mm, 5*mm, round((n_par / max(max_parados, 1)) * 100))
+        impacto = f"{round((n_par / max(dept.n_equipamentos, 1)) * 100)}%" if dept.n_equipamentos else "0%"
+        c.setFillColor(bar_col); c.setFont("Helvetica-Bold", 8.5)
+        c.drawRightString(w - 18*mm, y - row_h*0.38, impacto)
+        c.setStrokeColor(BORDER); c.setLineWidth(0.3)
+        c.line(16*mm, y - row_h, w - 16*mm, y - row_h)
+        y -= row_h
+
+    footer(); c.showPage()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PÁGINA 3+ — Destaques por departamento (2 colunas)
     # ══════════════════════════════════════════════════════════════════════════
     page_header("Destaques por Departamento")
     y = h - 20*mm

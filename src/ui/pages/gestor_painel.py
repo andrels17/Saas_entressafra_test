@@ -120,135 +120,72 @@ def _fragment_alertas(tenant_id: str, revisao_id: str) -> None:
     )
 
 
-
-
-@st.cache_data(ttl=60, show_spinner=False)
-def _load_equipamentos_parados(tenant_id: str, revisao_id: str, dias_sem_update: int) -> pd.DataFrame:
+@st.fragment
+def _fragment_parados(tenant_id: str, revisao_id: str, dias_sem_mov: int = 7) -> None:
+    """Equipamentos sem movimentação recente."""
+    st.markdown("### Equipamentos sem movimentação")
     sb = sb_for_user()
     rows = (
         sb.table("tarefas_servico")
         .select(
-            "equipamento_id,semana,status,updated_at,dt_etapa_d,dt_etapa_r,dt_etapa_m,"
-            "equipamentos(id,frota,modelo,equip_grupos(id,nome,departamento_id))"
+            "status,semana,updated_at,dt_etapa_d,dt_etapa_r,dt_etapa_m,"
+            "equipamentos(id,frota,modelo,equip_grupos(nome,departamento_id))"
         )
         .eq("tenant_id", tenant_id)
         .eq("revisao_id", revisao_id)
+        .limit(5000)
         .execute()
         .data
     ) or []
-    if not rows:
-        return pd.DataFrame()
 
-    eq_map: dict[str, dict] = {}
+    grouped: dict[str, dict] = {}
     for r in rows:
         eq = r.get("equipamentos") or {}
-        eid = r.get("equipamento_id") or eq.get("id")
+        eid = eq.get("id")
         if not eid:
             continue
-        item = eq_map.setdefault(eid, {
+        grp = eq.get("equip_grupos") or {}
+        item = grouped.setdefault(eid, {
             "Frota": eq.get("frota") or eid,
             "Modelo": eq.get("modelo") or "",
-            "Grupo": (eq.get("equip_grupos") or {}).get("nome") or "Sem grupo",
-            "_grp_id": (eq.get("equip_grupos") or {}).get("id"),
-            "_dept_id": (eq.get("equip_grupos") or {}).get("departamento_id"),
-            "_done": 0,
-            "_total": 0,
-            "_last_ts": None,
-            "_last_semana": None,
-            "_travado": False,
+            "Grupo": grp.get("nome") or "Sem grupo",
+            "ultima_semana": None,
+            "ultima_mov": None,
+            "status_final": r.get("status") or "pendente",
         })
-        item["_done"] += int(bool(r.get("dt_etapa_d") or r.get("etapa_d"))) + int(bool(r.get("dt_etapa_r") or r.get("etapa_r"))) + int(bool(r.get("dt_etapa_m") or r.get("etapa_m")))
-        item["_total"] += 3
-        if (r.get("status") or "pendente") == "travado":
-            item["_travado"] = True
-        cand = r.get("updated_at") or r.get("dt_etapa_m") or r.get("dt_etapa_r") or r.get("dt_etapa_d")
-        if cand:
-            try:
-                ts = pd.to_datetime(cand, utc=True)
-            except Exception:
-                ts = None
-            if ts is not None and (item["_last_ts"] is None or ts > item["_last_ts"]):
-                item["_last_ts"] = ts
-                item["_last_semana"] = r.get("semana")
+        mov = max([x for x in [r.get("dt_etapa_m"), r.get("dt_etapa_r"), r.get("dt_etapa_d"), r.get("updated_at")] if x] or [None])
+        if mov and (item["ultima_mov"] is None or mov > item["ultima_mov"]):
+            item["ultima_mov"] = mov
+        sem = int(r.get("semana") or 0)
+        if any([r.get("dt_etapa_d"), r.get("dt_etapa_r"), r.get("dt_etapa_m")]) and sem > (item["ultima_semana"] or 0):
+            item["ultima_semana"] = sem
+        item["status_final"] = r.get("status") or item["status_final"]
 
+    from src.utils.timezone import days_since_utc
     out = []
-    for item in eq_map.values():
-        if item["_total"] <= 0:
+    for item in grouped.values():
+        dias = days_since_utc(item.get("ultima_mov"))
+        if item.get("status_final") == "concluido":
             continue
-        pct = round((item["_done"] / max(item["_total"], 1)) * 100)
-        dias = None
-        if item["_last_ts"] is not None:
-            dias = int((pd.Timestamp.utcnow() - item["_last_ts"]).total_seconds() // 86400)
-        if pct < 100 and not item["_travado"] and dias is not None and dias >= int(dias_sem_update):
-            out.append({
-                "Grupo": item["Grupo"],
-                "Equipamento": f"{item['Frota']} — {item['Modelo']}".strip(" —"),
-                "Últ. semana": f"S{int(item['_last_semana'])}" if str(item.get("_last_semana") or "").isdigit() else "—",
-                "Dias parado": dias,
-                "Progresso": pct,
-                "_grp_id": item["_grp_id"],
-                "_dept_id": item["_dept_id"],
-            })
-    if not out:
-        return pd.DataFrame()
-    return pd.DataFrame(out).sort_values(["Dias parado", "Grupo", "Equipamento"], ascending=[False, True, True])
+        if dias is None or dias < dias_sem_mov:
+            continue
+        out.append({
+            "Frota": item["Frota"],
+            "Modelo": item["Modelo"],
+            "Grupo": item["Grupo"],
+            "Últ. semana": f"Sem. {item['ultima_semana']}" if item.get("ultima_semana") else "Sem registro",
+            "Dias sem mov.": dias,
+        })
 
-
-@st.fragment
-def _fragment_parados(tenant_id: str, revisao_id: str, scope_dept_ids, scope_grp_ids, grupos: list[dict]) -> None:
-    st.markdown("### Equipamentos sem movimentação")
-    c1, c2, c3 = st.columns([0.34, 0.33, 0.33])
-    grupo_opts = ["(Todos)"] + [g["nome"] for g in grupos]
-    with c1:
-        grupo_nome = st.selectbox("Grupo", grupo_opts, key="parados_grupo_sel")
-    with c2:
-        dias_sem_update = st.number_input("Sem movimentação há (dias)", min_value=1, max_value=120, value=7, step=1, key="parados_days")
-    with c3:
-        busca = st.text_input("Buscar frota", placeholder="Ex.: 2055", key="parados_busca")
-
-    df = _load_equipamentos_parados(tenant_id, revisao_id, int(dias_sem_update))
+    df = pd.DataFrame(sorted(out, key=lambda x: (-x["Dias sem mov."], str(x["Frota"]))))
     if df.empty:
-        st.success("Nenhum equipamento parado no período configurado.")
+        st.success("Nenhum equipamento parado no recorte atual ✅")
         return
-
-    if scope_dept_ids:
-        df = df[df["_dept_id"].isin(scope_dept_ids)]
-    if scope_grp_ids:
-        df = df[df["_grp_id"].isin(scope_grp_ids)]
-    if grupo_nome != "(Todos)":
-        df = df[df["Grupo"] == grupo_nome]
-    if busca.strip():
-        df = df[df["Equipamento"].str.contains(busca.strip(), case=False, na=False)]
-
-    if df.empty:
-        st.info("Nenhum equipamento encontrado com os filtros atuais.")
-        return
-
     m1, m2, m3 = st.columns(3)
     with m1: st.metric("Equipamentos parados", len(df))
-    with m2: st.metric("Maior tempo parado", int(df["Dias parado"].max()) if not df.empty else 0)
-    with m3: st.metric("Média de progresso", f"{round(df['Progresso'].mean()) if not df.empty else 0}%")
-
-    df_show = df.drop(columns=[c for c in ["_grp_id", "_dept_id"] if c in df.columns])
-    st.dataframe(
-        df_show,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Dias parado": st.column_config.NumberColumn("Dias parado"),
-            "Progresso": st.column_config.ProgressColumn("Progresso", min_value=0, max_value=100),
-        },
-        key="df_equip_parados",
-    )
-    st.download_button(
-        "Exportar equipamentos parados CSV",
-        icon=":material/download:",
-        data=df_show.to_csv(index=False).encode("utf-8"),
-        file_name="equipamentos_parados.csv",
-        mime="text/csv",
-        use_container_width=True,
-        key="parados_csv_btn",
-    )
+    with m2: st.metric("Maior tempo", f"{int(df['Dias sem mov.'].max())} dias")
+    with m3: st.metric("Grupos afetados", int(df['Grupo'].nunique()))
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
 
 # ── Fragment: tabela de pendências com filtros ────────────────────────────────
@@ -574,10 +511,5 @@ def render_gestor_painel() -> None:
 
     st.divider()
 
-    # Fragment 2: equipamentos sem movimentação
-    _fragment_parados(tenant_id, revisao_id, scope_dept_ids, scope_grp_ids, grupos)
-
-    st.divider()
-
-    # Fragment 3: pendências com filtros reativos
+    # Fragment 2: pendências com filtros reativos
     _fragment_pendencias(tenant_id, revisao_id, scope_dept_ids, scope_grp_ids, grupos, setores)

@@ -33,6 +33,41 @@ def _pct(done: int, total: int) -> int:
     return round((done / max(total, 1)) * 100)
 
 
+def _is_done(value: Any) -> bool:
+    """Normaliza flags de etapa vindas do banco (bool/int/str)."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        s = value.strip().lower()
+        return s in {"1", "true", "t", "sim", "s", "y", "yes", "ok", "x"}
+    return bool(value)
+
+
+def _sum_done_steps(task: dict) -> int:
+    return (
+        int(_is_done(task.get("etapa_d")))
+        + int(_is_done(task.get("etapa_r")))
+        + int(_is_done(task.get("etapa_m")))
+    )
+
+
+def _best_ts(*values: str | None) -> str | None:
+    vals = [v for v in values if v]
+    if not vals:
+        return None
+    return max(vals)
+
+
+def _dias_to_label(dias: int | None) -> str:
+    if dias is None:
+        return "—"
+    return f"{dias} dia" if dias == 1 else f"{dias} dias"
+
+
 def _dias_desde(ts_str: str | None) -> int | None:
     """Delega ao utilitário central — garante fuso consistente (UTC)."""
     return days_since_utc(ts_str)
@@ -234,7 +269,7 @@ def _build_payload(
     eq_done_anterior: dict[str, int] = {}
     for eid, tasks in eq_tasks.items():
         eq_done_anterior[eid] = sum(
-            int(bool(t.get("etapa_d"))) + int(bool(t.get("etapa_r"))) + int(bool(t.get("etapa_m")))
+            _sum_done_steps(t)
             for t in tasks if int(t.get("semana") or 0) <= semana_anterior
         )
 
@@ -262,7 +297,7 @@ def _build_payload(
             tasks  = eq_tasks.get(eid, [])
 
             done = sum(
-                int(bool(t.get("etapa_d"))) + int(bool(t.get("etapa_r"))) + int(bool(t.get("etapa_m")))
+                _sum_done_steps(t)
                 for t in tasks
             )
             done_by_grupo[gid] = done_by_grupo.get(gid, 0) + done
@@ -291,26 +326,22 @@ def _build_payload(
             else:
                 status_eq = "em_andamento"
 
-            # Última movimentação do equipamento (qualquer etapa ou update da tarefa)
-            last_ts = None
-            last_semana = None
+            ultima_mov = None
+            ultima_semana = None
             for t in tasks:
-                cand = t.get("updated_at") or t.get("dt_etapa_m") or t.get("dt_etapa_r") or t.get("dt_etapa_d")
-                if not cand:
-                    continue
-                try:
-                    ts = pd.to_datetime(cand, utc=True)
-                except Exception:
-                    continue
-                if last_ts is None or ts > last_ts:
-                    last_ts = ts
-                    try:
-                        last_semana = int(t.get("semana") or 0) or None
-                    except Exception:
-                        last_semana = None
+                mov_ts = _best_ts(
+                    t.get("dt_etapa_m"),
+                    t.get("dt_etapa_r"),
+                    t.get("dt_etapa_d"),
+                    t.get("updated_at"),
+                )
+                if mov_ts and (ultima_mov is None or mov_ts > ultima_mov):
+                    ultima_mov = mov_ts
+                sem_t = int(t.get("semana") or 0)
+                if _sum_done_steps(t) > 0 and sem_t > 0 and (ultima_semana is None or sem_t > ultima_semana):
+                    ultima_semana = sem_t
 
-            ultima_mov_iso = last_ts.isoformat() if last_ts is not None else None
-            dias_sem_manut = _dias_desde(ultima_mov_iso)
+            dias_sem_manut = _dias_desde(ultima_mov)
 
             if done == 0 and expected_per_eq > 0:
                 criticos.append(EquipamentoCritico(frota=frota, modelo=modelo, grupo=grupo_nome, pct=0, status="zero"))
@@ -321,9 +352,9 @@ def _build_payload(
                 "frota": frota, "modelo": modelo, "grupo": grupo_nome,
                 "grupo_id": gid,
                 "pct": pct, "pct_anterior": pct_anterior, "status": status_eq,
+                "ultima_mov": ultima_mov,
+                "ultima_semana": ultima_semana,
                 "dias_sem_manut": dias_sem_manut,
-                "ultima_semana": last_semana,
-                "ultima_mov": ultima_mov_iso,
             })
 
     # pct_geral ponderado (mesma fórmula do kpi_engine: sum(done) / sum(expected))
@@ -363,23 +394,24 @@ def _build_payload(
         sem = int(t.get("semana") or 0)
         if sem <= 0:
             continue
-        done_t = int(bool(t.get("etapa_d"))) + int(bool(t.get("etapa_r"))) + int(bool(t.get("etapa_m")))
+        done_t = _sum_done_steps(t)
         semana_counts[sem] = semana_counts.get(sem, 0) + done_t
 
     cumulative = 0
     for sem in range(1, semana_atual + 1):
         cumulative += semana_counts.get(sem, 0)
-        pct_sem = max(0, min(100, round(cumulative / max(total_expected, 1) * 100)))
+        expected_until_sem = round(total_expected * (sem / max(semanas_total, 1)))
+        pct_sem = max(0, min(100, round(cumulative / max(expected_until_sem, 1) * 100)))
         evolucao.append(SemanaSnapshot(semana=sem, concluidos=cumulative,
-                                       total=total_expected, pct=pct_sem))
+                                       total=expected_until_sem, pct=pct_sem))
 
     pct_semana_atual    = evolucao[-1].pct if evolucao else pct_geral
     pct_semana_anterior = evolucao[-2].pct if len(evolucao) >= 2 else 0
 
     # ── alertas ───────────────────────────────────────────────────────────────
-    n_travados = n_sem_inicio = n_risco_prazo = 0
-    parados_detalhe: list[dict[str, Any]] = []
+    n_travados = n_sem_inicio = n_parados = n_risco_prazo = 0
     esperado_pct = _pct(semana_atual, semanas_total)
+    parados_detalhe: list[dict] = []
 
     for gid, eqs in eq_por_grupo.items():
         svc_count = svc_por_grupo.get(gid, 0)
@@ -388,62 +420,58 @@ def _build_payload(
         for eq in eqs:
             eid   = eq["id"]
             tasks = eq_tasks.get(eid, [])
-            done  = sum(int(bool(t.get("etapa_d"))) + int(bool(t.get("etapa_r"))) + int(bool(t.get("etapa_m")))
-                        for t in tasks)
+            done  = sum(_sum_done_steps(t) for t in tasks)
             pct   = max(0, min(100, round(done / max(expected_per_eq, 1) * 100))) if expected_per_eq > 0 else 0
-            any_travado = any((t.get("status") or "pendente") == "travado" for t in tasks)
 
-            last_ts = None
-            last_semana = None
+            travado_eq = False
+            sem_inicio_eq = bool(tasks)
+            ultima_mov_eq = None
+            ultima_semana_eq = None
             for t in tasks:
                 status  = t.get("status") or "pendente"
-                updated = t.get("updated_at") or t.get("dt_etapa_m") or t.get("dt_etapa_r") or t.get("dt_etapa_d")
+                updated = _best_ts(t.get("dt_etapa_m"), t.get("dt_etapa_r"), t.get("dt_etapa_d"), t.get("updated_at"))
                 dias    = _dias_desde(updated)
+                if updated and (ultima_mov_eq is None or updated > ultima_mov_eq):
+                    ultima_mov_eq = updated
+                sem_t = int(t.get("semana") or 0)
+                if _sum_done_steps(t) > 0 and sem_t > 0 and (ultima_semana_eq is None or sem_t > ultima_semana_eq):
+                    ultima_semana_eq = sem_t
                 if status == "travado" and (dias is None or dias >= dias_travado):
-                    n_travados += 1
-                if not t.get("etapa_d") and not t.get("etapa_r") and not t.get("etapa_m"):
-                    if dias is None or dias >= dias_sem_update:
-                        n_sem_inicio += 1
-                if updated:
-                    try:
-                        ts = pd.to_datetime(updated, utc=True)
-                    except Exception:
-                        ts = None
-                    if ts is not None and (last_ts is None or ts > last_ts):
-                        last_ts = ts
-                        try:
-                            last_semana = int(t.get("semana") or 0) or None
-                        except Exception:
-                            last_semana = None
+                    travado_eq = True
+                if _sum_done_steps(t) > 0:
+                    sem_inicio_eq = False
 
-            dias_sem_manut = _dias_desde(last_ts.isoformat()) if last_ts is not None else None
-            if (
+            dias_sem_manut = _dias_desde(ultima_mov_eq)
+            if travado_eq:
+                n_travados += 1
+            if sem_inicio_eq and expected_per_eq > 0:
+                n_sem_inicio += 1
+
+            parado_eq = (
                 expected_per_eq > 0
                 and pct < 100
-                and not any_travado
+                and not travado_eq
                 and dias_sem_manut is not None
                 and dias_sem_manut >= dias_sem_update
-            ):
+            )
+            if parado_eq:
+                n_parados += 1
                 parados_detalhe.append({
                     "frota": str(eq.get("frota") or eid),
                     "modelo": str(eq.get("modelo") or ""),
                     "grupo": grupo_nome,
-                    "grupo_id": gid,
-                    "ultima_semana": last_semana,
+                    "ultima_semana": ultima_semana_eq,
                     "dias_parado": dias_sem_manut,
-                    "ultima_mov": last_ts.isoformat(),
-                    "pct": pct,
+                    "ultima_mov": ultima_mov_eq,
+                    "status": "Sem manutenção desde a semana " + (str(ultima_semana_eq) if ultima_semana_eq else "inicial"),
+                    "progresso": pct,
                 })
 
             if expected_per_eq > 0 and pct < esperado_pct - 15 and pct < 100:
                 n_risco_prazo += 1
 
-    parados_detalhe = sorted(
-        parados_detalhe,
-        key=lambda x: (-(x.get("dias_parado") or 0), str(x.get("frota") or "")),
-    )
-    n_parados = len(parados_detalhe)
-    n_alertas_total = n_travados + n_sem_inicio + n_parados + n_risco_prazo
+    parados_detalhe = sorted(parados_detalhe, key=lambda x: (-(x.get("dias_parado") or 0), str(x.get("frota") or "")))
+    n_alertas_total = n_travados + n_parados + n_risco_prazo + n_sem_inicio
 
     return RelatorioDeptPayload(
         tenant_nome=tenant_nome or "AgroSafra",
@@ -667,6 +695,8 @@ def dispatch_relatorio_semanal(
                         n_travados=p.n_travados,
                         n_sem_inicio=p.n_sem_inicio,
                         n_risco_prazo=p.n_risco_prazo,
+                        n_parados=p.n_parados,
+                        max_dias_parado=max([int(x.get("dias_parado") or 0) for x in (p.parados_detalhe or [])] or [0]),
                         top_criticos=top_criticos,
                         top_melhores=top_melhores,
                         maiores_evolucoes=maiores_evolucoes,
@@ -688,7 +718,7 @@ def dispatch_relatorio_semanal(
                 )
                 n_equip_total   = sum(d.n_equipamentos for d in dept_snapshots)
                 n_equip_concl   = sum(d.n_concluidos   for d in dept_snapshots)
-                n_alertas_total = sum(d.n_travados + d.n_risco_prazo for d in dept_snapshots)
+                n_alertas_total = sum(d.n_travados + d.n_risco_prazo + d.n_parados + d.n_sem_inicio for d in dept_snapshots)
 
                 exec_payload = RelatorioExecutivoPayload(
                     tenant_nome=tenant_nome or "AgroSafra",

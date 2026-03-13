@@ -212,6 +212,73 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
         tbl.drawOn(c, 16*mm, draw_y)
         return draw_y - 6*mm
 
+    def draw_alert_summary_page():
+        new_page("Resumo de Alertas")
+        y = h - 52*mm
+
+        alert_items = [
+            ("Travados", payload.n_travados, RED, "Status travado sem atualização recente."),
+            ("Sem apontamento", payload.n_sem_inicio, YELLOW, "Etapas D/R/M nunca iniciadas."),
+            ("Parados", payload.n_parados, YELLOW, "Sem manutenção / movimentação recente."),
+            ("Risco de prazo", payload.n_risco_prazo, RED, "Progresso abaixo da meta linear da semana."),
+        ]
+        card_w_a = (w - 36*mm) / 2
+        card_h_a = 24*mm
+        gap_a = 4*mm
+        for idx, (title_a, count, col, desc) in enumerate(alert_items):
+            col_i = idx % 2
+            row_i = idx // 2
+            cx = 16*mm + col_i * (card_w_a + gap_a)
+            cy = y - row_i * (card_h_a + gap_a) - card_h_a
+            c.setFillColor(SURFACE); c.setStrokeColor(BORDER); c.setLineWidth(0.7)
+            c.roundRect(cx, cy, card_w_a, card_h_a, 5, fill=1, stroke=1)
+            c.setFillColor(col); c.rect(cx, cy + card_h_a - 3, card_w_a, 3, fill=1, stroke=0)
+            c.setFillColor(col); c.setFont("Helvetica-Bold", 26)
+            c.drawString(cx + 6, cy + 6*mm, str(count))
+            c.setFillColor(FG); c.setFont("Helvetica-Bold", 9)
+            c.drawString(cx + 6, cy + card_h_a - 8*mm, title_a)
+            c.setFillColor(MUTED); c.setFont("Helvetica", 7.5)
+            c.drawString(cx + 6, cy + 3*mm, desc)
+            if count == 0:
+                c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 8)
+                c.drawRightString(cx + card_w_a - 5, cy + 6*mm, "OK")
+
+        y -= 2 * (card_h_a + gap_a) + 6*mm
+        if payload.parados_detalhe:
+            y = section_title("Equipamentos sem movimentação", y)
+            rows = [["Frota", "Grupo", "Últ. semana", "Dias", "Progresso"]]
+            for item in payload.parados_detalhe[:12]:
+                rows.append([
+                    str(item.get("frota") or "—"),
+                    str(item.get("grupo") or "—")[:24],
+                    f"Sem. {item.get('ultima_semana')}" if item.get("ultima_semana") else "Sem registro",
+                    str(item.get("dias_parado") or "—"),
+                    f"{int(item.get('progresso') or 0)}%",
+                ])
+            pw_useful = w - 32*mm
+            y = platypus_table(rows, [pw_useful*0.14, pw_useful*0.36, pw_useful*0.18, pw_useful*0.12, pw_useful*0.20], y)
+            c.setFillColor(MUTED); c.setFont("Helvetica", 8)
+            c.drawString(16*mm, max(y, 28*mm), "Alerta baseado na última manutenção/movimentação registrada por equipamento.")
+            y -= 8*mm
+        y = max(y, 46*mm)
+        c.setFillColor(FG); c.setFont("Helvetica-Bold", 9)
+        c.drawString(16*mm, y, "Legenda de status — faixa lateral nas listas de equipamentos")
+        y -= 7*mm
+        for s_col, s_label, s_desc in [
+            (RED, "Crítico", "0% ou travado — requer ação imediata"),
+            (YELLOW, "Em andamento", "Iniciado mas não concluído"),
+            (GREEN, "Concluído", "100% das etapas D+R+M finalizadas"),
+            (MUTED, "Sem template", "Grupo sem serviços configurados"),
+        ]:
+            c.setFillColor(s_col)
+            c.roundRect(16*mm, y - 4*mm, 8, 4*mm, 2, fill=1, stroke=0)
+            c.setFillColor(FG); c.setFont("Helvetica-Bold", 8)
+            c.drawString(20*mm, y - 1*mm, s_label)
+            c.setFillColor(MUTED); c.setFont("Helvetica", 8)
+            c.drawString(40*mm, y - 1*mm, s_desc)
+            y -= 7*mm
+        footer(); c.showPage()
+
     # ── PÁGINA 1: Capa / KPIs ─────────────────────────────────────────────────
     new_page("Relatório Semanal")
     y = h - 52*mm
@@ -385,7 +452,10 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
 
     footer(); c.showPage()
 
-    # ── PÁGINA 3: Equipamentos críticos ───────────────────────────────────────
+    # ── PÁGINA 3: Resumo de alertas ───────────────────────────────────────────
+    draw_alert_summary_page()
+
+    # ── PÁGINA 4: Equipamentos críticos ───────────────────────────────────────
     new_page("Equipamentos Críticos")
     y = h - 52*mm
 
@@ -704,97 +774,5 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
                 c.line(16*mm, y - row_h, w - 16*mm, y - row_h)
                 y -= row_h
 
-    # ── PÁGINA 4: Resumo de alertas ───────────────────────────────────────────
-    footer(); c.showPage()
-    new_page("Resumo de Alertas")
-    y = h - 52*mm
-
-    alert_items = [
-        ("Travados",          payload.n_travados,    RED,    "Status travado sem atualização recente."),
-        ("Sem apontamento",   payload.n_sem_inicio,  YELLOW, "Etapas D/R/M nunca iniciadas."),
-        ("Parados",           payload.n_parados,     YELLOW, "Em andamento sem atualização no período."),
-        ("Risco de prazo",    payload.n_risco_prazo, RED,    "Progresso abaixo da meta linear da semana."),
-    ]
-
-    # Grid 2×2
-    card_w_a = (w - 36*mm) / 2
-    card_h_a = 24*mm
-    gap_a    = 4*mm
-
-    for idx, (title_a, count, col, desc) in enumerate(alert_items):
-        col_i = idx % 2
-        row_i = idx // 2
-        cx = 16*mm + col_i * (card_w_a + gap_a)
-        cy = y - row_i * (card_h_a + gap_a) - card_h_a
-
-        c.setFillColor(SURFACE); c.setStrokeColor(BORDER); c.setLineWidth(0.7)
-        c.roundRect(cx, cy, card_w_a, card_h_a, 5, fill=1, stroke=1)
-        # barra superior colorida
-        c.setFillColor(col)
-        c.rect(cx, cy + card_h_a - 3, card_w_a, 3, fill=1, stroke=0)
-        # número grande
-        c.setFillColor(col); c.setFont("Helvetica-Bold", 26)
-        c.drawString(cx + 6, cy + 6*mm, str(count))
-        # título
-        c.setFillColor(FG); c.setFont("Helvetica-Bold", 9)
-        c.drawString(cx + 6, cy + card_h_a - 8*mm, title_a)
-        # descrição
-        c.setFillColor(MUTED); c.setFont("Helvetica", 7.5)
-        c.drawString(cx + 6, cy + 3*mm, desc)
-        # badge OK
-        if count == 0:
-            c.setFillColor(GREEN); c.setFont("Helvetica-Bold", 8)
-            c.drawRightString(cx + card_w_a - 5, cy + 6*mm, "OK")
-
-    y -= 2 * (card_h_a + gap_a) + 4*mm
-
-    # Detalhe dos equipamentos parados
-    if payload.parados_detalhe:
-        if y < 95*mm:
-            footer(); c.showPage(); new_page("Resumo de Alertas (cont.)"); y = h - 52*mm
-        y = section_title("Equipamentos sem movimentação recente", y)
-        rows = [["Frota", "Grupo", "Últ. semana", "Dias", "Progresso"]]
-        for item in payload.parados_detalhe[:18]:
-            rows.append([
-                str(item.get("frota") or "—"),
-                str(item.get("grupo") or "—")[:24],
-                f"S{item.get('ultima_semana')}" if item.get("ultima_semana") else "—",
-                str(item.get("dias_parado") or "—"),
-                f"{int(item.get('pct') or 0)}%",
-            ])
-        pw_useful = w - 32*mm
-        y = platypus_table(rows, [pw_useful*0.16, pw_useful*0.42, pw_useful*0.14, pw_useful*0.12, pw_useful*0.16], y)
-        c.setFillColor(MUTED); c.setFont("Helvetica", 7.5)
-        c.drawString(16*mm, y, "Parado = equipamento incompleto e sem movimentação recente nas etapas D/R/M.")
-        y -= 8*mm
-
-    # Legenda de status inline abaixo dos cards
-    y -= 4*mm
-    c.setFillColor(FG); c.setFont("Helvetica-Bold", 9)
-    c.drawString(16*mm, y, "Legenda de status — faixa lateral nas listas de equipamentos")
-    y -= 7*mm
-    for s_col, s_label, s_desc in [
-        (RED,    "Crítico",       "0% ou travado — requer ação imediata"),
-        (YELLOW, "Em andamento",  "Iniciado mas não concluído"),
-        (GREEN,  "Concluído",     "100% das etapas D+R+M finalizadas"),
-        (MUTED,  "Sem template",  "Grupo sem serviços configurados"),
-    ]:
-        c.setFillColor(s_col)
-        c.roundRect(16*mm, y - 4*mm, 8, 4*mm, 2, fill=1, stroke=0)
-        c.setFillColor(FG); c.setFont("Helvetica-Bold", 8)
-        c.drawString(20*mm, y - 1*mm, s_label)
-        c.setFillColor(MUTED); c.setFont("Helvetica", 8)
-        c.drawString(40*mm, y - 1*mm, s_desc)
-        y -= 7*mm
-
-    # Rodapé da página de alertas
-    y -= 4*mm
-    c.setFillColor(MUTED); c.setFont("Helvetica", 8.5)
-    note = (f"Relatório gerado em {fmt_brt('%d/%m/%Y às %H:%M')} "
-            f"para a revisão '{payload.revisao_titulo}', "
-            f"semana {payload.semana_atual} de {payload.semanas_total}.")
-    c.drawString(16*mm, max(y, 30*mm), note)
-
-    footer(); c.showPage()
     c.save()
     return buf.getvalue()
