@@ -7,6 +7,7 @@ import pandas as pd
 
 from src.domain.kpi import calc_risco
 from src.utils.dataframe import normalize_df
+from src.utils.timezone import now_brt as _now_brt
 
 
 def _series_or_default(df: pd.DataFrame, col: str, default=0):
@@ -235,7 +236,7 @@ def build_inteligencia(base: pd.DataFrame) -> tuple[dict, dict, pd.DataFrame, pd
 
     data_inicio = pd.to_datetime(valid["data_inicio"], errors="coerce").dropna().min() if "data_inicio" in valid.columns else pd.NaT
     data_fim = pd.to_datetime(valid["data_fim"], errors="coerce").dropna().max() if "data_fim" in valid.columns else pd.NaT
-    hoje = pd.Timestamp.today().normalize()
+    hoje = pd.Timestamp(_now_brt()).normalize().tz_localize(None)
     dias_passados = int(max((hoje - data_inicio.normalize()).days, 0)) if pd.notna(data_inicio) else 0
     dias_planejados = int(max((data_fim.normalize() - data_inicio.normalize()).days, 0)) if pd.notna(data_inicio) and pd.notna(data_fim) else 0
     ritmo = round(pct / max(dias_passados, 1), 4) if pct > 0 else 0.0
