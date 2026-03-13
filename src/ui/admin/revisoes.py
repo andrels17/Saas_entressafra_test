@@ -151,13 +151,14 @@ def render_admin_revisoes():
         st.info("Se o seu banco tiver alguma política/trigger recursiva em `revisoes`, o insert pode estourar stack. "
                 "Para evitar travar o app, a criação aqui usa **Service Role** (bypassa RLS).")
 
-        titulo = st.text_input("Título", placeholder="Entressafra 2026", key="revisao_titulo")
+        titulo = st.text_input("Título", placeholder="Entressafra 2026", key="rev_titulo")
         c1, c2, c3 = st.columns(3)
         with c1:
-            dt_ini = st.date_input("Data início", value=None, key="revisao_dt_ini")
+            dt_ini = st.date_input("Data início", value=None, key="rev_dt_ini")
         with c2:
-            dt_fim = st.date_input("Data fim", value=None, key="revisao_dt_fim")
+            dt_fim = st.date_input("Data fim", value=None, key="rev_dt_fim")
         with c3:
+            # Fora de st.form para recalcular em tempo real a cada alteração de data.
             auto_weeks = 0
             if dt_ini and dt_fim and dt_fim >= dt_ini:
                 try:
@@ -173,19 +174,19 @@ def render_admin_revisoes():
                 value=int(auto_weeks),
                 step=1,
                 disabled=True,
-                key="revisao_auto_weeks",
+                key="rev_auto_weeks",
             )
-            allow_manual = st.checkbox("Ajustar manualmente", value=False, key="revisao_allow_manual")
+            allow_manual = st.checkbox("Ajustar manualmente", value=False, key="rev_allow_manual")
             semanas_total = st.number_input(
                 "Nº semanas (manual)",
                 min_value=0,
                 value=int(auto_weeks),
                 step=1,
                 disabled=not allow_manual,
-                key="revisao_manual_weeks",
+                key="rev_manual_weeks",
             )
 
-        submitted = st.button("Criar revisão", use_container_width=True, key="revisao_submit")
+        submitted = st.button("Criar revisão", use_container_width=True, key="rev_submit")
 
         if submitted:
             t = (titulo or "").strip()
