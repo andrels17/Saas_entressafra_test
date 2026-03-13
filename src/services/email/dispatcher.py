@@ -652,7 +652,7 @@ def dispatch_relatorio_semanal(
     _log("  → Gerando relatório executivo para supervisores…")
     try:
         from src.services.email.recipients import get_executive_recipients
-        from src.services.reporting.pdf_relatorio_executivo_avancado import (
+        from src.services.reporting.pdf_relatorio_executivo import (
             build_executive_pdf, RelatorioExecutivoPayload, DeptSnapshot,
         )
 
