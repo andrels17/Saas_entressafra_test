@@ -247,34 +247,89 @@ def render_admin_revisoes():
         )
 
         titulo = st.text_input("Título", placeholder="Entressafra 2026", key="rev_titulo")
+
+        modo_calculo = st.radio(
+            "Modo de cálculo",
+            options=["Por datas", "Por semanas"],
+            horizontal=True,
+            key="rev_modo_calculo",
+            help="Escolha se a revisão será definida pelo período ou pela quantidade de semanas.",
+        )
+
+        def _calc_weeks(dt_inicio, dt_fim):
+            if not dt_inicio or not dt_fim or dt_fim < dt_inicio:
+                return 0
+            dias = (dt_fim - dt_inicio).days + 1
+            return max(1, int(math.ceil(dias / 7)))
+
+        def _calc_end_date(dt_inicio, semanas):
+            if not dt_inicio or not semanas or int(semanas) <= 0:
+                return None
+            from datetime import timedelta
+            return dt_inicio + timedelta(days=(int(semanas) * 7) - 1)
+
         c1, c2, c3 = st.columns(3)
         with c1:
             dt_ini = st.date_input("Data início", value=None, key="rev_dt_ini")
-        with c2:
-            dt_fim = st.date_input("Data fim", value=None, key="rev_dt_fim")
 
-        dias_total = 0
-        semanas_total = 0
-        pronto_heatmap = "Não"
-        if dt_ini and dt_fim and dt_fim >= dt_ini:
-            dias_total = (dt_fim - dt_ini).days + 1
-            semanas_total = int(math.ceil(dias_total / 7))
-            pronto_heatmap = "Sim"
+        semanas_input = int(st.session_state.get("rev_semanas_input", 0) or 0)
+        if modo_calculo == "Por datas":
+            with c2:
+                dt_fim = st.date_input("Data fim", value=None, key="rev_dt_fim")
+            semanas_total = _calc_weeks(dt_ini, dt_fim)
+            dias_total = (dt_fim - dt_ini).days + 1 if dt_ini and dt_fim and dt_fim >= dt_ini else 0
+            with c3:
+                st.number_input(
+                    "Nº semanas",
+                    min_value=0,
+                    value=int(semanas_total),
+                    step=1,
+                    disabled=True,
+                    help="Calculado automaticamente a partir de Data início e Data fim.",
+                )
+        else:
+            with c2:
+                st.number_input(
+                    "Nº semanas",
+                    min_value=1,
+                    value=max(1, semanas_input) if semanas_input else 20,
+                    step=1,
+                    key="rev_semanas_input",
+                    help="Aceita qualquer número de semanas. O sistema calculará a data fim automaticamente.",
+                )
+                at1, at2, at3, at4 = st.columns(4)
+                if at1.button("12", key="wk12", use_container_width=True):
+                    st.session_state["rev_semanas_input"] = 12
+                    st.rerun()
+                if at2.button("16", key="wk16", use_container_width=True):
+                    st.session_state["rev_semanas_input"] = 16
+                    st.rerun()
+                if at3.button("20", key="wk20", use_container_width=True):
+                    st.session_state["rev_semanas_input"] = 20
+                    st.rerun()
+                if at4.button("24", key="wk24", use_container_width=True):
+                    st.session_state["rev_semanas_input"] = 24
+                    st.rerun()
+            semanas_total = int(st.session_state.get("rev_semanas_input", 20) or 20)
+            dt_fim = _calc_end_date(dt_ini, semanas_total)
+            dias_total = (dt_fim - dt_ini).days + 1 if dt_ini and dt_fim else 0
+            with c3:
+                st.date_input(
+                    "Data fim",
+                    value=dt_fim,
+                    disabled=True,
+                    key="rev_dt_fim_auto",
+                    help="Calculada automaticamente com base na Data início e no Nº semanas.",
+                )
 
-        with c3:
-            st.text_input(
-                "Nº semanas",
-                value=str(semanas_total),
-                disabled=True,
-                help="Calculado automaticamente a partir de Data início e Data fim.",
-            )
+        pronto_heatmap = "Sim" if semanas_total > 0 and dt_ini and dt_fim else "Não"
 
         m1, m2, m3 = st.columns(3)
         m1.metric("Período total", f"{dias_total} dia(s)")
         m2.metric("Semanas geradas", semanas_total)
         m3.metric("Pronto para tendência/heatmap", pronto_heatmap)
 
-        if semanas_total > 0:
+        if semanas_total > 0 and dt_ini and dt_fim:
             st.caption("Prévia das semanas da revisão")
             semanas_preview = []
             for idx in range(semanas_total):
@@ -304,7 +359,7 @@ def render_admin_revisoes():
                 st.warning("Informe a data de início.")
                 st.stop()
             if not dt_fim:
-                st.warning("Informe a data de fim.")
+                st.warning("Informe a data final da revisão.")
                 st.stop()
             if dt_fim < dt_ini:
                 st.warning("A data fim não pode ser menor que a data início.")
