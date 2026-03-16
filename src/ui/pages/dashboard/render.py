@@ -205,6 +205,23 @@ def _fragment_grupos(base: pd.DataFrame, dept_map: dict, group_kpis_df: pd.DataF
         hide_index=True,
         column_config={"% Concluído": st.column_config.ProgressColumn("% Concluído", min_value=0, max_value=100, format="%.1f%%")},
     )
+    with st.expander("⬇ Exportar", expanded=False):
+        from src.utils.ui_helpers import df_to_xlsx
+        _exp = display.copy()
+        col_csv, col_xlsx = st.columns(2)
+        with col_csv:
+            st.download_button(
+                "CSV", _exp.to_csv(index=False).encode("utf-8"),
+                file_name="dashboard_grupos.csv", mime="text/csv",
+                use_container_width=True, key="dash_grupos_csv",
+            )
+        with col_xlsx:
+            st.download_button(
+                "XLSX", df_to_xlsx(_exp, sheet_name="Grupos"),
+                file_name="dashboard_grupos.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True, key="dash_grupos_xlsx",
+            )
 
 
 @st.fragment
@@ -221,6 +238,23 @@ def _fragment_setores(base: pd.DataFrame, top_n: int = 10) -> None:
         hide_index=True,
         column_config={"% Concluído": st.column_config.ProgressColumn("% Concluído", min_value=0, max_value=100, format="%.1f%%")},
     )
+    with st.expander("⬇ Exportar", expanded=False):
+        from src.utils.ui_helpers import df_to_xlsx
+        _exp = display[["Setor", "% Concluído"]].copy()
+        col_csv, col_xlsx = st.columns(2)
+        with col_csv:
+            st.download_button(
+                "CSV", _exp.to_csv(index=False).encode("utf-8"),
+                file_name="dashboard_setores.csv", mime="text/csv",
+                use_container_width=True, key="dash_setores_csv",
+            )
+        with col_xlsx:
+            st.download_button(
+                "XLSX", df_to_xlsx(_exp, sheet_name="Setores"),
+                file_name="dashboard_setores.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True, key="dash_setores_xlsx",
+            )
 
 
 @st.fragment
@@ -281,6 +315,23 @@ def _fragment_equipamentos(base: pd.DataFrame, dept_map: dict, top_n: int = 10) 
         hide_index=True,
         column_config={"% Concluído": st.column_config.ProgressColumn("% Concluído", min_value=0, max_value=100, format="%.1f%%")},
     )
+    with st.expander("⬇ Exportar tabela completa", expanded=False):
+        from src.utils.ui_helpers import df_to_xlsx
+        _exp = agg[cols].sort_values(["% Concluído", "Equipamento"], ascending=[False, True])
+        col_csv, col_xlsx = st.columns(2)
+        with col_csv:
+            st.download_button(
+                "CSV", _exp.to_csv(index=False).encode("utf-8"),
+                file_name="dashboard_equipamentos.csv", mime="text/csv",
+                use_container_width=True, key="dash_eq_csv",
+            )
+        with col_xlsx:
+            st.download_button(
+                "XLSX", df_to_xlsx(_exp, sheet_name="Equipamentos"),
+                file_name="dashboard_equipamentos.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True, key="dash_eq_xlsx",
+            )
 
 
 @st.fragment
