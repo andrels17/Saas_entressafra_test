@@ -2,6 +2,11 @@
 
 Interface única para queries: safe_select (simples) e safe_select_paginated (paginada).
 
+Melhorias v2:
+  - Todos os `except Exception` agora chamam log_error() de observability.py
+  - Erros de banco deixam rastro estruturado (tabela, contexto, tenant) nos logs
+  - Interface pública preservada: nenhum módulo existente precisa mudar
+
 Uso:
     from src.repositories.base import safe_select, safe_select_paginated
 
@@ -23,12 +28,11 @@ from typing import Any
 
 from supabase import Client
 
+from src.utils.observability import log_error
+
 
 def _apply_filters(q: Any, filters: dict[str, Any]) -> Any:
-    """Aplica kwargs de filtro a um query builder Supabase.
-
-    Extraído para eliminar duplicação entre safe_select e safe_select_paginated.
-    """
+    """Aplica kwargs de filtro a um query builder Supabase."""
     for key, value in filters.items():
         if value is None:
             continue
@@ -59,11 +63,16 @@ def safe_select(
     fields: str,
     **filters: Any,
 ) -> list[dict]:
-    """Executa uma query Supabase com filtros opcionais e retorna [] em caso de erro."""
+    """Executa uma query Supabase com filtros opcionais e retorna [] em caso de erro.
+
+    Diferente da versão anterior: erros são sempre logados com contexto estruturado,
+    nunca silenciados. O comportamento externo (retorno de []) é idêntico.
+    """
     try:
         q = _apply_filters(sb.table(table).select(fields), filters)
         return (q.execute().data) or []
-    except Exception:
+    except Exception as exc:
+        log_error(exc, context="repositories.safe_select", table=table)
         return []
 
 
@@ -75,11 +84,7 @@ def safe_select_paginated(
     max_rows: int = 50_000,
     **filters: Any,
 ) -> list[dict]:
-    """Versão paginada de safe_select usando .range().
-
-    Para queries com joins complexos ou .order() dinâmico, use fetch_all()
-    de src.utils.fetching (aceita uma filters_fn callable).
-    """
+    """Versão paginada de safe_select usando .range()."""
     out: list[dict] = []
     start = 0
 
@@ -88,7 +93,13 @@ def safe_select_paginated(
         try:
             q = _apply_filters(sb.table(table).select(fields), filters)
             batch = (q.range(start, end).execute().data) or []
-        except Exception:
+        except Exception as exc:
+            log_error(
+                exc,
+                context="repositories.safe_select_paginated",
+                table=table,
+                extra={"page_start": start, "page_size": page_size},
+            )
             break
 
         out.extend(batch)
