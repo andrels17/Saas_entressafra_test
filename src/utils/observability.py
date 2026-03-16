@@ -27,6 +27,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass
+from functools import wraps
 from typing import Any, Callable, TypeVar
 
 import streamlit as st
@@ -90,10 +91,15 @@ class ErrorRecord:
     tenant_id: str | None = None
 
 
+# Mantido em nível de módulo para funcionar tanto no app real quanto nos testes
+# unitários, onde streamlit.cache_resource é apenas um stub sem memoização.
+_ERROR_RING: deque[ErrorRecord] = deque(maxlen=200)
+
+
 @st.cache_resource()
-def _error_ring() -> deque:
+def _error_ring() -> deque[ErrorRecord]:
     """Ring buffer de erros, compartilhado entre reruns da mesma instância."""
-    return deque(maxlen=200)
+    return _ERROR_RING
 
 
 def get_recent_errors(n: int = 50) -> list[ErrorRecord]:
@@ -232,14 +238,13 @@ def safe_query(context: str, table: str | None = None, default: Any = None):
             ...
     """
     def decorator(fn: Callable) -> Callable:
+        @wraps(fn)
         def wrapper(*args, **kwargs):
             try:
                 return fn(*args, **kwargs)
             except Exception as exc:
                 log_error(exc, context=context, table=table)
                 return default if default is not None else []
-        wrapper.__name__ = fn.__name__
-        wrapper.__doc__ = fn.__doc__
         return wrapper
     return decorator
 
@@ -278,5 +283,5 @@ def render_error_diagnostics() -> None:
         } for e in recent])
         st.dataframe(df, use_container_width=True, hide_index=True)
         st.caption(
-            f"Mostrando os {
-                len(recent)} erros mais recentes desta instância.")
+            f"Mostrando os {len(recent)} erros mais recentes desta instância."
+        )
