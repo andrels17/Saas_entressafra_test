@@ -17,6 +17,7 @@ from src.domain.kpi import calc_global_kpis
 from src.ui.core.empty_state import empty_state
 from src.ui.components.filters import multiselect_departamentos, multiselect_grupos
 from src.ui.core.styles import page_header
+from src.ui.core.cache import bump_data_version
 from src.utils.kpi_engine import get_group_kpis
 from src.utils.nav import set_current_revisao
 from src.utils.supabase_helpers import current_tenant_id, sb_for_user
@@ -603,7 +604,7 @@ def render_dashboard() -> None:
             icon=":material/refresh:",
             use_container_width=True,
                 key="dash_refresh_btn"):
-            st.session_state["data_version"] = str(time.time())
+            bump_data_version()
             st.toast("Atualizado", icon=":material/refresh:")
             st.rerun()
 

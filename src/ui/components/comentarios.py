@@ -21,6 +21,7 @@ from __future__ import annotations
 import streamlit as st
 from datetime import datetime
 
+from src.ui.core.cache import bump_data_version, clear_cached_functions
 from src.utils.supabase_helpers import sb_for_user, current_user_id
 
 
@@ -137,12 +138,8 @@ def render_comentarios(
                     st.toast("✅ Comentário adicionado!")
                     # Limpar campo e invalidar cache
                     st.session_state.pop(_key_txt, None)
-                    import time as _t
-                    st.session_state["data_version"] = str(_t.time())
-                    try:
-                        _load_comentarios.clear()
-                    except Exception:
-                        pass
+                    bump_data_version()
+                    clear_cached_functions(_load_comentarios)
                     st.rerun()
                 except Exception as e:
                     st.error(

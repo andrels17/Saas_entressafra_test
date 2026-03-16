@@ -11,7 +11,8 @@ Funcionalidades:
 """
 from __future__ import annotations
 
-import logging
+import io
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
@@ -19,24 +20,14 @@ import streamlit as st
 from src.auth.roles import Role
 from src.auth.scope import get_my_scope
 from src.ui.core.styles import page_header as _ph
-from src.ui.pages import notificacoes_logic as _ntf_logic
-from src.ui.pages.notificacoes_logic import (
-    build_pdf_alertas as _build_pdf_alertas,
-    load_data as _load_data,
-    resumo_por_grupo as _resumo_por_grupo,
-    with_fallback as _with_fallback,
-)
+from src.ui.core.cache import bump_data_version, clear_cached_functions
 from src.utils.supabase_helpers import (
     current_role, current_tenant_id, sb_for_user,
 )
 from src.utils.nav import get_current_revisao
 
 
-log = logging.getLogger(__name__)
-
-
 # ── helpers ─────────────────────────────────────────────────────────────
-
 
 def _risk_color(pct: int) -> str:
     if pct >= 80:
@@ -46,77 +37,411 @@ def _risk_color(pct: int) -> str:
     return "#EF4444"
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_data(_tid: str, _rev_id: str, _ver: str = "0") -> dict:
+    """Carrega todos os dados necessários para os alertas em uma só query."""
+    sb = sb_for_user()
+    try:
+        tarefas = (
+            sb.table("tarefas_servico")
+            .select(
+                "id,equipamento_id,servico_id,status,semana,"
+                "etapa_d,etapa_r,etapa_m,observacao,"
+                "dt_etapa_d,dt_etapa_r,dt_etapa_m,updated_at,"
+                "servicos(id,nome,setor_id,setores(nome)),"
+                "equipamentos(id,frota,modelo,grupo_id,"
+                "equip_grupos(id,nome,departamento_id))"
+            )
+            .eq("tenant_id", _tid)
+            .eq("revisao_id", _rev_id)
+            .execute()
+            .data
+        ) or []
+    except Exception:
+        tarefas = []
+
+    try:
+        revisao = (
+            sb.table("revisoes")
+            .select("id,titulo,data_inicio,semanas_total,status")
+            .eq("id", _rev_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        revisao = revisao[0] if revisao else {}
+    except Exception:
+        revisao = {}
+
+    return {"tarefas": tarefas, "revisao": revisao}
 
 
-# lógica extraída para src.ui.pages.notificacoes_logic
+def _semana_atual(data_inicio_str: str | None, semanas_total: int) -> int:
+    if not data_inicio_str:
+        return 1
+    try:
+        inicio = pd.to_datetime(data_inicio_str, utc=True)
+        agora = pd.Timestamp.utcnow()
+        semana = max(1, int((agora - inicio).days // 7) + 1)
+        return min(semana, semanas_total or semana)
+    except Exception:
+        return 1
 
 
-_semana_atual = _ntf_logic.semana_atual
-_dias_desde = _ntf_logic.dias_desde
+def _dias_desde(ts_str: str | None) -> int | None:
+    if not ts_str:
+        return None
+    try:
+        ts = pd.to_datetime(ts_str, utc=True)
+        return int((pd.Timestamp.utcnow() - ts).total_seconds() // 86400)
+    except Exception:
+        return None
 
+
+# ── Processamento de alertas ────────────────────────────────────────────
 
 def _build_alertas(tarefas: list[dict], revisao: dict,
                    dias_travado: int, dias_sem_update: int) -> dict:
-    """Wrapper compatível com testes, usando helpers injetáveis do módulo."""
+    """Classifica cada tarefa em categorias de alerta."""
     semana_atual = _semana_atual(
         revisao.get("data_inicio"),
         revisao.get("semanas_total") or 99)
     semanas_total = revisao.get("semanas_total") or 99
 
     travados, sem_inicio, sem_update, risco_prazo = [], [], [], []
-    eq_tasks: dict[str, list] = {}
-    for tarefa in tarefas:
-        eq = tarefa.get("equipamentos") or {}
-        eid = eq.get("id") or tarefa.get("equipamento_id", "")
-        eq_tasks.setdefault(eid, []).append(tarefa)
 
-    for tasks in eq_tasks.values():
-        eq = tasks[0].get("equipamentos") or {}
-        base = {
-            "Frota": eq.get("frota") or eq.get("id") or "",
-            "Modelo": eq.get("modelo") or "",
-            "Grupo": (eq.get("equip_grupos") or {}).get("nome") or "—",
-            "dept_id": (eq.get("equip_grupos") or {}).get("departamento_id"),
-        }
+    # Agrupado por equipamento para calcular % por equip.
+    eq_tasks: dict[str, list] = {}
+    for t in tarefas:
+        eq = (t.get("equipamentos") or {})
+        eid = eq.get("id") or t.get("equipamento_id", "")
+        eq_tasks.setdefault(eid, []).append(t)
+
+    for eid, tasks in eq_tasks.items():
+        eq = (tasks[0].get("equipamentos") or {})
+        frota = eq.get("frota") or eid
+        modelo = eq.get("modelo") or ""
+        grupo = (eq.get("equip_grupos") or {}).get("nome") or "—"
+        dept_id = (eq.get("equip_grupos") or {}).get("departamento_id")
+
         total = len(tasks) * 3
-        feitas = sum(
-            int(bool(t.get("etapa_d"))) + int(bool(t.get("etapa_r"))) + int(bool(t.get("etapa_m")))
+        done = sum(
+            int(bool(t.get("etapa_d"))) +
+            int(bool(t.get("etapa_r"))) +
+            int(bool(t.get("etapa_m")))
             for t in tasks
         )
-        pct = round((feitas / max(total, 1)) * 100)
+        pct = round((done / max(total, 1)) * 100)
+
+        # Progresso esperado linear
         esperado_pct = round((semana_atual / max(semanas_total, 1)) * 100)
-        base.update({"% Atual": pct, "% Esperado": esperado_pct})
 
-        for tarefa in tasks:
-            svc = tarefa.get("servicos") or {}
-            updated = tarefa.get("updated_at") or tarefa.get("dt_etapa_m") or tarefa.get("dt_etapa_r") or tarefa.get("dt_etapa_d")
+        base = {
+            "Frota": frota,
+            "Modelo": modelo,
+            "Grupo": grupo,
+            "dept_id": dept_id,
+            "% Atual": pct,
+            "% Esperado": esperado_pct,
+        }
+
+        for t in tasks:
+            svc = (t.get("servicos") or {})
+            setor = (svc.get("setores") or {}).get("nome") or "—"
+            svc_nome = svc.get("nome") or "—"
+            status = t.get("status") or "pendente"
+            updated = t.get("updated_at") or t.get("dt_etapa_m") or t.get(
+                "dt_etapa_r") or t.get("dt_etapa_d")
             dias = _dias_desde(updated)
-            row = {
-                **base,
-                "Setor": (svc.get("setores") or {}).get("nome") or "—",
-                "Serviço": svc.get("nome") or "—",
-                "Status": tarefa.get("status") or "pendente",
-                "Obs.": tarefa.get("observacao") or "",
-            }
-            if row["Status"] == "travado" and (dias is None or dias >= dias_travado):
-                travados.append({**row, "Dias travado": dias if dias is not None else "?"})
-            if not tarefa.get("etapa_d") and not tarefa.get("etapa_r") and not tarefa.get("etapa_m"):
-                if dias is None or dias >= dias_sem_update:
-                    sem_inicio.append({**row, "Dias sem update": dias if dias is not None else "?"})
-            if row["Status"] not in ("concluido", "nao_aplica", "travado") and dias is not None and dias >= dias_sem_update:
-                sem_update.append({**row, "Dias parado": dias})
 
+            row = {**base, "Setor": setor, "Serviço": svc_nome,
+                   "Status": status, "Obs.": t.get("observacao") or ""}
+
+            # Travado há X dias
+            if status == "travado" and (dias is None or dias >= dias_travado):
+                travados.append(
+                    {**row, "Dias travado": dias if dias is not None else "?"})
+
+            # Sem nenhum apontamento (0 etapas)
+            if not t.get("etapa_d") and not t.get(
+                    "etapa_r") and not t.get("etapa_m"):
+                if dias is None or dias >= dias_sem_update:
+                    sem_inicio.append(
+                        {**row, "Dias sem update": dias if dias is not None else "?"})
+
+            # Sem atualização há muito tempo (não travado, não concluído)
+            if status not in ("concluido", "nao_aplica", "travado"):
+                if dias is not None and dias >= dias_sem_update:
+                    sem_update.append({**row, "Dias parado": dias})
+
+        # Risco de prazo: atrasado vs esperado
         if pct < esperado_pct - 15 and pct < 100:
-            risco_prazo.append({**base, "Atraso (p.p.)": esperado_pct - pct, "Etapas feitas": feitas, "Etapas total": total})
+            atraso = esperado_pct - pct
+            risco_prazo.append({**base,
+                                "Atraso (p.p.)": atraso,
+                                "Etapas feitas": done,
+                                "Etapas total": total,
+                                })
 
     return {
         "travados": pd.DataFrame(travados) if travados else pd.DataFrame(),
         "sem_inicio": pd.DataFrame(sem_inicio) if sem_inicio else pd.DataFrame(),
         "sem_update": pd.DataFrame(sem_update) if sem_update else pd.DataFrame(),
-        "risco_prazo": pd.DataFrame(risco_prazo) if risco_prazo else pd.DataFrame(),
+        "risco_prazo": pd.DataFrame(risco_prazo)if risco_prazo else pd.DataFrame(),
         "semana_atual": semana_atual,
         "semanas_total": semanas_total,
     }
+
+
+def _resumo_por_grupo(alertas: dict) -> pd.DataFrame:
+    """Consolida contagem de alertas por grupo."""
+    grupos: dict[str, dict] = {}
+    for categoria, col in [
+        ("travados", "travados"),
+        ("sem_inicio", "sem_inicio"),
+        ("sem_update", "parados"),
+        ("risco_prazo", "risco_prazo"),
+    ]:
+        df = alertas.get(categoria, pd.DataFrame())
+        if df.empty or "Grupo" not in df.columns:
+            continue
+        for grupo, cnt in df["Grupo"].value_counts().items():
+            grupos.setdefault(str(grupo),
+                              {"Grupo": str(grupo),
+                               "Travados": 0,
+                               "Sem início": 0,
+                               "Parados": 0,
+                               "Risco prazo": 0})
+            key_map = {"travados": "Travados", "sem_inicio": "Sem início",
+                       "sem_update": "Parados", "risco_prazo": "Risco prazo"}
+            grupos[str(grupo)][key_map[categoria]] = int(cnt)
+    if not grupos:
+        return pd.DataFrame()
+    df_res = pd.DataFrame(list(grupos.values()))
+    df_res["Total alertas"] = df_res[["Travados",
+                                      "Sem início", "Parados", "Risco prazo"]].sum(axis=1)
+    return df_res.sort_values(
+        "Total alertas",
+        ascending=False).reset_index(
+        drop=True)
+
+
+def _build_pdf_alertas(alertas: dict, revisao: dict) -> bytes:
+    """Gera PDF consolidado de todos os alertas."""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import cm
+        from reportlab.lib import colors
+        from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
+                                        Table, TableStyle)
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_RIGHT
+    except Exception:
+        return b""
+
+    sty = getSampleStyleSheet()
+    h1 = ParagraphStyle("h1", parent=sty["Heading1"], fontSize=14, leading=18,
+                        textColor=colors.HexColor("#111827"), spaceAfter=2)
+    h2 = ParagraphStyle(
+        "h2",
+        parent=sty["Heading2"],
+        fontSize=11,
+        leading=14,
+        textColor=colors.HexColor("#111827"),
+        spaceBefore=8,
+        spaceAfter=3)
+    p = ParagraphStyle("p", parent=sty["BodyText"], fontSize=9, leading=12,
+                       textColor=colors.HexColor("#374151"))
+    sm = ParagraphStyle("sm", parent=sty["BodyText"], fontSize=8, leading=10,
+                        textColor=colors.grey)
+
+    buf = io.BytesIO()
+    PAGE = A4
+    MARGIN = 1.5 * cm
+    pw = PAGE[0] - 2 * MARGIN
+    doc = SimpleDocTemplate(buf, pagesize=PAGE,
+                            leftMargin=MARGIN, rightMargin=MARGIN,
+                            topMargin=MARGIN, bottomMargin=MARGIN)
+
+    now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+    ts_style = ParagraphStyle(
+        "ts",
+        parent=sty["BodyText"],
+        fontSize=8,
+        alignment=TA_RIGHT,
+        textColor=colors.HexColor("#6B7280"))
+
+    header_data = [[
+        Paragraph("Relatório de Alertas — Notificações", h1),
+        Paragraph(f"Emitido em<br/>{now_str}", ts_style),
+    ]]
+    header_t = Table(
+        header_data,
+        colWidths=[
+            pw - 3.5 * cm,
+            3.5 * cm],
+        rowHeights=[
+            1 * cm])
+    header_t.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+        ("LINEBELOW", (0, 0), (-1, 0), 1.0, colors.HexColor("#E5E7EB")),
+    ]))
+
+    meta_lbl = ParagraphStyle("ml", parent=sty["BodyText"], fontSize=8,
+                              textColor=colors.HexColor("#6B7280"))
+    meta_val = ParagraphStyle(
+        "mv",
+        parent=sty["BodyText"],
+        fontSize=10,
+        textColor=colors.HexColor("#111827"),
+        fontName="Helvetica-Bold")
+    meta_data = [
+        [Paragraph("Revisão", meta_lbl), Paragraph("Semana", meta_lbl)],
+        [Paragraph(revisao.get("titulo") or "—", meta_val),
+         Paragraph(f'{alertas["semana_atual"]} / {alertas["semanas_total"]}', meta_val)],
+    ]
+    meta_t = Table(meta_data, colWidths=[pw * 0.6, pw * 0.4])
+    meta_t.setStyle(TableStyle([
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("LINEBELOW", (0, 1), (-1, 1), 0.5, colors.HexColor("#E5E7EB")),
+    ]))
+
+    # KPIs
+    n_trav = len(alertas["travados"])
+    n_sem = len(alertas["sem_inicio"])
+    n_upd = len(alertas["sem_update"])
+    n_risc = len(alertas["risco_prazo"])
+    kpi_data = [[
+        Paragraph(f'<font color="#6B7280" size="8">🚫 Travados</font><br/>'
+                  f'<b><font size="16" color="#EF4444">{n_trav}</font></b>', p),
+        Paragraph(f'<font color="#6B7280" size="8">⬜ Sem início</font><br/>'
+                  f'<b><font size="16">{n_sem}</font></b>', p),
+        Paragraph(f'<font color="#6B7280" size="8">⏸ Parados</font><br/>'
+                  f'<b><font size="16">{n_upd}</font></b>', p),
+        Paragraph(f'<font color="#6B7280" size="8">⚠️ Risco prazo</font><br/>'
+                  f'<b><font size="16" color="#F59E0B">{n_risc}</font></b>', p),
+    ]]
+    kpi_t = Table(kpi_data, colWidths=[pw / 4] * 4, rowHeights=[1.4 * cm])
+    kpi_t.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5E7EB")),
+        ("LINEAFTER", (0, 0), (2, 0), 0.5, colors.HexColor("#E5E7EB")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F9FAFB")),
+    ]))
+
+    story = [header_t, Spacer(1, 0.3 * cm), meta_t, Spacer(1, 0.4 * cm),
+             kpi_t, Spacer(1, 0.5 * cm)]
+
+    def _df_table(df: pd.DataFrame, cols_show: list, title: str,
+                  accent: tuple = (colors.HexColor("#111827"), colors.white)):
+        story.append(Paragraph(title, h2))
+        if df.empty:
+            story.append(Paragraph("Nenhum item nesta categoria.", sm))
+            story.append(Spacer(1, 0.2 * cm))
+            return
+        cols_ok = [c for c in cols_show if c in df.columns]
+        if not cols_ok:
+            story.append(Paragraph("Sem dados.", sm))
+            return
+        story.append(Paragraph(f"{len(df)} item(s) encontrado(s).", sm))
+        story.append(Spacer(1, 0.1 * cm))
+        data_rows = [cols_ok] + df[cols_ok].fillna("").values.tolist()
+        # Equipamento/Frota gets more space if present
+        cw = []
+        for i, c in enumerate(cols_ok):
+            if c in ("Frota", "Equipamento"):
+                cw.append(pw * 0.18)
+            elif c in ("Modelo", "Serviço", "Setor", "Obs."):
+                cw.append(pw * 0.20)
+            else:
+                cw.append(pw * 0.12)
+        # Normalize widths
+        total_w = sum(cw)
+        cw = [w * pw / total_w for w in cw]
+
+        t = Table(data_rows, colWidths=cw, repeatRows=1)
+        ts = [
+            ("BACKGROUND", (0, 0), (-1, 0), accent[0]),
+            ("TEXTCOLOR", (0, 0), (-1, 0), accent[1]),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 8),
+            ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("FONTSIZE", (0, 1), (-1, -1), 7.5),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F9FAFB")]),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#374151")),
+        ]
+        t.setStyle(TableStyle(ts))
+        story.append(t)
+        story.append(Spacer(1, 0.4 * cm))
+
+    _df_table(alertas["travados"],
+              ["Frota",
+               "Modelo",
+               "Grupo",
+               "Setor",
+               "Serviço",
+               "Dias travado",
+               "Obs."],
+              "🚫 Travados sem resolução",
+              (colors.HexColor("#7F1D1D"),
+               colors.white))
+    _df_table(alertas["sem_inicio"],
+              ["Frota",
+               "Modelo",
+               "Grupo",
+               "Setor",
+               "Serviço",
+               "Dias sem update"],
+              "⬜ Sem nenhum apontamento",
+              (colors.HexColor("#1E3A5F"),
+               colors.white))
+    _df_table(alertas["sem_update"],
+              ["Frota",
+               "Modelo",
+               "Grupo",
+               "Setor",
+               "Serviço",
+               "Status",
+               "Dias parado"],
+              "⏸ Parados (sem atualização)",
+              (colors.HexColor("#374151"),
+               colors.white))
+    _df_table(alertas["risco_prazo"],
+              ["Frota",
+               "Modelo",
+               "Grupo",
+               "% Atual",
+               "% Esperado",
+               "Atraso (p.p.)"],
+              "⚠️ Risco de não concluir no prazo",
+              (colors.HexColor("#78350F"),
+               colors.white))
+
+    def _footer(canvas, _doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(colors.grey)
+        canvas.drawRightString(
+            PAGE[0] - MARGIN,
+            0.8 * cm,
+            f"Página {
+                canvas.getPageNumber()}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
+    return buf.getvalue()
+
 
 # ── Fragmentos de UI ────────────────────────────────────────────────────
 
@@ -589,7 +914,7 @@ def _fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
         try:
             proximo = cfg.proximo_disparo_brt().strftime("%d/%m/%Y às %H:%M")
             st.info(f"Próximo disparo: **{proximo}** (Brasília)")
-        except (AttributeError, TypeError, ValueError):
+        except Exception:
             st.caption("Configure abaixo para ver o próximo disparo.")
 
     st.divider()
@@ -654,7 +979,7 @@ def _fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
     try:
         hh, mm = hora_envio.split(":")
         assert 0 <= int(hh) <= 23 and 0 <= int(mm) <= 59
-    except (AssertionError, TypeError, ValueError):
+    except Exception:
         st.error("Formato de horário inválido. Use HH:MM (ex: 07:00).")
         hora_valida = False
 
@@ -691,8 +1016,8 @@ def _fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
                 prox = preview_cfg.proximo_disparo_brt().strftime("%d/%m/%Y às %H:%M")
                 st.caption(f"**Prévia:** {preview_cfg.descricao_humana()}")
                 st.caption(f"Próximo disparo: {prox} (Brasília)")
-            except (AttributeError, TypeError, ValueError):
-                log.warning("Não foi possível gerar a prévia do próximo disparo.")
+            except Exception:
+                pass
 
     with st.expander("📋 Como configurar o scheduler", expanded=False):
         st.markdown(f"""
@@ -867,8 +1192,7 @@ def render_notificacoes() -> None:
         _fragment_configurar_agendamento(tenant_id, is_admin)
 
     # ── Botão de atualizar ──────────────────────────────────────────────────
-    import time as _time
     if st.button("🔄 Atualizar alertas", key="ntf_refresh"):
-        st.session_state["data_version"] = str(_time.time())
-        st.cache_data.clear()
+        bump_data_version()
+        clear_cached_functions(_load_data)
         st.rerun()

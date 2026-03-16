@@ -19,6 +19,7 @@ import streamlit as st
 from src.auth.scope import get_my_scope
 from src.domain.kpi import calc_global_kpis, calc_dept_kpis
 from src.ui.core.styles import page_header
+from src.ui.core.cache import bump_data_version
 from src.utils import nav
 from src.utils.kpi_engine import get_group_kpis
 from src.utils.ui_helpers import status_badge, mobile_columns
@@ -405,7 +406,7 @@ def render_home_overview() -> None:
             icon=":material/refresh:",
             use_container_width=True,
                 key="home_refresh_btn"):
-            st.session_state["data_version"] = str(time.time())
+            bump_data_version()
             st.session_state["home_pulse"] = True
             st.toast("Atualizado", icon=":material/refresh:")
             st.rerun()

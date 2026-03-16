@@ -18,6 +18,7 @@ from src.utils.timezone import now_brt as _now_brt
 
 from src.ui.components.filters import select_equipamento, select_grupo, select_revisao
 from src.ui.core.styles import page_header as _ph
+from src.ui.core.cache import bump_data_version
 from src.ui.core.confirm_dialog import confirm_dialog
 from src.ui.core.empty_state import empty_state
 from src.ui.core.error_messages import show_supabase_error
@@ -456,7 +457,6 @@ def _fragment_editor(
         confirm_label="Salvar",
     )
     if confirmed:
-        import time as _time
         sb = sb_for_user()
         erros = 0
         with st.spinner("Salvando…", show_time=False):
@@ -475,8 +475,7 @@ def _fragment_editor(
             invalidate_kpi_cache()
         except Exception:
             pass
-        st.cache_data.clear()
-        st.session_state["data_version"] = str(_time.time())
+        bump_data_version()
         if erros == 0:
             st.toast(
                 f"✅ {n_changes} {
