@@ -59,18 +59,6 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
   transition:transform .08s ease,border-color .12s ease,background .12s ease;}
 .mtz-card-grid [data-testid="stButton"] button:hover{
   transform:translateY(-1px);border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.06);}
-/* Cabeçalho das tabelas com texto branco */
-.stDataFrame thead th,
-[data-testid="stDataFrame"] thead th,
-[data-testid="stDataEditor"] thead th{
-  color:#FFFFFF !important;
-}
-.stDataFrame thead th span,
-[data-testid="stDataFrame"] thead th span,
-[data-testid="stDataEditor"] thead th span{
-  color:#FFFFFF !important;
-  fill:#FFFFFF !important;
-}
 </style>""", unsafe_allow_html=True)
 
 
@@ -334,6 +322,15 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
         alignment=TA_CENTER,
         textColor=palette["soft"],
     )
+    summary_head_left = ParagraphStyle(
+        "summary_head_left",
+        parent=cell_left,
+        fontSize=8.1,
+        leading=9.0,
+        alignment=TA_LEFT,
+        textColor=colors.white,
+        fontName="Helvetica-Bold",
+    )
 
     def _base_left_table_style(*, header_rows=0, zebra_from=1):
         cmds = [
@@ -383,10 +380,10 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
         view = view.sort_values(["%", "Concluidos", "Equipamento"], ascending=[False, False, True]).reset_index(drop=True)
 
         rows = [[
-            Paragraph("<b>Equipamento</b>", cell_left),
-            Paragraph("<b>Concluídos</b>", cell_left),
-            Paragraph("<b>Total</b>", cell_left),
-            Paragraph("<b>%</b>", cell_left),
+            Paragraph("Equipamento", summary_head_left),
+            Paragraph("Concluídos", summary_head_left),
+            Paragraph("Total", summary_head_left),
+            Paragraph("%", summary_head_left),
         ]]
         for _, row in view.iterrows():
             pct = _int_pct(row["%"])
