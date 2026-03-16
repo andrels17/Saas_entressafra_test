@@ -622,6 +622,17 @@ def dispatch_relatorio_semanal(
                 f"_semana{payload.semana_atual}.pdf"
             )
 
+            # Valida integridade do PDF antes de tentar enviar
+            try:
+                from src.services.reporting.pdf_validator import validate_pdf, PdfValidationError
+                validate_pdf(pdf_bytes, context=f"relatorio_semanal.{grp.departamento_nome[:30]}")
+            except PdfValidationError as pdf_err:
+                result.failed += 1
+                msg = f"PDF inválido para {grp.departamento_nome}: {pdf_err}"
+                result.errors.append(msg)
+                _log(f"  ❌ {msg}")
+                continue  # pula todos os destinatários deste departamento
+
             for rec in grp.recipients:
                 result.total_emails += 1
                 _log(f"    ↳ Enviando para {rec.email} ({rec.nome})")
@@ -657,6 +668,22 @@ def dispatch_relatorio_semanal(
                     msg = f"Falha ao enviar para {rec.email}: {e}"
                     result.errors.append(msg)
                     _log(f"    ↳ ❌ {msg}")
+                    # Enfileira na dead-letter para reprocessamento manual
+                    try:
+                        from src.services.email.dead_letter import enqueue_failed
+                        enqueue_failed(
+                            tenant_id=tenant_id,
+                            revisao_id=revisao_id,
+                            recipient=rec.email,
+                            subject=(f"[{payload.revisao_titulo}] Relatório Semanal — "
+                                     f"{grp.departamento_nome} · Semana {payload.semana_atual}"),
+                            html_body=html,
+                            pdf_bytes=pdf_bytes,
+                            pdf_filename=pdf_name,
+                            error=str(e),
+                        )
+                    except Exception:
+                        pass
 
         except Exception as e:
             result.failed += 1
