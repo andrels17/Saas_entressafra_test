@@ -59,6 +59,18 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
   transition:transform .08s ease,border-color .12s ease,background .12s ease;}
 .mtz-card-grid [data-testid="stButton"] button:hover{
   transform:translateY(-1px);border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.06);}
+/* Cabeçalho das tabelas com texto branco */
+.stDataFrame thead th,
+[data-testid="stDataFrame"] thead th,
+[data-testid="stDataEditor"] thead th{
+  color:#FFFFFF !important;
+}
+.stDataFrame thead th span,
+[data-testid="stDataFrame"] thead th span,
+[data-testid="stDataEditor"] thead th span{
+  color:#FFFFFF !important;
+  fill:#FFFFFF !important;
+}
 </style>""", unsafe_allow_html=True)
 
 
