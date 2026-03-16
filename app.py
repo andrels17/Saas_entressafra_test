@@ -20,6 +20,7 @@ from src.auth.roles import Role
 from src.auth.guard import require_login, require_role, require_tenant_selected
 from src.auth.tenant import ensure_tenant_selected, refresh_current_role
 from src.auth.session import clear_auth_session, ensure_valid_token, hard_logout
+from src.auth.audit import audit_logout
 
 # ── Utils ─────────────────────────────────────────────────────────────────────
 from src.utils.mobile import is_mobile, render_mobile_toggle
@@ -146,6 +147,7 @@ def _render_sidebar(pages: list[str], current_page: str, role: str, user_id: str
                 unsafe_allow_html=True,
             )
             if st.button("Sair", icon=":material/logout:", key="sidebar_logout", use_container_width=True, type="tertiary"):
+                audit_logout(st.session_state.get("sb_user_id"))
                 hard_logout()
 
         core_pages  = [p for p in pages if NAV_CONFIG.get(p, ("", "core", ""))[1] == "core"]
