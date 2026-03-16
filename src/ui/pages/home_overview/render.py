@@ -19,6 +19,7 @@ import streamlit as st
 from src.auth.scope import get_my_scope
 from src.domain.kpi import calc_global_kpis, calc_dept_kpis
 from src.ui.core.styles import page_header
+from src.ui.components.feedback import selection_summary
 from src.ui.core.cache import bump_data_version
 from src.utils import nav
 from src.utils.kpi_engine import get_group_kpis
@@ -410,6 +411,18 @@ def render_home_overview() -> None:
             st.session_state["home_pulse"] = True
             st.toast("Atualizado", icon=":material/refresh:")
             st.rerun()
+
+    selection_summary(
+        "Contexto da visão",
+        {
+            "Revisão": rev.get("titulo") or "-",
+            "Status": rev.get("status") or "-",
+            "Semana": f"{week}/{semanas_total}",
+            "Grupos": len(grupos),
+            "Departamentos": len(deps),
+        },
+        caption="A Home consolida a mesma revisão ativa usada nas páginas operacionais.",
+    )
 
     # ── Carrega KPIs ────────────────────────────────────────────────────────
     with st.spinner("", show_time=False):

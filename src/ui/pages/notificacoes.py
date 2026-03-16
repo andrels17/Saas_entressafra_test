@@ -20,6 +20,7 @@ import streamlit as st
 from src.auth.roles import Role
 from src.auth.scope import get_my_scope
 from src.ui.core.styles import page_header as _ph
+from src.ui.components.feedback import notice_card, selection_summary
 from src.ui.core.cache import bump_data_version, clear_cached_functions
 from src.utils.supabase_helpers import (
     current_role, current_tenant_id, sb_for_user,
@@ -1051,8 +1052,11 @@ def render_notificacoes() -> None:
     ver = str(st.session_state.get("data_version", "0"))
     revisao_id = get_current_revisao()
     if not revisao_id:
-        st.warning(
-            "Nenhuma revisão ativa selecionada. Acesse a Matriz ou Home para selecionar.")
+        notice_card(
+            "Nenhuma revisão selecionada",
+            "Abra uma revisão ativa pela Matriz ou Home para visualizar os alertas operacionais e de prazo.",
+            tone="warning",
+        )
         return
 
     # ── Configurações dos thresholds ─────────────────────────────────────────
@@ -1085,7 +1089,11 @@ def render_notificacoes() -> None:
     revisao = raw["revisao"]
 
     if not tarefas:
-        st.info("Nenhuma tarefa encontrada para esta revisão.")
+        notice_card(
+            "Revisão sem tarefas",
+            "A revisão selecionada ainda não possui tarefas sincronizadas para gerar alertas.",
+            tone="warning",
+        )
         return
 
     # Filtro de escopo (não-admin vê apenas seus grupos)
@@ -1104,6 +1112,30 @@ def render_notificacoes() -> None:
         revisao,
         int(dias_travado),
         int(dias_sem_update))
+
+    selection_summary(
+        "Parâmetros dos alertas",
+        {
+            "Revisão": revisao.get("titulo") or "-",
+            "Semana": f"{alertas.get('semana_atual', 1)}/{alertas.get('semanas_total', 1)}",
+            "Travado há": f"{int(dias_travado)} dia(s)",
+            "Sem atualização há": f"{int(dias_sem_update)} dia(s)",
+        },
+        caption="Os alertas abaixo usam os limites configurados no painel de thresholds.",
+    )
+
+    total_alertas = (
+        len(alertas["travados"])
+        + len(alertas["sem_inicio"])
+        + len(alertas["sem_update"])
+        + len(alertas["risco_prazo"])
+    )
+    if total_alertas == 0:
+        notice_card(
+            "Nenhum alerta crítico encontrado",
+            "Com os parâmetros atuais, a revisão não possui equipamentos travados, sem início, sem atualização relevante ou em risco de prazo.",
+            tone="success",
+        )
 
     # ── Resumo global ───────────────────────────────────────────────────────
     _fragment_resumo(alertas, revisao)

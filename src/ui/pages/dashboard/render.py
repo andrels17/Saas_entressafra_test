@@ -16,6 +16,7 @@ from src.auth.scope import get_my_scope
 from src.domain.kpi import calc_global_kpis
 from src.ui.core.empty_state import empty_state
 from src.ui.components.filters import multiselect_departamentos, multiselect_grupos
+from src.ui.components.feedback import notice_card, selection_summary
 from src.ui.core.styles import page_header
 from src.ui.core.cache import bump_data_version
 from src.utils.kpi_engine import get_group_kpis
@@ -608,6 +609,16 @@ def render_dashboard() -> None:
             st.toast("Atualizado", icon=":material/refresh:")
             st.rerun()
 
+    selection_summary(
+        "Contexto da revisão",
+        {
+            "Revisão": rev.get("titulo") or "Revisão ativa",
+            "Status": rev.get("status") or "-",
+            "Período": f"{rev.get('data_inicio') or '-'} -> {rev.get('data_fim') or '-'}",
+        },
+        caption="Os filtros abaixo refinam apenas a visualização atual do dashboard.",
+    )
+
     ver = str(st.session_state.get("data_version", "0"))
     with st.spinner("", show_time=False):
         raw, eq_meta = _load_base(sb, tenant_id, revisao_id)
@@ -622,7 +633,11 @@ def render_dashboard() -> None:
 
     base = normalize_matriz_base(raw, eq_meta)
     if base.empty:
-        st.info("Sem dados de execução para esta revisão. Verifique se a materialized view `mv_matriz_base` está populada.")
+        notice_card(
+            "Sem dados de execução",
+            "A revisão foi encontrada, mas a visão consolidada ainda não possui registros. Verifique se a materialized view mv_matriz_base foi atualizada.",
+            tone="warning",
+        )
         return
 
     base = apply_filters(base, dep_scope_ids, grp_scope_ids)
@@ -673,6 +688,15 @@ def render_dashboard() -> None:
             index=1,
             key="dash_filter_top"))
 
+    selection_summary(
+        "Filtro aplicado",
+        {
+            "Departamentos": len(dept_selected_ids) or "Todos",
+            "Grupos": len(group_selected_ids) or "Todos",
+            "Ranking": f"Top {top_n}",
+        },
+    )
+
     base_filtered = apply_filters(base, dept_selected_ids, group_selected_ids)
     dashboard_groups_filtered = dashboard_groups.copy()
     if dept_selected_ids and "departamento_id" in dashboard_groups_filtered.columns:
@@ -683,8 +707,11 @@ def render_dashboard() -> None:
             group_selected_ids)]
 
     if base_filtered.empty:
-        st.warning(
-            "Os filtros selecionados não retornaram dados para esta revisão.")
+        notice_card(
+            "Nenhum resultado para os filtros",
+            "A combinação de departamentos e grupos não retornou dados nesta revisão. Ajuste os filtros para continuar.",
+            tone="warning",
+        )
         return
 
     if dashboard_groups_filtered is None or dashboard_groups_filtered.empty:

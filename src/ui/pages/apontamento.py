@@ -17,6 +17,7 @@ from datetime import date
 from src.utils.timezone import now_brt as _now_brt
 
 from src.ui.components.filters import select_equipamento, select_grupo, select_revisao
+from src.ui.components.feedback import notice_card, selection_summary
 from src.ui.core.styles import page_header as _ph
 from src.ui.core.cache import bump_data_version
 from src.ui.core.confirm_dialog import confirm_dialog
@@ -242,6 +243,9 @@ def _fragment_seletores(
 
     st.session_state["_apt_semana_default"] = int(semana_default)
     st.session_state["_apt_revisao_id"] = revisao_id
+    st.session_state["_apt_revisao_titulo"] = revisao.get("titulo") or "Revisão"
+    st.session_state["_apt_grupo_nome"] = grupo_nome or "Grupo"
+    st.session_state["_apt_eq_label"] = eq_label or "Equipamento"
     st.session_state["_apt_equipamento_id"] = equipamento_id
 
     return revisao, revisao_id, equipamento_id
@@ -261,9 +265,11 @@ def _fragment_editor(
         tarefas = _load_tarefas(tenant_id, revisao_id, equipamento_id, ver)
 
     if not tarefas:
-        st.warning(
-            "Nenhuma tarefa encontrada para este equipamento nesta revisão. "
-            "Peça ao Admin para gerar/sincronizar a matriz.")
+        notice_card(
+            "Equipamento sem tarefas",
+            "Nenhuma tarefa foi encontrada para o equipamento selecionado nesta revisão. Peça ao administrador para gerar ou sincronizar a matriz.",
+            tone="warning",
+        )
         return
 
     semana_default = st.session_state.get("_apt_semana_default", 1)
@@ -505,6 +511,17 @@ def render_apontamento() -> None:
 
     if not revisao_id or not equipamento_id:
         return
+
+    selection_summary(
+        "Contexto do apontamento",
+        {
+            "Revisão": st.session_state.get("_apt_revisao_titulo") or "-",
+            "Grupo": st.session_state.get("_apt_grupo_nome") or "-",
+            "Equipamento": st.session_state.get("_apt_eq_label") or "-",
+            "Semana sugerida": st.session_state.get("_apt_semana_default") or "-",
+        },
+        caption="As alterações abaixo serão salvas apenas para o equipamento selecionado.",
+    )
 
     st.divider()
 
