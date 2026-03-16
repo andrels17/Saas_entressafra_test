@@ -24,11 +24,10 @@ import smtplib
 import ssl
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import List
+from typing import Callable, List
 
 from src.utils.timezone import fmt_brt
 from src.utils.observability import log_error
@@ -55,25 +54,25 @@ _TRANSIENT_ERRORS = (
 
 @dataclass
 class SmtpConfig:
-    host:        str
-    port:        int
-    user:        str
-    password:    str
-    from_name:   str  = "Sistema de Revisões"
-    use_tls:     bool = True   # STARTTLS na porta 587
-    use_ssl:     bool = False  # SSL direto na porta 465
-    max_retries: int  = 3      # tentativas totais (1 original + 2 retries)
-    retry_base:  float = 1.0   # segundos base do backoff exponencial
+    host: str
+    port: int
+    user: str
+    password: str
+    from_name: str = "Sistema de Revisões"
+    use_tls: bool = True   # STARTTLS na porta 587
+    use_ssl: bool = False  # SSL direto na porta 465
+    max_retries: int = 3      # tentativas totais (1 original + 2 retries)
+    retry_base: float = 1.0   # segundos base do backoff exponencial
 
 
 @dataclass
 class EmailMessage:
-    to:           List[str]
-    subject:      str
-    html_body:    str
-    pdf_bytes:    bytes | None = None
-    pdf_filename: str          = "relatorio.pdf"
-    cc:           List[str]    = field(default_factory=list)
+    to: List[str]
+    subject: str
+    html_body: str
+    pdf_bytes: bytes | None = None
+    pdf_filename: str = "relatorio.pdf"
+    cc: List[str] = field(default_factory=list)
 
 
 def _load_config_from_secrets() -> SmtpConfig:
@@ -83,25 +82,32 @@ def _load_config_from_secrets() -> SmtpConfig:
         secrets = st.secrets
     except Exception:
         import os
+
         class _FakeSecrets:
             def __getitem__(self, k): return os.environ[k]
             def get(self, k, d=None): return os.environ.get(k, d)
         secrets = _FakeSecrets()
 
-    missing = [k for k in ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD")
-               if not secrets.get(k)]
+    missing = [
+        k for k in (
+            "SMTP_HOST",
+            "SMTP_PORT",
+            "SMTP_USER",
+            "SMTP_PASSWORD") if not secrets.get(k)]
     if missing:
         raise ValueError(
-            f"Configuração SMTP incompleta. Adicione ao secrets.toml: {', '.join(missing)}"
-        )
+            f"Configuração SMTP incompleta. Adicione ao secrets.toml: {
+                ', '.join(missing)}")
 
     port = int(secrets["SMTP_PORT"])
     _true_vals = ("true", "1", "yes")
 
     use_tls_raw = secrets.get("SMTP_USE_TLS", "")
     use_ssl_raw = secrets.get("SMTP_USE_SSL", "")
-    use_tls = str(use_tls_raw).lower() in _true_vals if use_tls_raw != "" else (port == 587)
-    use_ssl = str(use_ssl_raw).lower() in _true_vals if use_ssl_raw != "" else (port == 465)
+    use_tls = str(use_tls_raw).lower(
+    ) in _true_vals if use_tls_raw != "" else (port == 587)
+    use_ssl = str(use_ssl_raw).lower(
+    ) in _true_vals if use_ssl_raw != "" else (port == 465)
 
     return SmtpConfig(
         host=secrets["SMTP_HOST"],
@@ -119,8 +125,8 @@ def _load_config_from_secrets() -> SmtpConfig:
 def _build_mime(msg: EmailMessage, cfg: SmtpConfig) -> MIMEMultipart:
     """Constrói o objeto MIME a partir de um EmailMessage."""
     mime = MIMEMultipart("mixed")
-    mime["From"]    = f"{cfg.from_name} <{cfg.user}>"
-    mime["To"]      = ", ".join(msg.to)
+    mime["From"] = f"{cfg.from_name} <{cfg.user}>"
+    mime["To"] = ", ".join(msg.to)
     mime["Subject"] = msg.subject
     if msg.cc:
         mime["Cc"] = ", ".join(msg.cc)
@@ -131,7 +137,10 @@ def _build_mime(msg: EmailMessage, cfg: SmtpConfig) -> MIMEMultipart:
 
     if msg.pdf_bytes:
         part = MIMEApplication(msg.pdf_bytes, _subtype="pdf")
-        part.add_header("Content-Disposition", "attachment", filename=msg.pdf_filename)
+        part.add_header(
+            "Content-Disposition",
+            "attachment",
+            filename=msg.pdf_filename)
         mime.attach(part)
 
     return mime
@@ -139,9 +148,9 @@ def _build_mime(msg: EmailMessage, cfg: SmtpConfig) -> MIMEMultipart:
 
 def _send_once(msg: EmailMessage, cfg: SmtpConfig) -> None:
     """Tenta enviar o e-mail uma única vez. Levanta smtplib.SMTPException em falha."""
-    mime    = _build_mime(msg, cfg)
-    all_to  = list(msg.to) + list(msg.cc)
-    ctx     = ssl.create_default_context()
+    mime = _build_mime(msg, cfg)
+    all_to = list(msg.to) + list(msg.cc)
+    ctx = ssl.create_default_context()
 
     if cfg.use_ssl:
         with smtplib.SMTP_SSL(cfg.host, cfg.port, context=ctx) as server:
@@ -194,7 +203,10 @@ def send_email_with_retry(
         try:
             _send_once(msg, cfg)
             if attempt > 1:
-                log.info("Email enviado na tentativa %d para %s", attempt, msg.to)
+                log.info(
+                    "Email enviado na tentativa %d para %s",
+                    attempt,
+                    msg.to)
             return  # sucesso
 
         except _PERMANENT_ERRORS as exc:
@@ -239,7 +251,10 @@ def send_email_with_retry(
                 raise
 
             wait = cfg.retry_base * (2 ** (attempt - 1))
-            log.info("Aguardando %.1fs antes da tentativa %d…", wait, attempt + 1)
+            log.info(
+                "Aguardando %.1fs antes da tentativa %d…",
+                wait,
+                attempt + 1)
             time.sleep(wait)
 
     # Não deve chegar aqui, mas por segurança:
@@ -267,8 +282,10 @@ def build_html_body(
     else:
         bar_color = "#EF4444"
     now = fmt_brt("%d/%m/%Y")
-    alerta_txt = (f"{n_alertas} alerta{'s' if n_alertas != 1 else ''} "
-                  f"ativo{'s' if n_alertas != 1 else ''}") if n_alertas else "sem alertas"
+    alerta_txt = (
+        f"{n_alertas} alerta{
+            's' if n_alertas != 1 else ''} " f"ativo{
+            's' if n_alertas != 1 else ''}") if n_alertas else "sem alertas"
     alerta_color = "#EF4444" if n_alertas else "#12B76A"
 
     return f"""<!DOCTYPE html>
@@ -303,7 +320,7 @@ def build_html_body(
               <div style="font-size:12px;color:#6B7280;margin-bottom:4px;">Progresso geral</div>
               <div style="font-size:32px;font-weight:700;color:{bar_color};">{pct_geral}%</div>
               <div style="background:#E5E7EB;border-radius:4px;height:8px;margin-top:10px;">
-                <div style="width:{min(pct_geral,100)}%;background:{bar_color};height:8px;border-radius:4px;"></div>
+                <div style="width:{min(pct_geral, 100)}%;background:{bar_color};height:8px;border-radius:4px;"></div>
               </div>
               <div style="font-size:11px;color:#9CA3AF;margin-top:6px;">Semana {semana_atual} de {semanas_total}</div>
             </td>

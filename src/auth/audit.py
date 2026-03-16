@@ -81,17 +81,18 @@ def audit_log(
         metadata: Dados adicionais livres (não inclua senhas ou tokens).
     """
     # Resolve valores do session_state quando não fornecidos
-    resolved_tenant = tenant_id or st.session_state.get("current_tenant_id") or None
-    resolved_user   = user_id   or st.session_state.get("sb_user_id")          or None
+    resolved_tenant = tenant_id or st.session_state.get(
+        "current_tenant_id") or None
+    resolved_user = user_id or st.session_state.get("sb_user_id") or None
 
     record = {
-        "tenant_id":   resolved_tenant,
-        "user_id":     resolved_user,
+        "tenant_id": resolved_tenant,
+        "user_id": resolved_user,
         "actor_email": actor_email,
-        "event":       event,
+        "event": event,
         "target_type": target_type,
-        "target_id":   str(target_id) if target_id is not None else None,
-        "metadata":    metadata or {},
+        "target_id": str(target_id) if target_id is not None else None,
+        "metadata": metadata or {},
     }
 
     # Log local sempre (para depuração mesmo sem banco)
@@ -118,7 +119,7 @@ def audit_log(
         log.warning("Falha ao persistir audit_log event=%s: %s", event, exc)
 
 
-# ── Helpers semânticos para os eventos mais comuns ────────────────────────────
+# ── Helpers semânticos para os eventos mais comuns ──────────────────────
 
 def audit_login_success(email: str, user_id: str) -> None:
     audit_log(
@@ -167,7 +168,10 @@ def audit_user_deleted(deleted_user_id: str, email: str) -> None:
     )
 
 
-def audit_user_role_changed(target_user_id: str, old_role: str, new_role: str) -> None:
+def audit_user_role_changed(
+        target_user_id: str,
+        old_role: str,
+        new_role: str) -> None:
     audit_log(
         "user_role_changed",
         target_type="user",
@@ -185,7 +189,10 @@ def audit_equipment_deleted(equipment_id: str, frota: str) -> None:
     )
 
 
-def audit_equipment_moved(equipment_id: str, from_group: str, to_group: str) -> None:
+def audit_equipment_moved(
+        equipment_id: str,
+        from_group: str,
+        to_group: str) -> None:
     audit_log(
         "equipment_moved",
         target_type="equipment",

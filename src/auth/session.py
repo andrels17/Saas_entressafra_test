@@ -9,8 +9,14 @@ from __future__ import annotations
 
 import streamlit as st
 
-# ── Chaves de sessão ──────────────────────────────────────────────────────────
-_AUTH_KEYS = ("sb_access_token", "sb_refresh_token", "sb_user_id", "current_tenant_id", "current_role", "__nav_to")
+# ── Chaves de sessão ────────────────────────────────────────────────────
+_AUTH_KEYS = (
+    "sb_access_token",
+    "sb_refresh_token",
+    "sb_user_id",
+    "current_tenant_id",
+    "current_role",
+    "__nav_to")
 _DERIVED_KEYS = (
     "current_tenant_id", "current_role", "__nav_to", "__current_page",
     "menu", "pages", "menu_pages", "_tenant_user_id",
@@ -19,9 +25,12 @@ _DERIVED_KEYS = (
 )
 
 
-# ── Escrita / leitura ─────────────────────────────────────────────────────────
+# ── Escrita / leitura ───────────────────────────────────────────────────
 
-def set_auth_session(access_token: str, refresh_token: str, user_id: str) -> None:
+def set_auth_session(
+        access_token: str,
+        refresh_token: str,
+        user_id: str) -> None:
     """Persiste tokens e user_id no session_state."""
     st.session_state["sb_access_token"] = access_token
     st.session_state["sb_refresh_token"] = refresh_token
@@ -33,7 +42,7 @@ def is_logged_in() -> bool:
     return bool(st.session_state.get("sb_access_token"))
 
 
-# ── Limpeza de estado ─────────────────────────────────────────────────────────
+# ── Limpeza de estado ───────────────────────────────────────────────────
 
 def clear_auth_session() -> None:
     """Remove tokens de autenticação. Use hard_logout() quando possível."""
@@ -88,7 +97,7 @@ def _clear_all_caches() -> None:
             pass
 
 
-# ── Renovação de token ────────────────────────────────────────────────────────
+# ── Renovação de token ──────────────────────────────────────────────────
 
 def try_refresh_session() -> bool:
     """Tenta renovar o access_token usando o refresh_token armazenado."""
@@ -105,7 +114,9 @@ def try_refresh_session() -> bool:
             set_auth_session(
                 res.session.access_token,
                 res.session.refresh_token,
-                res.user.id if res.user else st.session_state.get("sb_user_id", ""),
+                res.user.id if res.user else st.session_state.get(
+                    "sb_user_id",
+                    ""),
             )
             return True
     except Exception:
@@ -127,7 +138,9 @@ def ensure_valid_token() -> bool:
         from src.db.supabase_client import get_supabase_anon
 
         sb = get_supabase_anon()
-        sb.auth.set_session(access_token, st.session_state.get("sb_refresh_token", ""))
+        sb.auth.set_session(
+            access_token, st.session_state.get(
+                "sb_refresh_token", ""))
         user = sb.auth.get_user(access_token)
 
         if user and user.user:
@@ -141,8 +154,8 @@ def ensure_valid_token() -> bool:
     except Exception as e:
         msg = str(e).lower()
         if any(k in msg for k in ("invalid", "expired", "jwt", "401")):
-            return try_refresh_session() or (clear_auth_session() or False)  # type: ignore[func-returns-value]
+            return try_refresh_session() or (
+                clear_auth_session() or False)  # type: ignore[func-returns-value]
         return True  # erro transitório, mantém sessão
 
     return False
-

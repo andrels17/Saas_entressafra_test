@@ -65,14 +65,20 @@ def validate_pdf(
 
     size = len(pdf_bytes)
 
+    if size > max_size:
+        msg = f"{prefix}PDF muito grande ({
+            size /
+            1024 /
+            1024:.1f} MB > máximo {
+            max_size /
+            1024 /
+            1024:.0f} MB)."
+        log.warning(msg)
+        raise PdfValidationError(msg)
+
     if size < min_size:
         msg = f"{prefix}PDF muito pequeno ({size} bytes < mínimo {min_size}). Possível geração incompleta."
         log.error(msg)
-        raise PdfValidationError(msg)
-
-    if size > max_size:
-        msg = f"{prefix}PDF muito grande ({size / 1024 / 1024:.1f} MB > máximo {max_size / 1024 / 1024:.0f} MB)."
-        log.warning(msg)
         raise PdfValidationError(msg)
 
     if not pdf_bytes.startswith(_PDF_MAGIC):

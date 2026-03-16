@@ -39,32 +39,56 @@ from typing import Callable
 
 log = logging.getLogger("saas.dead_letter")
 
+
+def get_supabase_service():
+    from src.db.supabase_client import get_supabase_service as _get_supabase_service
+
+    return _get_supabase_service()
+
+
+def _load_config_from_secrets():
+    from src.services.email.smtp_sender import _load_config_from_secrets as _loader
+
+    return _loader()
+
+
+def send_email_with_retry(*args, **kwargs):
+    from src.services.email.smtp_sender import send_email_with_retry as _send_email_with_retry
+
+    return _send_email_with_retry(*args, **kwargs)
+
+
+def _build_email_message(**kwargs):
+    from src.services.email.smtp_sender import EmailMessage
+
+    return EmailMessage(**kwargs)
+
 _MAX_PDF_BYTES = 5 * 1024 * 1024  # 5 MB — limite para armazenar no banco
 
 
 @dataclass
 class RetryResult:
-    total:     int = 0
+    total: int = 0
     succeeded: int = 0
-    failed:    int = 0
-    errors:    list[str] = None
+    failed: int = 0
+    errors: list[str] = None
 
     def __post_init__(self):
         if self.errors is None:
             self.errors = []
 
 
-# ── Escrita ───────────────────────────────────────────────────────────────────
+# ── Escrita ─────────────────────────────────────────────────────────────
 
 def enqueue_failed(
-    tenant_id:    str,
-    revisao_id:   str | None,
-    recipient:    str,
-    subject:      str,
-    html_body:    str,
-    pdf_bytes:    bytes | None,
+    tenant_id: str,
+    revisao_id: str | None,
+    recipient: str,
+    subject: str,
+    html_body: str,
+    pdf_bytes: bytes | None,
     pdf_filename: str,
-    error:        str,
+    error: str,
 ) -> bool:
     """Persiste um email com falha na dead-letter queue.
 
@@ -72,7 +96,6 @@ def enqueue_failed(
         True se gravou com sucesso, False caso contrário (falha nunca propaga).
     """
     try:
-        from src.db.supabase_client import get_supabase_service
         svc = get_supabase_service()
 
         # Armazena PDF apenas se couber — evita inflar o banco
@@ -82,21 +105,22 @@ def enqueue_failed(
             pdf_col = base64.b64encode(pdf_bytes).decode("ascii")
 
         payload = {
-            "tenant_id":     tenant_id,
-            "revisao_id":    revisao_id,
-            "recipient":     recipient,
-            "subject":       subject,
-            "html_body":     html_body,
-            "pdf_filename":  pdf_filename,
+            "tenant_id": tenant_id,
+            "revisao_id": revisao_id,
+            "recipient": recipient,
+            "subject": subject,
+            "html_body": html_body,
+            "pdf_filename": pdf_filename,
             "error_message": error[:2000],     # trunca erros muito longos
-            "status":        "pending",
-            "attempts":      1,
+            "status": "pending",
+            "attempts": 1,
         }
         if pdf_col:
             payload["pdf_bytes_b64"] = pdf_col
 
         svc.table("email_dead_letter").insert(payload).execute()
-        log.warning("Email enfileirado na dead-letter: to=%s subject=%s", recipient, subject[:60])
+        log.warning(
+            "Email enfileirado na dead-letter: to=%s subject=%s", recipient, subject[:60])
         return True
 
     except Exception as exc:
@@ -104,7 +128,7 @@ def enqueue_failed(
         return False
 
 
-# ── Reenvio ───────────────────────────────────────────────────────────────────
+# ── Reenvio ─────────────────────────────────────────────────────────────
 
 def retry_pending(
     tenant_id: str,
@@ -133,11 +157,6 @@ def retry_pending(
                 pass
 
     try:
-        from src.db.supabase_client import get_supabase_service
-        from src.services.email.smtp_sender import (
-            EmailMessage, send_email_with_retry, _load_config_from_secrets,
-        )
-
         svc = get_supabase_service()
         rows = (
             svc.table("email_dead_letter")
@@ -160,9 +179,9 @@ def retry_pending(
         cfg = _load_config_from_secrets()
 
         for row in rows:
-            row_id    = row["id"]
+            row_id = row["id"]
             recipient = row.get("recipient", "")
-            subject   = row.get("subject", "")
+            subject = row.get("subject", "")
             _log(f"  ↳ Reenviando para {recipient}…")
 
             # Reconstrói PDF bytes se disponível
@@ -176,7 +195,7 @@ def retry_pending(
 
             try:
                 send_email_with_retry(
-                    EmailMessage(
+                    _build_email_message(
                         to=[recipient],
                         subject=subject,
                         html_body=row.get("html_body", ""),
@@ -192,7 +211,7 @@ def retry_pending(
                     "attempts": (row.get("attempts") or 1) + 1,
                 }).eq("id", row_id).execute()
                 result.succeeded += 1
-                _log(f"    ✅ Reenviado.")
+                _log("    ✅ Reenviado.")
 
             except Exception as exc:
                 # Incrementa contador e marca como abandonado após 3 tentativas
@@ -218,7 +237,6 @@ def retry_pending(
 def get_pending_count(tenant_id: str) -> int:
     """Retorna o número de emails pendentes na dead-letter queue."""
     try:
-        from src.db.supabase_client import get_supabase_service
         rows = (
             get_supabase_service()
             .table("email_dead_letter")

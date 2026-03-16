@@ -17,8 +17,8 @@ Esquema da tabela (ver sql/migration_email_schedule.sql):
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
 
 from src.utils.timezone import BRT, now_utc_iso
@@ -30,13 +30,10 @@ DIAS_SEMANA_LABELS = [
 
 PERIODICIDADE_OPTS = ["semanal", "quinzenal", "mensal"]
 PERIODICIDADE_LABELS = {
-    "semanal":   "Semanal",
+    "semanal": "Semanal",
     "quinzenal": "Quinzenal (a cada 2 semanas)",
-    "mensal":    "Mensal (mesmo dia todo mês)",
+    "mensal": "Mensal (mesmo dia todo mês)",
 }
-
-# Brasília = UTC-3
-BRT = timezone(timedelta(hours=-3))
 
 
 @dataclass
@@ -69,11 +66,13 @@ class ScheduleConfig:
         if self.periodicidade == "mensal":
             # mesmo dia do mês
             day = max(1, min(28, self.dia_mes))
-            candidate = now.replace(day=day, hour=hh, minute=mm, second=0, microsecond=0)
+            candidate = now.replace(
+                day=day, hour=hh, minute=mm, second=0, microsecond=0)
             if candidate <= now:
                 # próximo mês
                 if candidate.month == 12:
-                    candidate = candidate.replace(year=candidate.year + 1, month=1)
+                    candidate = candidate.replace(
+                        year=candidate.year + 1, month=1)
                 else:
                     candidate = candidate.replace(month=candidate.month + 1)
             return candidate
@@ -84,7 +83,8 @@ class ScheduleConfig:
         target_py = (self.dia_semana - 1) % 7   # 0=Dom→6, 1=Seg→0 …
         days_ahead = (target_py - now.weekday()) % 7
         if days_ahead == 0:
-            candidate = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            candidate = now.replace(
+                hour=hh, minute=mm, second=0, microsecond=0)
             if candidate <= now:
                 days_ahead = 7
         if days_ahead > 0:
@@ -95,7 +95,6 @@ class ScheduleConfig:
             # Avança mais 7 dias se o último disparo foi há menos de 14 dias
             if self.last_dispatched_at:
                 try:
-                    from src.utils.timezone import UTC
                     last = datetime.fromisoformat(
                         self.last_dispatched_at.replace("Z", "+00:00")
                     ).astimezone(BRT)
@@ -109,13 +108,15 @@ class ScheduleConfig:
 
     def descricao_humana(self) -> str:
         if self.periodicidade == "mensal":
-            return f"Mensal — todo dia {self.dia_mes} às {self.hora_envio} (Brasília)"
+            return f"Mensal — todo dia {
+                self.dia_mes} às {
+                self.hora_envio} (Brasília)"
         dia = DIAS_SEMANA_LABELS[self.dia_semana % 7]
         per = "Semanal" if self.periodicidade == "semanal" else "Quinzenal"
         return f"{per} — toda {dia} às {self.hora_envio} (Brasília)"
 
 
-# ── CRUD via Supabase ─────────────────────────────────────────────────────────
+# ── CRUD via Supabase ───────────────────────────────────────────────────
 
 def _row_to_config(row: dict) -> ScheduleConfig:
     return ScheduleConfig(
@@ -158,28 +159,31 @@ def save_schedule_config(cfg: ScheduleConfig) -> bool:
     from src.db.supabase_client import get_supabase_service
     sb = get_supabase_service()
     payload: dict[str, Any] = {
-        "tenant_id":    cfg.tenant_id,
-        "ativo":        cfg.ativo,
-        "periodicidade":cfg.periodicidade,
-        "dia_semana":   cfg.dia_semana,
-        "dia_mes":      cfg.dia_mes,
-        "hora_envio":   cfg.hora_envio,
+        "tenant_id": cfg.tenant_id,
+        "ativo": cfg.ativo,
+        "periodicidade": cfg.periodicidade,
+        "dia_semana": cfg.dia_semana,
+        "dia_mes": cfg.dia_mes,
+        "hora_envio": cfg.hora_envio,
         "dias_travado": cfg.dias_travado,
-        "dias_parado":  cfg.dias_parado,
+        "dias_parado": cfg.dias_parado,
         "revisao_fixa": cfg.revisao_fixa,
-        "updated_at":   now_utc_iso(),
+        "updated_at": now_utc_iso(),
     }
     try:
         if cfg.id:
-            sb.table("email_schedule_config").update(payload).eq("id", cfg.id).execute()
+            sb.table("email_schedule_config").update(
+                payload).eq("id", cfg.id).execute()
         else:
             sb.table("email_schedule_config").insert(payload).execute()
         return True
-    except Exception as e:
+    except Exception:
         return False
 
 
-def should_dispatch_now(cfg: ScheduleConfig, tolerance_minutes: int = 10) -> bool:
+def should_dispatch_now(
+        cfg: ScheduleConfig,
+        tolerance_minutes: int = 10) -> bool:
     """Verifica se o agendamento deve disparar agora (±tolerance_minutes).
 
     Proteção anti-duplo-disparo: se `last_dispatched_at` estiver preenchido
@@ -208,7 +212,7 @@ def should_dispatch_now(cfg: ScheduleConfig, tolerance_minutes: int = 10) -> boo
     if diff_min > tolerance_minutes:
         return False
 
-    # ── Proteção anti-duplo-disparo ───────────────────────────────────────────
+    # ── Proteção anti-duplo-disparo ─────────────────────────────────────────
     if cfg.last_dispatched_at:
         try:
             last = datetime.fromisoformat(
@@ -246,5 +250,4 @@ def mark_dispatched(tenant_id: str) -> None:
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning(
-            "Falha ao registrar last_dispatched_at para tenant %s: %s", tenant_id, e
-        )
+            "Falha ao registrar last_dispatched_at para tenant %s: %s", tenant_id, e)

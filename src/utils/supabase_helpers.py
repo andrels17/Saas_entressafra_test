@@ -7,7 +7,7 @@ Fonte única de verdade para:
 from __future__ import annotations
 
 try:
-    from supabase import Client, create_client  # type: ignore
+    from supabase import Client  # type: ignore
 except ModuleNotFoundError as e:
     raise ModuleNotFoundError(
         "Biblioteca supabase não instalada. "

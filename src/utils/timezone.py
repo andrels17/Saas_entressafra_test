@@ -113,7 +113,8 @@ def semana_da_revisao(data_inicio_str: str | None, semanas_total: int) -> int:
         s = s.replace("Z", "+00:00")
         dt = datetime.fromisoformat(s)
         if dt.tzinfo is None:
-            # Data sem fuso: interpreta como meia-noite BRT (horário do usuário)
+            # Data sem fuso: interpreta como meia-noite BRT (horário do
+            # usuário)
             dt = dt.replace(tzinfo=BRT)
         inicio_brt = dt.astimezone(BRT)
         agora_brt = now_brt()

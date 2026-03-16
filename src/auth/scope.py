@@ -29,7 +29,11 @@ def _uniq(seq: Iterable[str | None]) -> list[str]:
     return out
 
 
-def get_user_scope(sb, tenant_id: str, user_id: str | None, role: str | None = None):
+def get_user_scope(
+        sb,
+        tenant_id: str,
+        user_id: str | None,
+        role: str | None = None):
     """Return (departamento_ids, grupo_ids).
 
     - Admin/Superadmin => (None, None)
@@ -136,7 +140,10 @@ def apply_scope_to_query(q, dept_field: str, dept_ids: list[str] | None):
     return q.in_(dept_field, dept_ids)
 
 
-def apply_group_scope_to_query(q, group_field: str, group_ids: list[str] | None):
+def apply_group_scope_to_query(
+        q,
+        group_field: str,
+        group_ids: list[str] | None):
     if not group_ids:
         return q
     if len(group_ids) == 1:

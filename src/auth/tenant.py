@@ -22,10 +22,11 @@ _ROLE_RANK: dict[str, int] = {
 }
 
 
-# ── Helpers privados ──────────────────────────────────────────────────────────
+# ── Helpers privados ────────────────────────────────────────────────────
 
 def _current_user_id() -> str:
-    return st.session_state.get("sb_user_id") or st.session_state.get("user_id") or ""
+    return st.session_state.get(
+        "sb_user_id") or st.session_state.get("user_id") or ""
 
 
 def _clear_tenant_selection() -> None:
@@ -34,7 +35,7 @@ def _clear_tenant_selection() -> None:
         st.session_state.pop(k, None)
 
 
-# ── Funções públicas ──────────────────────────────────────────────────────────
+# ── Funções públicas ────────────────────────────────────────────────────
 
 def refresh_current_role() -> str:
     """Revalida o role no banco para o usuário atual e tenant selecionado.
@@ -61,7 +62,8 @@ def refresh_current_role() -> str:
             .maybe_single()
             .execute()
         )
-        role = ((getattr(res, "data", None) or {}).get("role") or "viewer").lower()
+        role = ((getattr(res, "data", None) or {}).get(
+            "role") or "viewer").lower()
     except Exception:
         role = "viewer"
 
@@ -75,11 +77,11 @@ def load_user_tenants() -> list[dict]:
     sb = get_supabase_anon()
     sb.postgrest.auth(st.session_state["sb_access_token"])
 
-    rows = (
-        sb.table("tenant_users").select("tenant_id, role, tenants(nome)").execute().data
-    ) or []
+    rows = (sb.table("tenant_users").select(
+        "tenant_id, role, tenants(nome)").execute().data) or []
 
-    # Deduplicação: mesmo tenant pode ter múltiplos vínculos — mantém o mais permissivo
+    # Deduplicação: mesmo tenant pode ter múltiplos vínculos — mantém o mais
+    # permissivo
     by_tenant: dict[str, tuple[int, dict]] = {}
     for r in rows:
         tid = r.get("tenant_id")
@@ -92,7 +94,9 @@ def load_user_tenants() -> list[dict]:
             by_tenant[tid] = (rank, r)
 
     tenants = [v[1] for v in by_tenant.values()]
-    tenants.sort(key=lambda x: ((x.get("tenants") or {}).get("nome") or "").lower())
+    tenants.sort(
+        key=lambda x: (
+            (x.get("tenants") or {}).get("nome") or "").lower())
     return tenants
 
 
@@ -141,4 +145,3 @@ def ensure_tenant_selected() -> None:
 
     st.info("Selecione a empresa e clique em **Continuar**.")
     st.stop()
-

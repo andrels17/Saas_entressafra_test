@@ -18,33 +18,33 @@ from typing import TypedDict
 import pandas as pd
 
 
-# ── Tipos de retorno ──────────────────────────────────────────────────────────
+# ── Tipos de retorno ────────────────────────────────────────────────────
 
 class GroupKPI(TypedDict):
-    grupo_id:       str
-    eq_count:       int
-    svc_count:      int
-    done_steps:     int
+    grupo_id: str
+    eq_count: int
+    svc_count: int
+    done_steps: int
     expected_steps: int
-    backlog_steps:  int
-    pct:            int
+    backlog_steps: int
+    pct: int
 
 
 class GlobalKPI(TypedDict):
-    pct:            int
-    done_steps:     int
+    pct: int
+    done_steps: int
     expected_steps: int
-    backlog_steps:  int
+    backlog_steps: int
 
 
 class RiscoKPI(TypedDict):
-    risco_score:    float
-    pct_concluido:  float
-    pendentes:      int
-    travados:       int
-    em_andamento:   int
-    concluidos:     int
-    status_risco:   str   # "alto" | "medio" | "baixo"
+    risco_score: float
+    pct_concluido: float
+    pendentes: int
+    travados: int
+    em_andamento: int
+    concluidos: int
+    status_risco: str   # "alto" | "medio" | "baixo"
 
 
 _EMPTY_GLOBAL: GlobalKPI = {
@@ -52,7 +52,7 @@ _EMPTY_GLOBAL: GlobalKPI = {
 }
 
 
-# ── Funções puras ─────────────────────────────────────────────────────────────
+# ── Funções puras ───────────────────────────────────────────────────────
 
 def calc_expected(eq_count: int, svc_count: int) -> int:
     """Calcula o total esperado de etapas para um grupo."""
@@ -111,9 +111,9 @@ def calc_global_kpis(df: pd.DataFrame) -> GlobalKPI:
     if scope.empty:
         return _EMPTY_GLOBAL
 
-    done     = int(scope["done_steps"].sum())
+    done = int(scope["done_steps"].sum())
     expected = int(scope["expected_steps"].sum())
-    backlog  = int(scope["backlog_steps"].sum())
+    backlog = int(scope["backlog_steps"].sum())
     pct = int(round(done / expected * 100)) if expected > 0 else 0
     return GlobalKPI(
         pct=max(0, min(100, pct)),
@@ -123,15 +123,22 @@ def calc_global_kpis(df: pd.DataFrame) -> GlobalKPI:
     )
 
 
-def calc_dept_kpis(df: pd.DataFrame, group_to_dept: dict[str, str]) -> pd.DataFrame:
+def calc_dept_kpis(df: pd.DataFrame,
+                   group_to_dept: dict[str,
+                                       str]) -> pd.DataFrame:
     """Agrega KPIs de grupos por departamento.
 
     Retorna DataFrame com colunas:
       departamento_id, pct, done_steps, expected_steps, backlog_steps, grupos
     """
     empty = pd.DataFrame(
-        columns=["departamento_id", "pct", "done_steps", "expected_steps", "backlog_steps", "grupos"]
-    )
+        columns=[
+            "departamento_id",
+            "pct",
+            "done_steps",
+            "expected_steps",
+            "backlog_steps",
+            "grupos"])
     if df is None or df.empty:
         return empty
 
@@ -156,7 +163,8 @@ def calc_dept_kpis(df: pd.DataFrame, group_to_dept: dict[str, str]) -> pd.DataFr
         .astype(int)
         .clip(0, 100)
     )
-    return g[["departamento_id", "pct", "done_steps", "expected_steps", "backlog_steps", "grupos"]]
+    return g[["departamento_id", "pct", "done_steps",
+              "expected_steps", "backlog_steps", "grupos"]]
 
 
 def calc_risco(
@@ -214,15 +222,15 @@ def count_etapas(tarefa: dict) -> int:
     )
 
 
-# ── KPI de Prazo ──────────────────────────────────────────────────────────────
+# ── KPI de Prazo ────────────────────────────────────────────────────────
 
 class PrazoKPI(TypedDict):
-    dias_restantes:  int          # positivo = ainda no prazo, negativo = atrasado
-    dias_totais:     int          # duração total da revisão em dias
+    dias_restantes: int          # positivo = ainda no prazo, negativo = atrasado
+    dias_totais: int          # duração total da revisão em dias
     dias_decorridos: int          # dias desde o início
     pct_tempo_gasto: int          # % do tempo total já consumido (0–100)
-    status_prazo:    str          # "no_prazo" | "atencao" | "atrasado" | "sem_prazo"
-    data_fim:        str | None   # ISO date da data_fim, ou None
+    status_prazo: str          # "no_prazo" | "atencao" | "atrasado" | "sem_prazo"
+    data_fim: str | None   # ISO date da data_fim, ou None
 
 
 def calc_prazo(
@@ -261,7 +269,8 @@ def calc_prazo(
         return _empty
 
     def _parse(s: str) -> date | None:
-        # Tenta os formatos mais longos primeiro para não truncar acidentalmente
+        # Tenta os formatos mais longos primeiro para não truncar
+        # acidentalmente
         for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
             try:
                 return datetime.strptime(s, fmt).date()
@@ -273,8 +282,8 @@ def calc_prazo(
         except ValueError:
             return None
 
-    hoje      = date.today()
-    dt_fim    = _parse(data_fim)
+    hoje = date.today()
+    dt_fim = _parse(data_fim)
     dt_inicio = _parse(data_inicio) if data_inicio else None
 
     if dt_fim is None:
@@ -283,13 +292,13 @@ def calc_prazo(
     dias_restantes = (dt_fim - hoje).days
 
     if dt_inicio:
-        dias_totais     = max((dt_fim - dt_inicio).days, 1)
+        dias_totais = max((dt_fim - dt_inicio).days, 1)
         dias_decorridos = max((hoje - dt_inicio).days, 0)
-        pct_tempo       = min(int(round(dias_decorridos / dias_totais * 100)), 100)
+        pct_tempo = min(int(round(dias_decorridos / dias_totais * 100)), 100)
     else:
-        dias_totais     = 0
+        dias_totais = 0
         dias_decorridos = 0
-        pct_tempo       = 0
+        pct_tempo = 0
 
     if dias_restantes < 0:
         status = "atrasado"

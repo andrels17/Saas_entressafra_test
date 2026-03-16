@@ -79,13 +79,17 @@ def safe_numeric(series: pd.Series, fill: float = 0.0) -> pd.Series:
     return pd.to_numeric(series, errors="coerce").fillna(fill)
 
 
-def pct_series(done: pd.Series, total: pd.Series, scale: float = 100.0) -> pd.Series:
+def pct_series(done: pd.Series, total: pd.Series,
+               scale: float = 100.0) -> pd.Series:
     """Calcula percentual vetorizado, evitando divisão por zero."""
     total_safe = total.clip(lower=1)
     return (done / total_safe * scale).round(1).clip(0, scale)
 
 
-def compact_top(df: pd.DataFrame, cols: list[str], n: int = 12) -> pd.DataFrame:
+def compact_top(
+        df: pd.DataFrame,
+        cols: list[str],
+        n: int = 12) -> pd.DataFrame:
     """Retorna as primeiras `n` linhas apenas com as colunas existentes."""
     if df is None or df.empty:
         return pd.DataFrame(columns=cols)

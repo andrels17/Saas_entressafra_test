@@ -40,11 +40,16 @@ def _get_or_create_setor(svc, tenant_id: str, nome: str) -> str:
     ) or []
     if found:
         return found[0]["id"]
-    row = svc.table("setores").insert({"tenant_id": tenant_id, "nome": nome, "ativo": True}).execute().data
+    row = svc.table("setores").insert(
+        {"tenant_id": tenant_id, "nome": nome, "ativo": True}).execute().data
     return row[0]["id"]
 
 
-def _get_or_create_servico(svc, tenant_id: str, setor_id: str, nome: str) -> str:
+def _get_or_create_servico(
+        svc,
+        tenant_id: str,
+        setor_id: str,
+        nome: str) -> str:
     found = (
         svc.table("servicos")
         .select("id")
@@ -57,7 +62,8 @@ def _get_or_create_servico(svc, tenant_id: str, setor_id: str, nome: str) -> str
     ) or []
     if found:
         return found[0]["id"]
-    row = svc.table("servicos").insert({"tenant_id": tenant_id, "setor_id": setor_id, "nome": nome, "ativo": True}).execute().data
+    row = svc.table("servicos").insert(
+        {"tenant_id": tenant_id, "setor_id": setor_id, "nome": nome, "ativo": True}).execute().data
     return row[0]["id"]
 
 
@@ -73,11 +79,17 @@ def _get_or_create_grupo(svc, tenant_id: str, nome: str) -> str:
     ) or []
     if found:
         return found[0]["id"]
-    row = svc.table("equip_grupos").insert({"tenant_id": tenant_id, "nome": nome, "ativo": True}).execute().data
+    row = svc.table("equip_grupos").insert(
+        {"tenant_id": tenant_id, "nome": nome, "ativo": True}).execute().data
     return row[0]["id"]
 
 
-def _get_or_create_equipamento(svc, tenant_id: str, grupo_id: str, frota: str, modelo: str) -> str:
+def _get_or_create_equipamento(
+        svc,
+        tenant_id: str,
+        grupo_id: str,
+        frota: str,
+        modelo: str) -> str:
     found = (
         svc.table("equipamentos")
         .select("id")
@@ -89,7 +101,13 @@ def _get_or_create_equipamento(svc, tenant_id: str, grupo_id: str, frota: str, m
     ) or []
     if found:
         # ensure group/model/ativo updated for demo
-        svc.table("equipamentos").update({"grupo_id": grupo_id, "modelo": modelo, "ativo": True}).eq("id", found[0]["id"]).execute()
+        svc.table("equipamentos").update(
+            {
+                "grupo_id": grupo_id,
+                "modelo": modelo,
+                "ativo": True}).eq(
+            "id",
+            found[0]["id"]).execute()
         return found[0]["id"]
     row = svc.table("equipamentos").insert({
         "tenant_id": tenant_id,
@@ -112,7 +130,9 @@ def seed_demo_data(tenant_id: str) -> dict:
         sid = _get_or_create_setor(svc, tenant_id, setor)
         setor_ids[setor] = sid
         for nome in SERVICOS.get(setor, []):
-            servico_ids.append(_get_or_create_servico(svc, tenant_id, sid, nome))
+            servico_ids.append(
+                _get_or_create_servico(
+                    svc, tenant_id, sid, nome))
 
     # grupos + equipamentos
     grupo_ids = {}
@@ -121,7 +141,9 @@ def seed_demo_data(tenant_id: str) -> dict:
         gid = _get_or_create_grupo(svc, tenant_id, g)
         grupo_ids[g] = gid
         for frota, modelo in EQUIPAMENTOS.get(g, []):
-            equipamento_ids.append(_get_or_create_equipamento(svc, tenant_id, gid, frota, modelo))
+            equipamento_ids.append(
+                _get_or_create_equipamento(
+                    svc, tenant_id, gid, frota, modelo))
 
     # templates: vincula todos os serviços a todos os grupos (pode refinar depois)
     # evita duplicar via select-check
@@ -135,11 +157,12 @@ def seed_demo_data(tenant_id: str) -> dict:
             .data
         ) or []
         existing_ids = {r["servico_id"] for r in existing}
-        to_add = [{"tenant_id": tenant_id, "grupo_id": gid, "servico_id": sid} for sid in servico_ids if sid not in existing_ids]
+        to_add = [{"tenant_id": tenant_id, "grupo_id": gid, "servico_id": sid}
+                  for sid in servico_ids if sid not in existing_ids]
         if to_add:
             # batch insert
             for i in range(0, len(to_add), 500):
-                svc.table("grupo_servicos").insert(to_add[i:i+500]).execute()
+                svc.table("grupo_servicos").insert(to_add[i:i + 500]).execute()
 
     # revisão demo: fecha outras ativas e cria/garante uma ativa
     demo_title = "Revisão Demo"
@@ -155,11 +178,13 @@ def seed_demo_data(tenant_id: str) -> dict:
     ) or []
 
     # close any active to keep one active
-    svc.table("revisoes").update({"status": "fechada"}).eq("tenant_id", tenant_id).eq("status", "ativa").execute()
+    svc.table("revisoes").update({"status": "fechada"}).eq(
+        "tenant_id", tenant_id).eq("status", "ativa").execute()
 
     if existing_demo:
         rid = existing_demo[0]["id"]
-        svc.table("revisoes").update({"status": "ativa"}).eq("id", rid).execute()
+        svc.table("revisoes").update(
+            {"status": "ativa"}).eq("id", rid).execute()
     else:
         rid = svc.table("revisoes").insert({
             "tenant_id": tenant_id,

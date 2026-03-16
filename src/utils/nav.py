@@ -8,10 +8,15 @@ from __future__ import annotations
 
 import streamlit as st
 
-# ── Revisão atual ─────────────────────────────────────────────────────────────
+# ── Revisão atual ───────────────────────────────────────────────────────
 _REVISAO_KEY = "current_revisao_id"
-# Aliases legados para retrocompatibilidade de caches existentes (somente leitura)
-_REVISAO_ALIASES = ("matriz_revisao_id", "home_revisao_id", "dashboard_revisao_id", "revisao_id")
+# Aliases legados para retrocompatibilidade de caches existentes (somente
+# leitura)
+_REVISAO_ALIASES = (
+    "matriz_revisao_id",
+    "home_revisao_id",
+    "dashboard_revisao_id",
+    "revisao_id")
 
 
 def get_current_revisao() -> str | None:
@@ -28,7 +33,10 @@ def get_current_revisao() -> str | None:
     return None
 
 
-def set_current_revisao(revisao_id: str | None, titulo: str | None = None, semana: int | None = None) -> None:
+def set_current_revisao(
+        revisao_id: str | None,
+        titulo: str | None = None,
+        semana: int | None = None) -> None:
     """Persiste o revisao_id canônico e mantém aliases sincronizados.
 
     titulo e semana, quando fornecidos, são gravados no session_state
@@ -43,7 +51,7 @@ def set_current_revisao(revisao_id: str | None, titulo: str | None = None, seman
         st.session_state["_sidebar_rev_semana"] = semana
 
 
-# ── Navegação ─────────────────────────────────────────────────────────────────
+# ── Navegação ───────────────────────────────────────────────────────────
 
 def goto(page_name: str) -> None:
     """Navega para uma página e reexecuta o app.
@@ -59,4 +67,3 @@ def goto(page_name: str) -> None:
 def rerun_keep_menu() -> None:
     """Rerun preservando a página atual (alias de st.rerun para retrocompatibilidade)."""
     st.rerun()
-

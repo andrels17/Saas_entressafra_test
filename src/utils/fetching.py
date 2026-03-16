@@ -47,4 +47,3 @@ def fetch_all(
         start += page_size
 
     return rows
-

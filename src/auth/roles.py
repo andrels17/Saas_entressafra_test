@@ -17,13 +17,13 @@ from enum import Enum
 
 
 class Role(str, Enum):
-    USER       = "user"
-    GESTOR     = "gestor"
+    USER = "user"
+    GESTOR = "gestor"
     SUPERVISOR = "supervisor"   # diretor/supervisor — visão executiva cross-departamentos
-    ADMIN      = "admin"
+    ADMIN = "admin"
     SUPERADMIN = "superadmin"
 
-    # ── Conjuntos pré-calculados (frozenset para O(1) lookup) ─────────────────
+    # ── Conjuntos pré-calculados (frozenset para O(1) lookup) ───────────────
     @classmethod
     @property
     def ADMIN_ROLES(cls) -> frozenset[Role]:
@@ -39,14 +39,16 @@ class Role(str, Enum):
     @property
     def MANAGER_ROLES(cls) -> frozenset[Role]:
         """Roles com acesso a painéis de gestão."""
-        return frozenset({cls.GESTOR, cls.SUPERVISOR, cls.ADMIN, cls.SUPERADMIN})
+        return frozenset({cls.GESTOR, cls.SUPERVISOR,
+                         cls.ADMIN, cls.SUPERADMIN})
 
     @classmethod
     @property
     def ALL_ROLES(cls) -> frozenset[Role]:
-        return frozenset({cls.USER, cls.GESTOR, cls.SUPERVISOR, cls.ADMIN, cls.SUPERADMIN})
+        return frozenset(
+            {cls.USER, cls.GESTOR, cls.SUPERVISOR, cls.ADMIN, cls.SUPERADMIN})
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
+    # ── Helpers ─────────────────────────────────────────────────────────────
     @classmethod
     def is_admin(cls, role: str | None) -> bool:
         """Retorna True se o role tem privilégios de admin/superadmin."""

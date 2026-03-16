@@ -35,18 +35,19 @@ from typing import Tuple
 
 import streamlit as st
 
-MAX_ATTEMPTS    = 5
-WINDOW_SECONDS  = 300   # janela deslizante de 5 min
+MAX_ATTEMPTS = 5
+WINDOW_SECONDS = 300   # janela deslizante de 5 min
 LOCKOUT_SECONDS = 900   # 15 min de bloqueio
 
 
 @dataclass
 class _Bucket:
-    attempts: list[float] = field(default_factory=list)  # timestamps das falhas
+    attempts: list[float] = field(
+        default_factory=list)  # timestamps das falhas
     locked_until: float = 0.0
 
 
-@st.cache_resource
+@st.cache_resource()
 def _get_store() -> dict[str, _Bucket]:
     """Armazena buckets em cache_resource para sobreviver reruns."""
     return {}
@@ -112,6 +113,10 @@ def record_failure(key: str) -> int:
     """Registra falha de login. Retorna tentativas restantes."""
     now = time.time()
     b = _bucket(key)
+
+    if b.locked_until > now:
+        return 0
+
     _clean_window(b, now)
     b.attempts.append(now)
 
@@ -119,7 +124,9 @@ def record_failure(key: str) -> int:
     if remaining <= 0:
         b.locked_until = now + LOCKOUT_SECONDS
         b.attempts = []
-    return max(remaining, 0)
+        return 0
+
+    return remaining
 
 
 def record_success(key: str) -> None:

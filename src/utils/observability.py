@@ -25,14 +25,13 @@ from __future__ import annotations
 
 import logging
 import time
-import traceback
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, TypeVar
 
 import streamlit as st
 
-# ── Logger raiz do projeto ────────────────────────────────────────────────────
+# ── Logger raiz do projeto ──────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  [%(name)s]  %(message)s",
@@ -42,9 +41,10 @@ log = logging.getLogger("saas")
 
 T = TypeVar("T")
 
-# ── Sentry (opcional) ─────────────────────────────────────────────────────────
+# ── Sentry (opcional) ───────────────────────────────────────────────────
 # Para ativar: adicione SENTRY_DSN em st.secrets e instale sentry-sdk
 _sentry_ready = False
+
 
 def _init_sentry() -> bool:
     try:
@@ -79,18 +79,18 @@ def _maybe_capture_sentry(exc: Exception, context: dict) -> None:
         pass
 
 
-# ── Registro em memória (últimos 200 erros) ───────────────────────────────────
+# ── Registro em memória (últimos 200 erros) ─────────────────────────────
 @dataclass
 class ErrorRecord:
-    ts:        float
-    level:     str
-    context:   str
-    exc_type:  str
-    message:   str
+    ts: float
+    level: str
+    context: str
+    exc_type: str
+    message: str
     tenant_id: str | None = None
 
 
-@st.cache_resource
+@st.cache_resource()
 def _error_ring() -> deque:
     """Ring buffer de erros, compartilhado entre reruns da mesma instância."""
     return deque(maxlen=200)
@@ -110,7 +110,7 @@ def get_error_count_since(seconds: int = 300) -> int:
     return sum(1 for e in _error_ring() if e.ts >= cutoff)
 
 
-# ── Função principal de log ───────────────────────────────────────────────────
+# ── Função principal de log ─────────────────────────────────────────────
 
 def log_error(
     exc: Exception,
@@ -212,7 +212,12 @@ def capture(
     try:
         return fn()
     except Exception as exc:
-        log_error(exc, context=context, table=table, tenant_id=tenant_id, level=level)
+        log_error(
+            exc,
+            context=context,
+            table=table,
+            tenant_id=tenant_id,
+            level=level)
         return default
 
 
@@ -234,12 +239,12 @@ def safe_query(context: str, table: str | None = None, default: Any = None):
                 log_error(exc, context=context, table=table)
                 return default if default is not None else []
         wrapper.__name__ = fn.__name__
-        wrapper.__doc__  = fn.__doc__
+        wrapper.__doc__ = fn.__doc__
         return wrapper
     return decorator
 
 
-# ── Widget de diagnóstico para admins ─────────────────────────────────────────
+# ── Widget de diagnóstico para admins ───────────────────────────────────
 
 def render_error_diagnostics() -> None:
     """Renderiza painel de diagnóstico de erros recentes (apenas para admins).
@@ -272,4 +277,6 @@ def render_error_diagnostics() -> None:
             "mensagem": e.message[:80],
         } for e in recent])
         st.dataframe(df, use_container_width=True, hide_index=True)
-        st.caption(f"Mostrando os {len(recent)} erros mais recentes desta instância.")
+        st.caption(
+            f"Mostrando os {
+                len(recent)} erros mais recentes desta instância.")

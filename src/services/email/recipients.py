@@ -18,12 +18,12 @@ from typing import Any
 
 from src.db.supabase_client import get_supabase_service
 
-TIPO_GESTOR     = "gestor"
-TIPO_EXECUTIVO  = "executivo"
+TIPO_GESTOR = "gestor"
+TIPO_EXECUTIVO = "executivo"
 ROLE_DEFAULT: dict[str, str] = {
-    "gestor":     TIPO_GESTOR,
+    "gestor": TIPO_GESTOR,
     "supervisor": TIPO_EXECUTIVO,
-    "admin":      TIPO_EXECUTIVO,
+    "admin": TIPO_EXECUTIVO,
     "superadmin": TIPO_EXECUTIVO,
 }
 
@@ -53,12 +53,20 @@ def _fetch_user_emails(svc, user_ids: set[str]) -> dict[str, str]:
         page = 1
         while True:
             resp = svc.auth.admin.list_users(page=page, per_page=1000)
-            users_page = resp if isinstance(resp, list) else getattr(resp, "users", [])
+            users_page = resp if isinstance(
+                resp, list) else getattr(
+                resp, "users", [])
             if not users_page:
                 break
             for u in users_page:
-                uid   = getattr(u, "id", None) or (u.get("id") if isinstance(u, dict) else None)
-                email = getattr(u, "email", None) or (u.get("email") if isinstance(u, dict) else None)
+                uid = getattr(
+                    u, "id", None) or (
+                    u.get("id") if isinstance(
+                        u, dict) else None)
+                email = getattr(
+                    u, "email", None) or (
+                    u.get("email") if isinstance(
+                        u, dict) else None)
                 if uid and email and uid in user_ids:
                     out[uid] = email
             if len(users_page) < 1000:
@@ -99,7 +107,7 @@ def _fetch_email_prefs(svc, tenant_id: str) -> dict[str, str]:
         ) or []
         out = {}
         for r in rows:
-            uid  = r.get("user_id")
+            uid = r.get("user_id")
             tipo = r.get("tipo_relatorio") or ""
             ativo = r.get("ativo", True)
             if uid:
@@ -190,7 +198,7 @@ def get_recipient_groups(tenant_id: str) -> list[RecipientGroup]:
 
     all_uids = {uid for uids in dep_to_users.values() for uid in uids}
     profiles = _fetch_profiles(svc, list(all_uids))
-    emails   = _fetch_user_emails(svc, all_uids)
+    emails = _fetch_user_emails(svc, all_uids)
 
     groups: list[RecipientGroup] = []
     for dep_id, dep_nome in dep_map.items():
@@ -234,7 +242,7 @@ def get_executive_recipients(tenant_id: str) -> list[Recipient]:
 
     exec_uids: set[str] = set()
     for r in tu_rows:
-        uid  = r.get("user_id", "")
+        uid = r.get("user_id", "")
         role = r.get("role", "")
         if _resolve_tipo(uid, role, prefs) == TIPO_EXECUTIVO:
             exec_uids.add(uid)
@@ -243,7 +251,7 @@ def get_executive_recipients(tenant_id: str) -> list[Recipient]:
         return []
 
     profiles = _fetch_profiles(svc, list(exec_uids))
-    emails   = _fetch_user_emails(svc, exec_uids)
+    emails = _fetch_user_emails(svc, exec_uids)
 
     return [
         Recipient(
@@ -260,17 +268,21 @@ def get_admin_recipients(tenant_id: str) -> list[Recipient]:
     return get_executive_recipients(tenant_id)
 
 
-def save_email_pref(tenant_id: str, user_id: str, tipo_relatorio: str, ativo: bool = True) -> bool:
+def save_email_pref(
+        tenant_id: str,
+        user_id: str,
+        tipo_relatorio: str,
+        ativo: bool = True) -> bool:
     """Salva override manual de tipo de relatório para um usuário.
     Se tipo_relatorio == 'nenhum', salva com ativo=False automaticamente.
     """
     svc = get_supabase_service()
     try:
         svc.table("tenant_email_prefs").upsert({
-            "tenant_id":      tenant_id,
-            "user_id":        user_id,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
             "tipo_relatorio": tipo_relatorio,
-            "ativo":          False if tipo_relatorio == "nenhum" else ativo,
+            "ativo": False if tipo_relatorio == "nenhum" else ativo,
         }, on_conflict="tenant_id,user_id").execute()
         return True
     except Exception:
@@ -297,22 +309,22 @@ def get_all_users_with_prefs(tenant_id: str) -> list[dict]:
 
     all_uids = {r["user_id"] for r in tu_rows}
     profiles = _fetch_profiles(svc, list(all_uids))
-    emails   = _fetch_user_emails(svc, all_uids)
+    emails = _fetch_user_emails(svc, all_uids)
 
     result = []
     for r in tu_rows:
-        uid   = r.get("user_id", "")
-        role  = r.get("role", "")
+        uid = r.get("user_id", "")
+        role = r.get("role", "")
         email = emails.get(uid, "")
         if not email:
             continue
         result.append({
-            "user_id":        uid,
-            "nome":           _nome_from(uid, profiles, email),
-            "email":          email,
-            "role":           role,
+            "user_id": uid,
+            "nome": _nome_from(uid, profiles, email),
+            "email": email,
+            "role": role,
             "tipo_relatorio": _resolve_tipo(uid, role, prefs),
-            "override":       uid in prefs,
+            "override": uid in prefs,
         })
     return sorted(result, key=lambda x: (x["role"], x["nome"]))
 

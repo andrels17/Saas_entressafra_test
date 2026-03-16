@@ -18,7 +18,8 @@ from src.utils.supabase_helpers import sb_for_user
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def group_kpis(tenant_id: str, revisao_id: str, ver: str = "0") -> dict[str, dict]:
+def group_kpis(tenant_id: str, revisao_id: str,
+               ver: str = "0") -> dict[str, dict]:
     """Return dict keyed by grupo_id with eq_count, svc_count, pct.
 
     Matches the logic used by the Matriz selection cards.
@@ -87,7 +88,7 @@ def group_kpis(tenant_id: str, revisao_id: str, ver: str = "0") -> dict[str, dic
                 eq_to_gid[eid] = gid
 
         for i in range(0, len(all_eq_ids), CHUNK):
-            chunk = all_eq_ids[i : i + CHUNK]
+            chunk = all_eq_ids[i: i + CHUNK]
             trows = (
                 sb.table("tarefas_servico")
                 .select("equipamento_id,etapa_d,etapa_r,etapa_m")
@@ -115,7 +116,12 @@ def group_kpis(tenant_id: str, revisao_id: str, ver: str = "0") -> dict[str, dic
         svc = len(grp_to_services.get(gid) or set())
         expected = max(eqc * svc * 3, 1)
         done = int(done_steps_by_gid.get(gid, 0))
-        pct = int(round((done / expected) * 100)) if (eqc > 0 and svc > 0) else 0
+        pct = int(
+            round(
+                (done /
+                 expected) *
+                100)) if (
+            eqc > 0 and svc > 0) else 0
         out[gid] = {
             "eq_count": eqc,
             "svc_count": svc,

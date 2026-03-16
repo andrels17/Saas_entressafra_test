@@ -18,19 +18,19 @@ import streamlit as st
 # ── Mapa de status → (label, cor) ────────────────────────────────────────────
 _STATUS_CONFIG: dict[str, tuple[str, str]] = {
     # Tarefas
-    "pendente":     ("Pendente",     "orange"),
+    "pendente": ("Pendente", "orange"),
     "em_andamento": ("Em andamento", "blue"),
-    "concluido":    ("Concluído",    "green"),
-    "travado":      ("Travado",      "red"),
-    "nao_aplica":   ("Não aplica",   "gray"),
+    "concluido": ("Concluído", "green"),
+    "travado": ("Travado", "red"),
+    "nao_aplica": ("Não aplica", "gray"),
     # Revisões
-    "ativa":        ("Ativa",        "green"),
-    "fechada":      ("Fechada",      "gray"),
-    "arquivada":    ("Arquivada",    "orange"),
+    "ativa": ("Ativa", "green"),
+    "fechada": ("Fechada", "gray"),
+    "arquivada": ("Arquivada", "orange"),
     # Risco
-    "alto":         ("Alto",         "red"),
-    "medio":        ("Médio",        "orange"),
-    "baixo":        ("Baixo",        "green"),
+    "alto": ("Alto", "red"),
+    "medio": ("Médio", "orange"),
+    "baixo": ("Baixo", "green"),
 }
 
 
@@ -71,7 +71,8 @@ def df_to_xlsx(df: pd.DataFrame, sheet_name: str = "Dados") -> bytes:
                 (len(str(cell.value)) if cell.value is not None else 0)
                 for cell in col_cells
             )
-            ws.column_dimensions[col_cells[0].column_letter].width = min(max_len + 4, 60)
+            ws.column_dimensions[col_cells[0].column_letter].width = min(
+                max_len + 4, 60)
         ws.freeze_panes = "A2"
 
     return buf.getvalue()

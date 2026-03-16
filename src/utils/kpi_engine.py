@@ -30,10 +30,10 @@ log = logging.getLogger("saas.kpi_engine")
 
 # Re-exporta funções de domínio para compatibilidade retroativa
 global_kpis = calc_global_kpis
-dept_kpis   = calc_dept_kpis
+dept_kpis = calc_dept_kpis
 
 # TTLs diferenciados por status da revisão
-_TTL_ACTIVE    = 60    # revisão em andamento: dados mudam frequentemente
+_TTL_ACTIVE = 60    # revisão em andamento: dados mudam frequentemente
 _TTL_CONCLUDED = 3600  # revisão concluída: dados estáticos, cache longo
 
 
@@ -50,7 +50,10 @@ def _get_revisao_status(tenant_id: str, revisao_id: str) -> str:
         )
         return (rows[0].get("status") or "ativa") if rows else "ativa"
     except Exception as exc:
-        log_error(exc, context="kpi_engine._get_revisao_status", table="revisoes")
+        log_error(
+            exc,
+            context="kpi_engine._get_revisao_status",
+            table="revisoes")
         return "ativa"
 
 
@@ -68,7 +71,8 @@ def invalidate_kpi_cache() -> None:
         get_group_kpis.clear()
     except Exception:
         pass
-    # Incrementa o 'ver' na sessão — força nova chave de cache mesmo sem clear()
+    # Incrementa o 'ver' na sessão — força nova chave de cache mesmo sem
+    # clear()
     ver = st.session_state.get("_kpi_ver", 0)
     st.session_state["_kpi_ver"] = ver + 1
     log.info("Cache de KPIs invalidado (ver=%d)", ver + 1)
@@ -85,7 +89,11 @@ def _fetch_mv(tenant_id: str, revisao_id: str) -> list[dict]:
 def _mv_to_df(mv_rows: list[dict]) -> pd.DataFrame:
     df = pd.DataFrame(mv_rows)
     for col in ["eq_count", "svc_count", "done_steps"]:
-        df[col] = pd.to_numeric(df.get(col, 0), errors="coerce").fillna(0).astype(int)
+        df[col] = pd.to_numeric(
+            df.get(
+                col,
+                0),
+            errors="coerce").fillna(0).astype(int)
 
     df["expected_raw"] = (df["eq_count"] * df["svc_count"] * 3).astype(int)
     bad = (df["expected_raw"] > 0) & (df["done_steps"] > df["expected_raw"])
@@ -97,27 +105,52 @@ def _mv_to_df(mv_rows: list[dict]) -> pd.DataFrame:
         return pd.DataFrame()
 
     df["expected_steps"] = df["expected_raw"].clip(lower=1).astype(int)
-    df["backlog_steps"] = (df["expected_steps"] - df["done_steps"]).clip(lower=0).astype(int)
+    df["backlog_steps"] = (
+        df["expected_steps"] -
+        df["done_steps"]).clip(
+        lower=0).astype(int)
     df["pct"] = 0
-    mask = (df["eq_count"] > 0) & (df["svc_count"] > 0) & (df["expected_steps"] > 0)
-    df.loc[mask, "pct"] = (
-        (df.loc[mask, "done_steps"] / df.loc[mask, "expected_steps"] * 100).round().astype(int)
-    )
+    mask = (
+        df["eq_count"] > 0) & (
+        df["svc_count"] > 0) & (
+            df["expected_steps"] > 0)
+    df.loc[mask, "pct"] = ((df.loc[mask, "done_steps"] /
+                            df.loc[mask, "expected_steps"] *
+                            100).round().astype(int))
     df["pct"] = df["pct"].clip(0, 100).astype(int)
-    return df[["grupo_id", "eq_count", "svc_count", "done_steps", "expected_steps", "backlog_steps", "pct"]]
+    return df[["grupo_id", "eq_count", "svc_count",
+               "done_steps", "expected_steps", "backlog_steps", "pct"]]
 
 
 def _compute_from_raw(tenant_id: str, revisao_id: str) -> pd.DataFrame:
     sb = sb_for_user()
-    EMPTY = pd.DataFrame(columns=["grupo_id","eq_count","svc_count","done_steps","expected_steps","backlog_steps","pct"])
+    EMPTY = pd.DataFrame(
+        columns=[
+            "grupo_id",
+            "eq_count",
+            "svc_count",
+            "done_steps",
+            "expected_steps",
+            "backlog_steps",
+            "pct"])
 
-    grupos = safe_select(sb, "equip_grupos", "id", tenant_id__eq=tenant_id, ativo__eq=True)
+    grupos = safe_select(
+        sb,
+        "equip_grupos",
+        "id",
+        tenant_id__eq=tenant_id,
+        ativo__eq=True)
     gids = [g["id"] for g in grupos if g.get("id")]
     if not gids:
         return EMPTY
 
-    eq_rows = safe_select(sb, "equipamentos", "id,grupo_id",
-                          tenant_id__eq=tenant_id, ativo__eq=True, grupo_id__in=gids)
+    eq_rows = safe_select(
+        sb,
+        "equipamentos",
+        "id,grupo_id",
+        tenant_id__eq=tenant_id,
+        ativo__eq=True,
+        grupo_id__in=gids)
     grp_to_eq: dict[str, list[str]] = defaultdict(list)
     eq_to_gid: dict[str, str] = {}
     for r in eq_rows:

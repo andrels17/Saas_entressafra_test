@@ -24,18 +24,18 @@ import re
 
 log = logging.getLogger("saas.config")
 
-# ── Definição das secrets ─────────────────────────────────────────────────────
+# ── Definição das secrets ───────────────────────────────────────────────
 
 _REQUIRED: list[tuple[str, str]] = [
-    ("SUPABASE_URL",              "URL do projeto Supabase (ex: https://xyz.supabase.co)"),
-    ("SUPABASE_ANON_KEY",         "Chave anon do Supabase (Settings → API → anon key)"),
+    ("SUPABASE_URL", "URL do projeto Supabase (ex: https://xyz.supabase.co)"),
+    ("SUPABASE_ANON_KEY", "Chave anon do Supabase (Settings → API → anon key)"),
     ("SUPABASE_SERVICE_ROLE_KEY", "Chave service_role do Supabase (Settings → API → service_role)"),
 ]
 
 _RECOMMENDED: list[tuple[str, str]] = [
-    ("SMTP_HOST",     "Servidor SMTP para envio de e-mails"),
-    ("SMTP_PORT",     "Porta SMTP (ex: 587)"),
-    ("SMTP_USER",     "Usuário SMTP"),
+    ("SMTP_HOST", "Servidor SMTP para envio de e-mails"),
+    ("SMTP_PORT", "Porta SMTP (ex: 587)"),
+    ("SMTP_USER", "Usuário SMTP"),
     ("SMTP_PASSWORD", "Senha SMTP"),
 ]
 
@@ -52,7 +52,7 @@ _VALIDATORS: dict[str, tuple[str, str]] = {
 }
 
 
-# ── Resultado da validação ────────────────────────────────────────────────────
+# ── Resultado da validação ──────────────────────────────────────────────
 
 class ConfigError(Exception):
     """Lançada quando uma secret obrigatória está ausente ou inválida."""
@@ -65,6 +65,7 @@ def _get_secrets():
         return st.secrets
     except Exception:
         import os
+
         class _Env:
             def get(self, k, d=None): return os.environ.get(k, d)
             def __getitem__(self, k): return os.environ[k]
@@ -79,7 +80,7 @@ def validate_config() -> tuple[list[str], list[str]]:
         warnings: Lista de problemas não-críticos (secrets recomendadas ausentes).
     """
     secrets = _get_secrets()
-    errors:   list[str] = []
+    errors: list[str] = []
     warnings: list[str] = []
 
     # Obrigatórias
@@ -108,12 +109,14 @@ def validate_config() -> tuple[list[str], list[str]]:
     elif smtp_missing and not smtp_present:
         warnings.append(
             "⚠️ Configuração SMTP não encontrada. "
-            "Adicione SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD para habilitar e-mails."
-        )
+            "Adicione SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD para habilitar e-mails.")
 
     # Log resumo
     if errors:
-        log.error("Configuração inválida: %d erro(s), %d aviso(s)", len(errors), len(warnings))
+        log.error(
+            "Configuração inválida: %d erro(s), %d aviso(s)",
+            len(errors),
+            len(warnings))
     elif warnings:
         log.warning("Configuração com avisos: %d aviso(s)", len(warnings))
     else:
@@ -144,13 +147,11 @@ def validate_config_or_stop() -> None:
         st.markdown(
             "O sistema não pode iniciar porque as seguintes configurações estão ausentes "
             "ou inválidas. Adicione-as ao arquivo `.streamlit/secrets.toml` ou nas "
-            "variáveis de ambiente do servidor."
-        )
+            "variáveis de ambiente do servidor.")
         for err in errors:
             st.markdown(err)
         st.markdown(
             "---\n"
             "📖 Consulte a documentação de configuração no `README.md` do projeto.\n\n"
-            "Após corrigir, reinicie o aplicativo."
-        )
+            "Após corrigir, reinicie o aplicativo.")
         st.stop()
