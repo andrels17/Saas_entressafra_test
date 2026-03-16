@@ -1,6 +1,8 @@
 import streamlit as st
 from src.db.supabase_client import get_supabase_anon_fresh
 from src.auth.session import set_auth_session, reset_for_login_attempt
+from src.auth.rate_limit import get_rate_limit_key, check_rate_limit, record_failure, record_success
+from src.auth.audit import audit_login_success, audit_login_failure, audit_login_blocked, audit_password_reset
 from src.ui.core.error_messages import show_error
 from src.utils import nav
 
@@ -40,7 +42,6 @@ def render_login():
             margin-bottom: 1.6rem; line-height: 1.5;
         }
         .login-footer { text-align: center; color: #374151; font-size: 0.72rem; margin-top: 1.4rem; }
-        /* Remove borda padrão do form do Streamlit */
         [data-testid="stForm"] {
             border: none !important;
             padding: 0 !important;
@@ -69,8 +70,6 @@ def render_login():
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-        # st.form garante que email+senha são lidos JUNTOS no submit,
-        # independente de colunas ou reruns parciais.
         with st.form("login_form", clear_on_submit=False):
             st.markdown("**E-mail**")
             email = st.text_input(
@@ -89,7 +88,6 @@ def render_login():
                 type="primary",
             )
 
-        # Recuperação de senha (fora do form)
         col_a, col_b = st.columns(2)
         with col_a:
             forgot = st.button("Esqueci minha senha", use_container_width=True)
@@ -115,8 +113,15 @@ def render_login():
                 st.warning("⚠️ Informe seu e-mail e senha para continuar.")
                 return
 
+            # ── Rate limiting: bloqueia brute-force por e-mail ────────────
+            rl_key = get_rate_limit_key(email_norm)
+            allowed, rl_msg, wait_secs = check_rate_limit(rl_key)
+            if not allowed:
+                audit_login_blocked(email_norm, wait_secs)
+                st.error(f"🔒 {rl_msg}")
+                return
+
             sb = get_supabase_anon_fresh()
-            # Melhor esforço: garante que não exista sessão “presa” no client/server
             try:
                 sb.auth.sign_out()
             except Exception:
@@ -132,19 +137,30 @@ def render_login():
                         res.session.refresh_token,
                         user_id,
                     )
-                    
+
+                    # Login OK: limpa contador de falhas e registra auditoria
+                    record_success(rl_key)
+                    audit_login_success(email_norm, user_id)
+
                     # Evita herdar tenant/role/menu de sessão anterior
-                    for k in ("current_tenant_id","current_role","_tenant_user_id","__nav_to","__current_page","__menu","menu"):
+                    for k in ("current_tenant_id", "current_role", "_tenant_user_id",
+                              "__nav_to", "__current_page", "__menu", "menu"):
                         st.session_state.pop(k, None)
                     st.session_state["_identity_user_id"] = user_id
                     st.success("✅ Login realizado!")
-                    # IMPORTANTE: não forçamos reload completo aqui.
-                    # Um reload cria uma nova sessão no servidor e perderíamos os
-                    # tokens armazenados no session_state, voltando para a tela de login.
-                    # O reload total é usado APENAS no logout.
                     nav.goto("Início")
 
                 except Exception as e:
+                    # Falha: incrementa contador e avisa quantas tentativas restam
+                    remaining = record_failure(rl_key)
+                    audit_login_failure(email_norm)
+                    if remaining > 0:
+                        st.warning(
+                            f"⚠️ Credenciais inválidas. "
+                            f"Você tem mais {remaining} tentativa(s) antes do bloqueio temporário."
+                        )
+                    else:
+                        st.error("🔒 Conta bloqueada temporariamente por excesso de tentativas.")
                     show_error(e)
 
         # ── Recuperação de senha ────────────────────────────────────────────
@@ -156,6 +172,7 @@ def render_login():
                 sb = get_supabase_anon_fresh()
                 try:
                     sb.auth.reset_password_for_email(email_norm)
+                    audit_password_reset(email_norm)
                     st.success("📧 Se o e-mail estiver cadastrado, enviaremos um link.")
                 except Exception as e:
                     st.error(f"Erro: `{repr(e)}`")

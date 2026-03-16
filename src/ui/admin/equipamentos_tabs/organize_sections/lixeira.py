@@ -83,8 +83,17 @@ def render_lixeira_section(sb, tenant_id: str):
                 confirm = st.checkbox("Confirmo apagar definitivamente", value=False, key="eq_trash_hard_confirm")
                 if st.button("Apagar definitivamente", use_container_width=True, disabled=(not confirm or len(sel_ids) == 0), key="eq_trash_hard"):
                     try:
+                        # Captura frotas antes de deletar para o log
+                        frotas = {r["id"]: r.get("frota", r["id"]) for r in rows if r["id"] in sel_ids}
                         sb.table("equipamentos").delete().eq("tenant_id", tenant_id).in_("id", sel_ids).execute()
                         _audit(sb, tenant_id, "hard_delete", {"ids": sel_ids})
+                        # Registra também no audit log centralizado
+                        try:
+                            from src.auth.audit import audit_equipment_deleted
+                            for eid in sel_ids:
+                                audit_equipment_deleted(eid, frotas.get(eid, eid))
+                        except Exception:
+                            pass
                         st.success(f"Apagados: {len(sel_ids)}")
                         _rerun()
                     except Exception as e:

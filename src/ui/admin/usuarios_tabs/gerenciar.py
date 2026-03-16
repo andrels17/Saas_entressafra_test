@@ -1,6 +1,7 @@
 """Tab 2 — Gerenciar usuários: role, escopo, senha, remoção."""
 import streamlit as st
 from postgrest.exceptions import APIError
+from src.auth.audit import audit_user_role_changed, audit_user_deleted
 
 ROLES = ["admin", "supervisor", "gestor", "executor", "viewer"]
 ROLE_ICONS = {"admin": "🔴", "supervisor": "🟣", "gestor": "🟠", "executor": "🟡", "viewer": "⚪"}
@@ -211,6 +212,8 @@ def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn):
                     svc.table("tenant_users").upsert(
                         {"tenant_id": tenant_id, "user_id": target_user_id, "role": new_role}
                     ).execute()
+                    if new_role != cur_role:
+                        audit_user_role_changed(target_user_id, cur_role, new_role)
                     st.success("✅ Perfil atualizado!")
                     rerun_fn()
                 except Exception as e:
@@ -331,6 +334,7 @@ def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn):
                 except Exception:
                     pass
                 _clear_user_scope(svc, tenant_id, target_user_id)
+                audit_user_deleted(target_user_id, cur_nome or target_user_id)
                 st.success("✅ Vínculo removido.")
                 rerun_fn()
             except Exception as e:
