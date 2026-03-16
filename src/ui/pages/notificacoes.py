@@ -12,6 +12,7 @@ Funcionalidades:
 from __future__ import annotations
 
 import io
+import logging
 from datetime import datetime
 
 import pandas as pd
@@ -26,7 +27,19 @@ from src.utils.supabase_helpers import (
 from src.utils.nav import get_current_revisao
 
 
+log = logging.getLogger(__name__)
+
+
 # ── helpers ─────────────────────────────────────────────────────────────
+
+
+def _with_fallback(action, default, *, context: str):
+    try:
+        return action()
+    except Exception as exc:  # consultas/integrações externas variam por ambiente
+        log.warning("%s: %s", context, exc)
+        return default
+
 
 def _risk_color(pct: int) -> str:
     if pct >= 80:
@@ -40,8 +53,8 @@ def _risk_color(pct: int) -> str:
 def _load_data(_tid: str, _rev_id: str, _ver: str = "0") -> dict:
     """Carrega todos os dados necessários para os alertas em uma só query."""
     sb = sb_for_user()
-    try:
-        tarefas = (
+    tarefas = _with_fallback(
+        lambda: (
             sb.table("tarefas_servico")
             .select(
                 "id,equipamento_id,servico_id,status,semana,"
@@ -55,22 +68,24 @@ def _load_data(_tid: str, _rev_id: str, _ver: str = "0") -> dict:
             .eq("revisao_id", _rev_id)
             .execute()
             .data
-        ) or []
-    except Exception:
-        tarefas = []
+        ) or [],
+        [],
+        context=f"Falha ao carregar tarefas de notificações da revisão {_rev_id}",
+    )
 
-    try:
-        revisao = (
+    revisao_rows = _with_fallback(
+        lambda: (
             sb.table("revisoes")
             .select("id,titulo,data_inicio,semanas_total,status")
             .eq("id", _rev_id)
             .limit(1)
             .execute()
             .data
-        )
-        revisao = revisao[0] if revisao else {}
-    except Exception:
-        revisao = {}
+        ),
+        [],
+        context=f"Falha ao carregar revisão {_rev_id} nas notificações",
+    )
+    revisao = revisao_rows[0] if revisao_rows else {}
 
     return {"tarefas": tarefas, "revisao": revisao}
 
@@ -83,7 +98,8 @@ def _semana_atual(data_inicio_str: str | None, semanas_total: int) -> int:
         agora = pd.Timestamp.utcnow()
         semana = max(1, int((agora - inicio).days // 7) + 1)
         return min(semana, semanas_total or semana)
-    except Exception:
+    except (TypeError, ValueError):
+        log.warning("Data de início inválida para cálculo de semana: %s", data_inicio_str)
         return 1
 
 
@@ -93,7 +109,8 @@ def _dias_desde(ts_str: str | None) -> int | None:
     try:
         ts = pd.to_datetime(ts_str, utc=True)
         return int((pd.Timestamp.utcnow() - ts).total_seconds() // 86400)
-    except Exception:
+    except (TypeError, ValueError):
+        log.warning("Timestamp inválido em notificações: %s", ts_str)
         return None
 
 
@@ -235,7 +252,8 @@ def _build_pdf_alertas(alertas: dict, revisao: dict) -> bytes:
                                         Table, TableStyle)
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.enums import TA_RIGHT
-    except Exception:
+    except ImportError:
+        log.info("ReportLab não disponível para exportação de alertas em PDF.")
         return b""
 
     sty = getSampleStyleSheet()
@@ -913,7 +931,7 @@ def _fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
         try:
             proximo = cfg.proximo_disparo_brt().strftime("%d/%m/%Y às %H:%M")
             st.info(f"Próximo disparo: **{proximo}** (Brasília)")
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             st.caption("Configure abaixo para ver o próximo disparo.")
 
     st.divider()
@@ -978,7 +996,7 @@ def _fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
     try:
         hh, mm = hora_envio.split(":")
         assert 0 <= int(hh) <= 23 and 0 <= int(mm) <= 59
-    except Exception:
+    except (AssertionError, TypeError, ValueError):
         st.error("Formato de horário inválido. Use HH:MM (ex: 07:00).")
         hora_valida = False
 
@@ -1015,8 +1033,8 @@ def _fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
                 prox = preview_cfg.proximo_disparo_brt().strftime("%d/%m/%Y às %H:%M")
                 st.caption(f"**Prévia:** {preview_cfg.descricao_humana()}")
                 st.caption(f"Próximo disparo: {prox} (Brasília)")
-            except Exception:
-                pass
+            except (AttributeError, TypeError, ValueError):
+                log.warning("Não foi possível gerar a prévia do próximo disparo.")
 
     with st.expander("📋 Como configurar o scheduler", expanded=False):
         st.markdown(f"""

@@ -12,6 +12,7 @@ Melhorias v2:
 """
 from __future__ import annotations
 
+import logging
 import time
 from datetime import date, datetime, timezone
 
@@ -43,6 +44,24 @@ from src.utils.supabase_helpers import (
 from src.utils.timezone import now_brt as _now_brt
 from src.utils.timezone import now_utc as _now_utc
 from src.utils.weeks import week_from_revisao as _week_from_revisao
+
+
+log = logging.getLogger(__name__)
+
+
+def _clear_data_cache() -> None:
+    try:
+        st.cache_data.clear()
+    except Exception as exc:
+        log.warning("Falha ao limpar cache da matriz: %s", exc)
+
+
+def _rerun_preserving_menu() -> None:
+    try:
+        nav.rerun_keep_menu()
+    except Exception as exc:
+        log.info("Fallback para st.rerun na matriz: %s", exc)
+        st.rerun()
 
 
 def render_matriz():
@@ -174,10 +193,7 @@ def render_matriz():
                     "Recarregar",
                     key="mtz_reload",
                         use_container_width=True):
-                    try:
-                        st.cache_data.clear()
-                    except Exception:
-                        pass
+                    _clear_data_cache()
                     st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
@@ -316,11 +332,8 @@ def render_matriz():
         if _last_rendered_grupo != grupo_id:
             try:
                 _load_payload.clear()
-            except Exception:
-                try:
-                    st.cache_data.clear()
-                except Exception:
-                    pass
+            except AttributeError:
+                _clear_data_cache()
             st.session_state["_mtz_last_rendered_grupo_id"] = grupo_id
             # Limpa payload cacheado manualmente no session_state
             st.session_state.pop("_mtz_payload_cache", None)
@@ -390,10 +403,7 @@ def render_matriz():
                 s2s2, all2 = _fetch_template(sb, tenant_id, grupo_id)
                 if all2:
                     setor_to_services, all_services = s2s2, all2
-                    try:
-                        st.cache_data.clear()
-                    except Exception:
-                        pass
+                    _clear_data_cache()
                 else:
                     st.warning(
                         "Grupo sem Template configurado (Admin > Templates).")
@@ -401,7 +411,8 @@ def render_matriz():
                         st.session_state["matriz_view"] = "select"
                         st.rerun()
                     return
-            except Exception:
+            except (AttributeError, KeyError, TypeError, ValueError) as exc:
+                log.warning("Falha ao buscar template do grupo %s: %s", grupo_id, exc)
                 st.warning(
                     "Grupo sem Template configurado (Admin > Templates).")
                 if st.button("Voltar", key="mtz_back_notpl2"):
@@ -426,8 +437,8 @@ def render_matriz():
                     str(rev_row["data_inicio"])[:10])
             _rev_semanas_total = int(
                 rev_row.get("semanas_total") or 0) or None if rev_row else None
-        except Exception:
-            pass
+        except (TypeError, ValueError):
+            log.warning("Não foi possível calcular semana sugerida da revisão %s", revisao_id)
         _semana_sugerida = _week_from_revisao(
             _now_brt().date(), _rev_data_inicio, _rev_semanas_total)
 
@@ -1471,11 +1482,9 @@ def render_matriz():
                             st.success(
                                 f"✅ Frota {esl} · {svc_name} atualizado!")
                             st.session_state["data_version"] = str(time.time())
-                            try:
-                                nav.rerun_keep_menu()
-                            except Exception:
-                                st.rerun()
+                            _rerun_preserving_menu()
                         except Exception as e:
+                            log.exception("Erro ao salvar edição rápida da matriz")
                             st.error(f"Erro: {e}")
                 with sv_b:
                     # Limpar observação rapidamente
@@ -1490,11 +1499,9 @@ def render_matriz():
                                 st.toast("Observação removida.")
                                 st.session_state["data_version"] = str(
                                     time.time())
-                                try:
-                                    nav.rerun_keep_menu()
-                                except Exception:
-                                    st.rerun()
+                                _rerun_preserving_menu()
                             except Exception as e:
+                                log.exception("Erro ao limpar observação da matriz")
                                 st.error(f"Erro: {e}")
 
                 # ── Histórico de comentários ─────────────────────────────────
@@ -1508,8 +1515,8 @@ def render_matriz():
                         user_nome=_u_nome,
                         key_prefix=f"mtz_{equip_sel}_{svc_sel}_",
                     )
-                except Exception:
-                    pass  # comentários são opcionais — tabela pode não existir ainda
+                except (ImportError, AttributeError, KeyError, TypeError, ValueError) as exc:
+                    log.info("Comentários opcionais indisponíveis na matriz: %s", exc)
 
         # ── TAB: EXPORTAR ──
         with tab_exportar:

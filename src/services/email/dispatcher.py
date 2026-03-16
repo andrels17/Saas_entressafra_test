@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 
 from src.utils.timezone import days_since_utc, semana_da_revisao
@@ -26,6 +26,15 @@ log = logging.getLogger(__name__)
 
 
 # ── helpers internos ────────────────────────────────────────────────────
+
+def _with_fallback(action: Callable[[], Any], default: Any, *, context: str):
+    """Executa operações opcionais/sujeitas a falha com log consistente."""
+    try:
+        return action()
+    except Exception as exc:  # integrações externas variam por driver/ambiente
+        log.warning("%s: %s", context, exc)
+        return default
+
 
 def _pct(done: int, total: int) -> int:
     return round((done / max(total, 1)) * 100)
@@ -83,8 +92,9 @@ def _load_tarefas(sb, tenant_id: str, revisao_id: str,
     """Carrega tarefas de uma lista de grupos para um tenant/revisão."""
     if not grupo_ids:
         return []
-    try:
-        rows = (
+
+    rows = _with_fallback(
+        lambda: (
             sb.table("tarefas_servico")
             .select(
                 "id,equipamento_id,servico_id,status,semana,"
@@ -97,16 +107,15 @@ def _load_tarefas(sb, tenant_id: str, revisao_id: str,
             .eq("revisao_id", revisao_id)
             .execute()
             .data
-        ) or []
-        # filtra pelo grupo
-        grupo_set = set(grupo_ids)
-        return [
-            t for t in rows
-            if (t.get("equipamentos") or {}).get("grupo_id") in grupo_set
-        ]
-    except Exception as e:
-        log.warning("Erro ao carregar tarefas: %s", e)
-        return []
+        ) or [],
+        [],
+        context=f"Erro ao carregar tarefas da revisão {revisao_id}",
+    )
+    grupo_set = set(grupo_ids)
+    return [
+        t for t in rows
+        if (t.get("equipamentos") or {}).get("grupo_id") in grupo_set
+    ]
 
 
 def _load_grupo_template(
@@ -116,24 +125,25 @@ def _load_grupo_template(
     """
     if not grupo_ids:
         return {}
-    try:
-        rows = (
+    rows = _with_fallback(
+        lambda: (
             sb.table("grupo_servicos")
             .select("grupo_id,servico_id")
             .eq("tenant_id", tenant_id)
             .in_("grupo_id", grupo_ids)
             .execute()
             .data
-        ) or []
-        svc_map: dict[str, set] = {}
-        for r in rows:
-            gid = r.get("grupo_id")
-            sid = r.get("servico_id")
-            if gid and sid:
-                svc_map.setdefault(gid, set()).add(sid)
-        return {gid: len(svcs) for gid, svcs in svc_map.items()}
-    except Exception:
-        return {}
+        ) or [],
+        [],
+        context=f"Erro ao carregar template dos grupos {grupo_ids}",
+    )
+    svc_map: dict[str, set] = {}
+    for r in rows:
+        gid = r.get("grupo_id")
+        sid = r.get("servico_id")
+        if gid and sid:
+            svc_map.setdefault(gid, set()).add(sid)
+    return {gid: len(svcs) for gid, svcs in svc_map.items()}
 
 
 def _load_equipamentos_ativos(
@@ -141,8 +151,8 @@ def _load_equipamentos_ativos(
     """Retorna {grupo_id: [{id, frota, modelo}]} — equipamentos ativos por grupo."""
     if not grupo_ids:
         return {}
-    try:
-        rows = (
+    rows = _with_fallback(
+        lambda: (
             sb.table("equipamentos")
             .select("id,frota,modelo,grupo_id")
             .eq("tenant_id", tenant_id)
@@ -150,60 +160,64 @@ def _load_equipamentos_ativos(
             .in_("grupo_id", grupo_ids)
             .execute()
             .data
-        ) or []
-        out: dict[str, list] = {}
-        for r in rows:
-            gid = r.get("grupo_id")
-            if gid:
-                out.setdefault(gid, []).append(r)
-        return out
-    except Exception:
-        return {}
+        ) or [],
+        [],
+        context=f"Erro ao carregar equipamentos ativos dos grupos {grupo_ids}",
+    )
+    out: dict[str, list] = {}
+    for r in rows:
+        gid = r.get("grupo_id")
+        if gid:
+            out.setdefault(gid, []).append(r)
+    return out
 
 
 def _load_revisao(sb, revisao_id: str) -> dict:
-    try:
-        rows = (
+    rows = _with_fallback(
+        lambda: (
             sb.table("revisoes")
             .select("id,titulo,data_inicio,semanas_total,status")
             .eq("id", revisao_id)
             .limit(1)
             .execute()
             .data
-        )
-        return rows[0] if rows else {}
-    except Exception:
-        return {}
+        ),
+        [],
+        context=f"Erro ao carregar revisão {revisao_id}",
+    )
+    return rows[0] if rows else {}
 
 
 def _load_tenant_nome(sb, tenant_id: str) -> str:
-    try:
-        rows = (
+    rows = _with_fallback(
+        lambda: (
             sb.table("tenants")
             .select("nome")
             .eq("id", tenant_id)
             .limit(1)
             .execute()
             .data
-        )
-        return (rows[0].get("nome") or "") if rows else ""
-    except Exception:
-        return ""
+        ),
+        [],
+        context=f"Erro ao carregar tenant {tenant_id}",
+    )
+    return (rows[0].get("nome") or "") if rows else ""
 
 
 def _load_branding(sb, tenant_id: str) -> dict:
-    try:
-        rows = (
+    rows = _with_fallback(
+        lambda: (
             sb.table("tenant_branding")
             .select("primary_color,logo_url")
             .eq("tenant_id", tenant_id)
             .limit(1)
             .execute()
             .data
-        )
-        return rows[0] if rows else {}
-    except Exception:
-        return {}
+        ),
+        [],
+        context=f"Erro ao carregar branding do tenant {tenant_id}",
+    )
+    return rows[0] if rows else {}
 
 
 # ── Construção do payload ───────────────────────────────────────────────
@@ -236,17 +250,18 @@ def _build_payload(
 
     # Nomes dos grupos direto da tabela (independente de ter tarefas)
     grupo_nomes: dict[str, str] = {}
-    try:
-        gnrows = (
+    gnrows = _with_fallback(
+        lambda: (
             sb.table("equip_grupos")
             .select("id,nome")
             .in_("id", grupo_ids)
             .execute()
             .data
-        ) or []
-        grupo_nomes = {r["id"]: r.get("nome") or r["id"] for r in gnrows}
-    except Exception:
-        pass
+        ) or [],
+        [],
+        context=f"Erro ao carregar nomes dos grupos {grupo_ids}",
+    )
+    grupo_nomes = {r["id"]: r.get("nome") or r["id"] for r in gnrows if r.get("id")}
 
     # Mapa eid → info do equipamento (frota, modelo, grupo_nome, grupo_id)
     eid_to_info: dict[str, dict] = {}
