@@ -21,6 +21,7 @@ from src.auth.guard import require_login, require_role, require_tenant_selected
 from src.auth.tenant import ensure_tenant_selected, refresh_current_role
 from src.auth.session import clear_auth_session, ensure_valid_token, hard_logout
 from src.auth.audit import audit_logout
+from src.utils.config import validate_config_or_stop
 
 # ── Utils ─────────────────────────────────────────────────────────────────────
 from src.utils.mobile import is_mobile, render_mobile_toggle
@@ -268,6 +269,9 @@ def _build_route(role: str) -> dict:
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 def main():
     st.session_state.setdefault("sb_access_token", None)
+
+    # Valida configuração obrigatória antes de qualquer lógica
+    validate_config_or_stop()
 
     render_mobile_toggle()
     if is_mobile():
