@@ -279,11 +279,9 @@ def render_admin_revisoes():
             semanas_total = _calc_weeks(dt_ini, dt_fim)
             dias_total = (dt_fim - dt_ini).days + 1 if dt_ini and dt_fim and dt_fim >= dt_ini else 0
             with c3:
-                st.number_input(
+                st.text_input(
                     "Nº semanas",
-                    min_value=0,
-                    value=int(semanas_total),
-                    step=1,
+                    value=str(int(semanas_total)),
                     disabled=True,
                     help="Calculado automaticamente a partir de Data início e Data fim.",
                 )
@@ -314,11 +312,10 @@ def render_admin_revisoes():
             dt_fim = _calc_end_date(dt_ini, semanas_total)
             dias_total = (dt_fim - dt_ini).days + 1 if dt_ini and dt_fim else 0
             with c3:
-                st.date_input(
+                st.text_input(
                     "Data fim",
-                    value=dt_fim,
+                    value=dt_fim.strftime("%Y/%m/%d") if dt_fim else "",
                     disabled=True,
-                    key="rev_dt_fim_auto",
                     help="Calculada automaticamente com base na Data início e no Nº semanas.",
                 )
 
