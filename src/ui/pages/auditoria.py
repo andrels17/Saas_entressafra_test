@@ -26,7 +26,7 @@ EVENT_LABELS = {
 }
 
 
-# ── Fragment: filtros + tabela de auditoria ───────────────────────────────────
+# ── Fragment: filtros + tabela de auditoria ─────────────────────────────
 
 @st.fragment
 def _fragment_auditoria(
@@ -37,7 +37,7 @@ def _fragment_auditoria(
 ) -> None:
     """Tabela de auditoria em fragment isolado."""
 
-    # ── Filtros ───────────────────────────────────────────────────────────────
+    # ── Filtros ─────────────────────────────────────────────────────────────
     f1, f2, f3 = st.columns([0.34, 0.33, 0.33])
     with f1:
         evento_selecionado = st.pills(
@@ -49,18 +49,32 @@ def _fragment_auditoria(
             key="audit_eventos_pills",
         )
     with f2:
-        busca_eq    = st.text_input("Buscar equipamento", placeholder="Frota ou modelo…", key="audit_busca_eq")
+        busca_eq = st.text_input(
+            "Buscar equipamento",
+            placeholder="Frota ou modelo…",
+            key="audit_busca_eq")
     with f3:
-        busca_setor = st.text_input("Buscar setor",       placeholder="Mecânica, Elétrica…", key="audit_busca_setor")
+        busca_setor = st.text_input(
+            "Buscar setor",
+            placeholder="Mecânica, Elétrica…",
+            key="audit_busca_setor")
 
     c1, c2 = st.columns(2)
     with c1:
-        busca_usuario = st.text_input("Buscar usuário", placeholder="Nome ou ID…", key="audit_busca_usuario")
+        busca_usuario = st.text_input(
+            "Buscar usuário",
+            placeholder="Nome ou ID…",
+            key="audit_busca_usuario")
     with c2:
-        limit = st.number_input("Limite de registros", min_value=100, max_value=10000,
-                                 value=1000, step=100, key="audit_limit")
+        limit = st.number_input(
+            "Limite de registros",
+            min_value=100,
+            max_value=10000,
+            value=1000,
+            step=100,
+            key="audit_limit")
 
-    # ── Query ─────────────────────────────────────────────────────────────────
+    # ── Query ───────────────────────────────────────────────────────────────
     sb = sb_for_user()
 
     def filters(q):
@@ -86,7 +100,7 @@ def _fragment_auditoria(
         st.info("Nenhum evento para os filtros.")
         return
 
-    # ── Resolve nomes de usuário ──────────────────────────────────────────────
+    # ── Resolve nomes de usuário ────────────────────────────────────────────
     user_ids = sorted({r.get("user_id") for r in rows if r.get("user_id")})
     user_name: dict[str, str] = {}
     for i in range(0, len(user_ids), 200):
@@ -101,47 +115,58 @@ def _fragment_auditoria(
         for p in profs:
             user_name[p["user_id"]] = p.get("nome") or ""
 
-    # ── Transforma ────────────────────────────────────────────────────────────
+    # ── Transforma ──────────────────────────────────────────────────────────
     out = []
     for r in rows:
-        t       = r.get("tarefas_servico") or {}
-        eq      = t.get("equipamentos") or {}
-        grp_obj = eq.get("equip_grupos") or {} if isinstance(eq.get("equip_grupos"), dict) else {}
-        grp     = grp_obj.get("nome")
-        grp_id  = grp_obj.get("id")
-        dep_id  = grp_obj.get("departamento_id")
+        t = r.get("tarefas_servico") or {}
+        eq = t.get("equipamentos") or {}
+        grp_obj = eq.get("equip_grupos") or {} if isinstance(
+            eq.get("equip_grupos"), dict) else {}
+        grp = grp_obj.get("nome")
+        grp_id = grp_obj.get("id")
+        dep_id = grp_obj.get("departamento_id")
 
-        if scope_dept_ids and dep_id and dep_id not in scope_dept_ids: continue
-        if scope_grp_ids  and grp_id and grp_id not in scope_grp_ids:  continue
+        if scope_dept_ids and dep_id and dep_id not in scope_dept_ids:
+            continue
+        if scope_grp_ids and grp_id and grp_id not in scope_grp_ids:
+            continue
 
-        svc     = t.get("servicos") or {}
-        setor   = (svc.get("setores") or {}).get("nome") if isinstance(svc.get("setores"), dict) else None
-        equip   = f"{eq.get('frota') or ''} — {eq.get('modelo') or ''}".strip(" —")
+        svc = t.get("servicos") or {}
+        setor = (
+            svc.get("setores") or {}).get("nome") if isinstance(
+            svc.get("setores"),
+            dict) else None
+        equip = f"{
+            eq.get('frota') or ''} — {
+            eq.get('modelo') or ''}".strip(" —")
 
-        if busca_eq.strip()    and busca_eq.strip().lower()    not in equip.lower():            continue
-        if busca_setor.strip() and busca_setor.strip().lower() not in (setor or "").lower():    continue
+        if busca_eq.strip() and busca_eq.strip().lower() not in equip.lower():
+            continue
+        if busca_setor.strip() and busca_setor.strip().lower() not in (setor or "").lower():
+            continue
 
-        uid   = r.get("user_id") or ""
+        uid = r.get("user_id") or ""
         uname = user_name.get(uid) or (uid[:8] if uid else "—")
 
-        if busca_usuario.strip() and busca_usuario.strip().lower() not in uname.lower(): continue
+        if busca_usuario.strip() and busca_usuario.strip().lower() not in uname.lower():
+            continue
 
         det = r.get("detalhes") or {}
         old = det.get("old") if isinstance(det, dict) else None
         new = det.get("new") if isinstance(det, dict) else None
 
         out.append({
-            "Quando":      r.get("created_at"),
-            "Evento":      EVENT_LABELS.get(r.get("evento"), r.get("evento")),
-            "Usuário":     uname,
-            "Grupo":       grp or "Sem grupo",
+            "Quando": r.get("created_at"),
+            "Evento": EVENT_LABELS.get(r.get("evento"), r.get("evento")),
+            "Usuário": uname,
+            "Grupo": grp or "Sem grupo",
             "Equipamento": equip,
-            "Setor":       setor or "—",
-            "Serviço":     svc.get("nome") or "—",
-            "De":          old.get("status") if isinstance(old, dict) else "",
-            "Para":        new.get("status") if isinstance(new, dict) else (t.get("status") or ""),
-            "Semana":      t.get("semana") or "",
-            "Obs":         t.get("observacao") or "",
+            "Setor": setor or "—",
+            "Serviço": svc.get("nome") or "—",
+            "De": old.get("status") if isinstance(old, dict) else "",
+            "Para": new.get("status") if isinstance(new, dict) else (t.get("status") or ""),
+            "Semana": t.get("semana") or "",
+            "Obs": t.get("observacao") or "",
         })
 
     df = pd.DataFrame(out).sort_values("Quando", ascending=False)
@@ -150,14 +175,18 @@ def _fragment_auditoria(
         st.info("Nenhum evento após aplicar os filtros.")
         return
 
-    # ── Métricas do recorte ───────────────────────────────────────────────────
+    # ── Métricas do recorte ─────────────────────────────────────────────────
     m1, m2, m3, m4 = st.columns(4)
-    with m1: st.metric("Total eventos",   len(df))
-    with m2: st.metric("Criados",         int((df["Evento"] == "Criado").sum()))
-    with m3: st.metric("Atualizações",    int((df["Evento"] == "Atualizado").sum()))
-    with m4: st.metric("Usuários únicos", int(df["Usuário"].nunique()))
+    with m1:
+        st.metric("Total eventos", len(df))
+    with m2:
+        st.metric("Criados", int((df["Evento"] == "Criado").sum()))
+    with m3:
+        st.metric("Atualizações", int((df["Evento"] == "Atualizado").sum()))
+    with m4:
+        st.metric("Usuários únicos", int(df["Usuário"].nunique()))
 
-    # ── Tabela com seleção de linha ───────────────────────────────────────────
+    # ── Tabela com seleção de linha ─────────────────────────────────────────
     evento = st.dataframe(
         df,
         use_container_width=True,
@@ -171,9 +200,9 @@ def _fragment_auditoria(
                 format="DD/MM/YYYY HH:mm",
                 timezone="America/Sao_Paulo",
             ),
-            "De":    st.column_config.TextColumn("De",    width="small"),
-            "Para":  st.column_config.TextColumn("Para",  width="small"),
-            "Obs":   st.column_config.TextColumn("Observação", width="medium"),
+            "De": st.column_config.TextColumn("De", width="small"),
+            "Para": st.column_config.TextColumn("Para", width="small"),
+            "Obs": st.column_config.TextColumn("Observação", width="medium"),
         },
     )
 
@@ -206,7 +235,9 @@ def _fragment_auditoria(
             st.download_button(
                 "⬇ XLSX",
                 icon=":material/download:",
-                data=df_to_xlsx(df, sheet_name="Auditoria"),
+                data=df_to_xlsx(
+                    df,
+                    sheet_name="Auditoria"),
                 file_name="auditoria.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
@@ -218,7 +249,7 @@ def _fragment_auditoria(
                "`sql/etapa5_auditoria_trigger.sql` no Supabase.")
 
 
-# ── Ponto de entrada público ──────────────────────────────────────────────────
+# ── Ponto de entrada público ────────────────────────────────────────────
 
 def render_auditoria() -> None:
     _ph("◎", "Auditoria", "Histórico de alterações gerado automaticamente. "
@@ -230,10 +261,11 @@ def render_auditoria() -> None:
         st.stop()
 
     tenant_id = current_tenant_id()
-    sb        = sb_for_user()
-    user_id   = st.session_state.get("sb_user_id") or ""
+    sb = sb_for_user()
+    user_id = st.session_state.get("sb_user_id") or ""
 
-    scope_dept_ids, scope_grp_ids = get_user_scope(sb, tenant_id, user_id, role=role)
+    scope_dept_ids, scope_grp_ids = get_user_scope(
+        sb, tenant_id, user_id, role=role)
 
     # Seletor de revisão (fora do fragment para persistir no URL)
     with st.spinner("", show_time=False):
@@ -250,17 +282,22 @@ def render_auditoria() -> None:
         st.info("Nenhuma revisão criada.")
         return
 
-    default_idx = next((i for i, r in enumerate(revisoes) if r["status"] == "ativa"), 0)
-    rev_labels  = [f"{r['titulo']} [{r['status']}]" for r in revisoes]
+    default_idx = next((i for i, r in enumerate(
+        revisoes) if r["status"] == "ativa"), 0)
+    rev_labels = [f"{r['titulo']} [{r['status']}]" for r in revisoes]
 
     # Sincroniza revisão com query param
-    qp_rev_id  = st.query_params.get("rev")
+    qp_rev_id = st.query_params.get("rev")
     default_from_qp = next(
         (i for i, r in enumerate(revisoes) if r["id"] == qp_rev_id),
         default_idx,
     )
-    rev_sel    = st.selectbox("Revisão", rev_labels, index=default_from_qp, key="audit_revisao_sel")
-    revisao    = revisoes[rev_labels.index(rev_sel)]
+    rev_sel = st.selectbox(
+        "Revisão",
+        rev_labels,
+        index=default_from_qp,
+        key="audit_revisao_sel")
+    revisao = revisoes[rev_labels.index(rev_sel)]
     revisao_id = revisao["id"]
     st.query_params["rev"] = revisao_id  # sincroniza URL
 

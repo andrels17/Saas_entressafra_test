@@ -12,12 +12,22 @@ def two_col_form(left_fn, right_fn=None):
             right_fn()
 
 
-def action_row(primary_label: str, primary_key: str, secondary_label: str | None = None, secondary_key: str | None = None):
+def action_row(
+        primary_label: str,
+        primary_key: str,
+        secondary_label: str | None = None,
+        secondary_key: str | None = None):
     c1, c2 = st.columns([0.5, 0.5], gap="small")
     primary = secondary = False
     with c1:
-        primary = st.button(primary_label, use_container_width=True, key=primary_key)
+        primary = st.button(
+            primary_label,
+            use_container_width=True,
+            key=primary_key)
     with c2:
         if secondary_label and secondary_key:
-            secondary = st.button(secondary_label, use_container_width=True, key=secondary_key)
+            secondary = st.button(
+                secondary_label,
+                use_container_width=True,
+                key=secondary_key)
     return primary, secondary

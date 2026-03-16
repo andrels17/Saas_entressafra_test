@@ -8,7 +8,8 @@ from src.ui.core.styles import page_header as _ph
 
 
 def render_admin_templates():
-    _ph("◪", "Templates", "Defina quais serviços se aplicam a cada grupo. Controla as colunas da Matriz.")
+    _ph("◪", "Templates",
+        "Defina quais serviços se aplicam a cada grupo. Controla as colunas da Matriz.")
 
     role = current_role()
     if role not in ("admin", "superadmin"):
@@ -31,6 +32,8 @@ def render_admin_templates():
         st.info("Crie pelo menos um grupo antes de configurar templates.")
         return
 
+    grupo_map = {g["nome"]: g["id"] for g in grupos}
+
     setores = (
         sb.table("setores")
         .select("id, nome")
@@ -41,7 +44,8 @@ def render_admin_templates():
         .data
     ) or []
     if not setores:
-        st.warning("Nenhum setor cadastrado ainda. Cadastre setores e serviços para montar templates.")
+        st.warning(
+            "Nenhum setor cadastrado ainda. Cadastre setores e serviços para montar templates.")
         return
 
     servicos = (
@@ -54,7 +58,8 @@ def render_admin_templates():
         .data
     ) or []
     if not servicos:
-        st.warning("Nenhum serviço cadastrado ainda. Cadastre serviços para montar templates.")
+        st.warning(
+            "Nenhum serviço cadastrado ainda. Cadastre serviços para montar templates.")
         return
     # ---------------------------------------------------------
     # Cobertura (nível gerente): grupos com template + equipamentos ativos
@@ -88,35 +93,48 @@ def render_admin_templates():
         gid = g["id"]
         cov_rows.append(
             {
-                "Grupo": g["nome"],
-                "Equip ativos": int(eq_active_by_gid.get(gid, 0)),
-                "Serviços no template": int(len(svc_by_gid.get(gid, set()))),
-                "Coberto": bool(eq_active_by_gid.get(gid, 0) > 0 and len(svc_by_gid.get(gid, set())) > 0),
-                "grupo_id": gid,
-            }
-        )
+                "Grupo": g["nome"], "Equip ativos": int(
+                    eq_active_by_gid.get(
+                        gid, 0)), "Serviços no template": int(
+                    len(
+                        svc_by_gid.get(
+                            gid, set()))), "Coberto": bool(
+                                eq_active_by_gid.get(
+                                    gid, 0) > 0 and len(
+                                        svc_by_gid.get(
+                                            gid, set())) > 0), "grupo_id": gid, })
     cov_df = st.session_state.get("_cov_df_cache")
-    cov_df = cov_df if isinstance(cov_df, type(None)) else cov_df  # no-op (compat)
+    cov_df = cov_df if isinstance(
+        cov_df, type(None)) else cov_df  # no-op (compat)
     cov_df = cov_rows
 
     covered = sum(1 for r in cov_rows if r["Coberto"])
     with st.expander("Cobertura + ações em massa (recomendado)", expanded=False):
         c1, c2, c3 = st.columns(3)
         c1.metric("Grupos ativos", f"{len(grupos)}")
-        c2.metric("Grupos com template", f"{sum(1 for r in cov_rows if r['Serviços no template']>0)}")
-        c3.metric("Grupos cobertos (template + equip)", f"{covered}/{len(grupos)}")
+        c2.metric("Grupos com template",
+                  f"{sum(1 for r in cov_rows if r['Serviços no template'] > 0)}")
+        c3.metric("Grupos cobertos (template + equip)",
+                  f"{covered}/{len(grupos)}")
 
-        df_show = pd.DataFrame(cov_rows).drop(columns=["grupo_id"]).sort_values(["Coberto", "Serviços no template", "Equip ativos"], ascending=[True, True, True])
+        df_show = pd.DataFrame(cov_rows).drop(columns=["grupo_id"]).sort_values(
+            ["Coberto", "Serviços no template", "Equip ativos"], ascending=[True, True, True])
         st.dataframe(df_show, use_container_width=True, hide_index=True)
 
         st.markdown("#### Copiar template entre grupos")
         colA, colB, colC = st.columns([1.2, 1.2, 1])
         with colA:
-            src_g = st.selectbox("Origem", [g["nome"] for g in grupos], key="tpl_copy_src")
+            src_g = st.selectbox("Origem", [g["nome"]
+                                 for g in grupos], key="tpl_copy_src")
         with colB:
-            dst_g = st.selectbox("Destino", [g["nome"] for g in grupos], key="tpl_copy_dst")
+            dst_g = st.selectbox(
+                "Destino", [
+                    g["nome"] for g in grupos], key="tpl_copy_dst")
         with colC:
-            only_if_empty = st.toggle("Somente se destino estiver vazio", value=True, key="tpl_copy_only_empty")
+            only_if_empty = st.toggle(
+                "Somente se destino estiver vazio",
+                value=True,
+                key="tpl_copy_only_empty")
 
         if st.button("Copiar", use_container_width=True):
             src_id = grupo_map.get(src_g)
@@ -130,15 +148,19 @@ def render_admin_templates():
                 else:
                     dst_has = len(svc_by_gid.get(dst_id, set())) > 0
                     if only_if_empty and dst_has:
-                        st.warning("Destino já possui template. Desmarque a opção para sobrescrever.")
+                        st.warning(
+                            "Destino já possui template. Desmarque a opção para sobrescrever.")
                     else:
                         # remove existentes e insere os novos
                         try:
-                            sb.table("grupo_servicos").delete().eq("tenant_id", tenant_id).eq("grupo_id", dst_id).execute()
+                            sb.table("grupo_servicos").delete().eq(
+                                "tenant_id", tenant_id).eq(
+                                "grupo_id", dst_id).execute()
                             sb.table("grupo_servicos").insert(
                                 [{"tenant_id": tenant_id, "grupo_id": dst_id, "servico_id": sid} for sid in src_svcs]
                             ).execute()
-                            st.success("Template copiado. Recarregue a página para atualizar.")
+                            st.success(
+                                "Template copiado. Recarregue a página para atualizar.")
                         except Exception as e:
                             st.error(f"Falha ao copiar: {e}")
 
@@ -151,9 +173,19 @@ def render_admin_templates():
             .data
         ) or []
         dep_map = {d["nome"]: d["id"] for d in deps if d.get("id")}
-        dep_pick = st.selectbox("Departamento", ["—"] + list(dep_map.keys()), key="tpl_mass_dep")
-        ref_group = st.selectbox("Usar template do grupo", [g["nome"] for g in grupos], key="tpl_mass_ref")
-        only_missing = st.toggle("Somente grupos sem template", value=True, key="tpl_mass_only_missing")
+        dep_pick = st.selectbox(
+            "Departamento",
+            ["—"] +
+            list(
+                dep_map.keys()),
+            key="tpl_mass_dep")
+        ref_group = st.selectbox(
+            "Usar template do grupo", [
+                g["nome"] for g in grupos], key="tpl_mass_ref")
+        only_missing = st.toggle(
+            "Somente grupos sem template",
+            value=True,
+            key="tpl_mass_only_missing")
         if st.button("Aplicar no departamento", use_container_width=True):
             if dep_pick == "—":
                 st.error("Selecione um departamento.")
@@ -177,20 +209,21 @@ def render_admin_templates():
                     applied = 0
                     for g in gs:
                         gid = g["id"]
-                        if only_missing and len(svc_by_gid.get(gid, set())) > 0:
+                        if only_missing and len(
+                                svc_by_gid.get(gid, set())) > 0:
                             continue
                         try:
-                            sb.table("grupo_servicos").delete().eq("tenant_id", tenant_id).eq("grupo_id", gid).execute()
+                            sb.table("grupo_servicos").delete().eq(
+                                "tenant_id", tenant_id).eq(
+                                "grupo_id", gid).execute()
                             sb.table("grupo_servicos").insert(
                                 [{"tenant_id": tenant_id, "grupo_id": gid, "servico_id": sid} for sid in ref_svcs]
                             ).execute()
                             applied += 1
                         except Exception:
                             continue
-                    st.success(f"Aplicado em {applied} grupos do departamento. Recarregue a página.")
-
-
-    grupo_map = {g["nome"]: g["id"] for g in grupos}
+                    st.success(
+                        f"Aplicado em {applied} grupos do departamento. Recarregue a página.")
 
     grupo_nome = st.selectbox("Grupo", list(grupo_map.keys()))
     grupo_id = grupo_map[grupo_nome]
@@ -212,7 +245,8 @@ def render_admin_templates():
         by_setor[sv["setor_id"]].append(sv)
 
     st.markdown("### Seleção de serviços")
-    st.caption("Dica: expanda um setor e marque os serviços aplicáveis. Você pode salvar quantas vezes quiser.")
+    st.caption(
+        "Dica: expanda um setor e marque os serviços aplicáveis. Você pode salvar quantas vezes quiser.")
 
     # estado local do que está selecionado (derivado das checkboxes)
     selecionados = set(atuais_set)
@@ -227,7 +261,10 @@ def render_admin_templates():
             mark_key = f"tpl_markall_{grupo_id}_{sid}"
             clear_key = f"tpl_clear_{grupo_id}_{sid}"
 
-            if cA.button("Marcar todos", key=mark_key, use_container_width=True):
+            if cA.button(
+                "Marcar todos",
+                key=mark_key,
+                    use_container_width=True):
                 for sv in lista:
                     st.session_state[f"tpl_{grupo_id}_{sv['id']}"] = True
 
@@ -243,7 +280,8 @@ def render_admin_templates():
                 if key not in st.session_state:
                     st.session_state[key] = default
 
-                checked = st.checkbox(sv["nome"], value=st.session_state[key], key=key)
+                checked = st.checkbox(
+                    sv["nome"], value=st.session_state[key], key=key)
                 if checked:
                     selecionados.add(sv["id"])
                 else:
@@ -255,10 +293,16 @@ def render_admin_templates():
         st.metric("Serviços selecionados", len(selecionados))
 
     with c2:
-        if st.button("Salvar template", icon=":material/save:", type="primary", use_container_width=True):
+        if st.button(
+            "Salvar template",
+            icon=":material/save:",
+            type="primary",
+                use_container_width=True):
             try:
                 # estratégia simples: limpa e reinsere (admin-only)
-                sb.table("grupo_servicos").delete().eq("tenant_id", tenant_id).eq("grupo_id", grupo_id).execute()
+                sb.table("grupo_servicos").delete().eq(
+                    "tenant_id", tenant_id).eq(
+                    "grupo_id", grupo_id).execute()
 
                 if selecionados:
                     payload = [
@@ -272,7 +316,9 @@ def render_admin_templates():
                     ]
                     sb.table("grupo_servicos").insert(payload).execute()
 
-                st.success(f"Template salvo. ({len(selecionados)} serviço(s) vinculados)")
+                st.success(
+                    f"Template salvo. ({
+                        len(selecionados)} serviço(s) vinculados)")
                 nav.rerun_keep_menu()
             except Exception as e:
                 st.error(f"Erro ao salvar template: {e}")

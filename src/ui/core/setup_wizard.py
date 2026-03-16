@@ -1,3 +1,4 @@
+from src.ui.core.styles import page_header as _ph
 import streamlit as st
 from postgrest.exceptions import APIError
 
@@ -9,7 +10,11 @@ from src.services.demo_seed import seed_demo_data
 def _count(sb, table, tenant_id, extra_filters=None):
     """Count rows in a tenant-scoped table (works even for join tables without 'id')."""
     try:
-        q = sb.table(table).select("tenant_id", count="exact").eq("tenant_id", tenant_id)
+        q = sb.table(table).select(
+            "tenant_id",
+            count="exact").eq(
+            "tenant_id",
+            tenant_id)
         if extra_filters:
             q = extra_filters(q)
         res = q.execute()
@@ -20,9 +25,9 @@ def _count(sb, table, tenant_id, extra_filters=None):
         return 0
 
 
-from src.ui.core.styles import page_header as _ph
 def render_setup_wizard():
-    _ph("⚙", "Configuração Guiada", "Checklist completo para deixar o sistema pronto rapidamente. Apenas Admin.")
+    _ph("⚙", "Configuração Guiada",
+        "Checklist completo para deixar o sistema pronto rapidamente. Apenas Admin.")
 
     role = current_role()
     if role not in ("admin", "superadmin"):
@@ -34,7 +39,13 @@ def render_setup_wizard():
 
     c_setores = _count(sb, "setores", tenant_id, lambda q: q.eq("ativo", True))
     c_serv = _count(sb, "servicos", tenant_id, lambda q: q.eq("ativo", True))
-    c_grupos = _count(sb, "equip_grupos", tenant_id, lambda q: q.eq("ativo", True))
+    c_grupos = _count(
+        sb,
+        "equip_grupos",
+        tenant_id,
+        lambda q: q.eq(
+            "ativo",
+            True))
     c_eq = _count(sb, "equipamentos", tenant_id, lambda q: q.eq("ativo", True))
     c_templates = _count(sb, "grupo_servicos", tenant_id)
     c_rev = _count(sb, "revisoes", tenant_id)
@@ -73,14 +84,13 @@ def render_setup_wizard():
                       <div style="font-size:0.68rem;color:#8892A4">{count} registro(s)</div>
                     </div>
                   </div>
-                </div>''',
-                unsafe_allow_html=True
-            )
+                </div>''', unsafe_allow_html=True)
 
     st.divider()
 
     st.markdown("### Atalhos")
-    st.caption("Clique para abrir a tela correspondente e completar o setup. (Depois volte aqui.)")
+    st.caption(
+        "Clique para abrir a tela correspondente e completar o setup. (Depois volte aqui.)")
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -98,7 +108,10 @@ def render_setup_wizard():
         if st.button("4) Templates", use_container_width=True):
             nav.goto("Admin - Templates")
     with col5:
-        if st.button("5) Revisões + Matriz", type="primary", use_container_width=True):
+        if st.button(
+            "5) Revisões + Matriz",
+            type="primary",
+                use_container_width=True):
             nav.goto("Admin - Revisões")
     with col6:
         if st.button("6) Permissões por setor", use_container_width=True):
@@ -110,16 +123,25 @@ def render_setup_wizard():
     st.caption("Cria setores, serviços, grupos, alguns equipamentos, templates e uma revisão demo. Pode rodar mais de uma vez.")
     colx, coly = st.columns([0.7, 0.3])
     with colx:
-        confirm = st.checkbox("Confirmo que quero inserir dados de demonstração neste tenant", value=False)
+        confirm = st.checkbox(
+            "Confirmo que quero inserir dados de demonstração neste tenant",
+            value=False)
     with coly:
-        if st.button("Gerar dados demo", icon=":material/science:", type="primary", use_container_width=True, disabled=not confirm):
+        if st.button(
+            "Gerar dados demo",
+            icon=":material/science:",
+            type="primary",
+            use_container_width=True,
+                disabled=not confirm):
             try:
                 with st.spinner("Gerando dados de demonstração..."):
                     result = seed_demo_data(str(tenant_id))
                 st.success(
-                    f"Demo criado: {result['setores']} setores, {result['servicos']} serviços, "
-                    f"{result['grupos']} grupos, {result['equipamentos']} equipamentos. Revisão ativa pronta."
-                )
+                    f"Demo criado: {
+                        result['setores']} setores, {
+                        result['servicos']} serviços, " f"{
+                        result['grupos']} grupos, {
+                        result['equipamentos']} equipamentos. Revisão ativa pronta.")
                 nav.goto("Admin - Revisões")
             except Exception as e:
                 st.error(f"Erro ao gerar demo: {e}")
@@ -127,6 +149,8 @@ def render_setup_wizard():
     st.divider()
 
     if c_setores and c_serv and c_grupos and c_eq and c_templates and c_rev:
-        st.success("Setup mínimo completo. Agora é só gerar a matriz na tela de Revisões e operar no Apontamento!")
+        st.success(
+            "Setup mínimo completo. Agora é só gerar a matriz na tela de Revisões e operar no Apontamento!")
     else:
-        st.info("Complete os itens em amarelo. Assim que tudo estiver OK, você consegue operar sem Excel.")
+        st.info(
+            "Complete os itens em amarelo. Assim que tudo estiver OK, você consegue operar sem Excel.")

@@ -16,14 +16,30 @@ def _series_or_default(df: pd.DataFrame, col: str, default=0):
     return pd.Series([default] * len(df), index=df.index)
 
 
-def normalize_matriz_base(raw: pd.DataFrame, eq_meta: pd.DataFrame) -> pd.DataFrame:
+def normalize_matriz_base(raw: pd.DataFrame,
+                          eq_meta: pd.DataFrame) -> pd.DataFrame:
     """Normaliza mv_matriz_base e enriquece com metadados de equipamentos."""
     if raw is None or raw.empty:
-        return pd.DataFrame(columns=[
-            "tenant_id", "revisao_id", "departamento_id", "grupo_id", "grupo",
-            "equipamento_id", "frota", "modelo", "servico_id", "setor",
-            "state", "ok_count", "na", "trav", "updated_at", "data_inicio", "data_fim",
-        ])
+        return pd.DataFrame(
+            columns=[
+                "tenant_id",
+                "revisao_id",
+                "departamento_id",
+                "grupo_id",
+                "grupo",
+                "equipamento_id",
+                "frota",
+                "modelo",
+                "servico_id",
+                "setor",
+                "state",
+                "ok_count",
+                "na",
+                "trav",
+                "updated_at",
+                "data_inicio",
+                "data_fim",
+            ])
 
     df = normalize_df(
         raw,
@@ -41,17 +57,29 @@ def normalize_matriz_base(raw: pd.DataFrame, eq_meta: pd.DataFrame) -> pd.DataFr
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="coerce")
 
-    etapa_cols = [c for c in ("etapa_d", "etapa_r", "etapa_m") if c in df.columns]
+    etapa_cols = [
+        c for c in (
+            "etapa_d",
+            "etapa_r",
+            "etapa_m") if c in df.columns]
     if etapa_cols:
         ok = pd.Series(0.0, index=df.index)
         for col in etapa_cols:
-            ok = ok.add(pd.to_numeric(df[col], errors="coerce").fillna(0).clip(0, 1), fill_value=0)
+            ok = ok.add(
+                pd.to_numeric(
+                    df[col],
+                    errors="coerce").fillna(0).clip(
+                    0,
+                    1),
+                fill_value=0)
         df["ok_count"] = ok
     else:
-        df["ok_count"] = pd.to_numeric(_series_or_default(df, "ok_count", 0), errors="coerce").fillna(0)
+        df["ok_count"] = pd.to_numeric(_series_or_default(
+            df, "ok_count", 0), errors="coerce").fillna(0)
     df["ok_count"] = df["ok_count"].clip(lower=0, upper=3)
 
-    state = _series_or_default(df, "state", "pendente").astype(str).str.strip().str.lower()
+    state = _series_or_default(df, "state", "pendente").astype(
+        str).str.strip().str.lower()
     df["state"] = state.replace({
         "em andamento": "em_andamento",
         "em-andamento": "em_andamento",
@@ -84,13 +112,18 @@ def normalize_matriz_base(raw: pd.DataFrame, eq_meta: pd.DataFrame) -> pd.DataFr
 
     df["frota"] = df["frota"].fillna(df.get("frota_meta")).fillna("—")
     df["modelo"] = df["modelo"].fillna(df.get("modelo_meta")).fillna("—")
-    df["departamento_id"] = df["departamento_id"].fillna(df.get("departamento_id_meta"))
+    df["departamento_id"] = df["departamento_id"].fillna(
+        df.get("departamento_id_meta"))
     df["grupo"] = _series_or_default(df, "grupo", "—").fillna("—")
     df["setor"] = _series_or_default(df, "setor", "—").fillna("—")
     return df
 
 
-def apply_filters(df: pd.DataFrame, departamento_ids=None, grupo_ids=None, equipamento_ids=None) -> pd.DataFrame:
+def apply_filters(
+        df: pd.DataFrame,
+        departamento_ids=None,
+        grupo_ids=None,
+        equipamento_ids=None) -> pd.DataFrame:
     f = df.copy()
     if departamento_ids and "departamento_id" in f.columns:
         f = f[f["departamento_id"].isin(departamento_ids)]
@@ -103,7 +136,10 @@ def apply_filters(df: pd.DataFrame, departamento_ids=None, grupo_ids=None, equip
 
 def _valid_scope(base: pd.DataFrame) -> pd.DataFrame:
     if base is None or base.empty:
-        return pd.DataFrame(columns=list(base.columns) if isinstance(base, pd.DataFrame) else [])
+        return pd.DataFrame(
+            columns=list(
+                base.columns) if isinstance(
+                base, pd.DataFrame) else [])
     valid = base.copy()
     if "na" in valid.columns:
         valid = valid[~valid["na"].astype(bool)]
@@ -112,10 +148,18 @@ def _valid_scope(base: pd.DataFrame) -> pd.DataFrame:
 
 def overall_from_base(base: pd.DataFrame) -> dict:
     if base is None or base.empty:
-        return {"pct": 0.0, "total": 0, "concl": 0, "pend": 0, "andamento": 0, "trav": 0, "na": 0}
+        return {
+            "pct": 0.0,
+            "total": 0,
+            "concl": 0,
+            "pend": 0,
+            "andamento": 0,
+            "trav": 0,
+            "na": 0}
     valid = _valid_scope(base)
     total = int(len(valid))
-    pct = round(float(valid["ok_count"].sum()) / max(total * 3, 1) * 100, 1) if total else 0.0
+    pct = round(float(valid["ok_count"].sum()) /
+                max(total * 3, 1) * 100, 1) if total else 0.0
     return {
         "pct": float(max(0, min(100, pct))),
         "total": total,
@@ -129,10 +173,18 @@ def overall_from_base(base: pd.DataFrame) -> dict:
 
 def group_progress(base: pd.DataFrame) -> pd.DataFrame:
     if base is None or base.empty:
-        return pd.DataFrame(columns=["grupo", "grupo_id", "departamento_id", "pct_concluido", "done_steps", "expected_steps"])
+        return pd.DataFrame(
+            columns=[
+                "grupo",
+                "grupo_id",
+                "departamento_id",
+                "pct_concluido",
+                "done_steps",
+                "expected_steps"])
     valid = _valid_scope(base)
     rows = []
-    for (gid, grupo, dept), sub in valid.groupby(["grupo_id", "grupo", "departamento_id"], dropna=False):
+    for (gid, grupo, dept), sub in valid.groupby(
+            ["grupo_id", "grupo", "departamento_id"], dropna=False):
         expected = int(len(sub) * 3)
         done = float(sub["ok_count"].sum())
         pct = round(done / max(expected, 1) * 100, 1) if expected else 0.0
@@ -149,7 +201,12 @@ def group_progress(base: pd.DataFrame) -> pd.DataFrame:
 
 def sector_progress(base: pd.DataFrame) -> pd.DataFrame:
     if base is None or base.empty:
-        return pd.DataFrame(columns=["setor", "pct_concluido", "done_steps", "expected_steps"])
+        return pd.DataFrame(
+            columns=[
+                "setor",
+                "pct_concluido",
+                "done_steps",
+                "expected_steps"])
     valid = _valid_scope(base)
     rows = []
     for setor, sub in valid.groupby("setor", dropna=False):
@@ -166,14 +223,35 @@ def sector_progress(base: pd.DataFrame) -> pd.DataFrame:
 
 
 def equipment_progress(base: pd.DataFrame) -> pd.DataFrame:
-    cols = ["equipamento_id", "grupo_id", "grupo", "departamento_id", "Frota", "Modelo",
-            "Total", "% Concluído", "Pendentes", "Em andamento", "Travados", "Não aplica", "Concluídos",
-            "done_steps", "expected_steps"]
+    cols = [
+        "equipamento_id",
+        "grupo_id",
+        "grupo",
+        "departamento_id",
+        "Frota",
+        "Modelo",
+        "Total",
+        "% Concluído",
+        "Pendentes",
+        "Em andamento",
+        "Travados",
+        "Não aplica",
+        "Concluídos",
+        "done_steps",
+        "expected_steps"]
     if base is None or base.empty:
         return pd.DataFrame(columns=cols)
     base = base.copy()
-    base["frota"] = base.get("frota", pd.Series(index=base.index, dtype=object)).fillna("—").astype(str).str.strip()
-    base["modelo"] = base.get("modelo", pd.Series(index=base.index, dtype=object)).fillna("—").astype(str).str.strip()
+    base["frota"] = base.get(
+        "frota",
+        pd.Series(
+            index=base.index,
+            dtype=object)).fillna("—").astype(str).str.strip()
+    base["modelo"] = base.get(
+        "modelo",
+        pd.Series(
+            index=base.index,
+            dtype=object)).fillna("—").astype(str).str.strip()
     rows = []
     for (eid, gid, grupo, dept, frota, modelo), sub in base.groupby(
         ["equipamento_id", "grupo_id", "grupo", "departamento_id", "frota", "modelo"], dropna=False
@@ -202,20 +280,45 @@ def equipment_progress(base: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def build_inteligencia(base: pd.DataFrame) -> tuple[dict, dict, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def build_inteligencia(
+        base: pd.DataFrame) -> tuple[dict, dict, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     EMPTY_RISCO = {
-        "risco_score": 0.0, "pct_concluido": 0.0, "pendentes": 0,
-        "travados": 0, "em_andamento": 0, "concluidos": 0, "status_risco": "baixo",
+        "risco_score": 0.0,
+        "pct_concluido": 0.0,
+        "pendentes": 0,
+        "travados": 0,
+        "em_andamento": 0,
+        "concluidos": 0,
+        "status_risco": "baixo",
     }
     EMPTY_PREV = {
-        "data_inicio": None, "data_fim_planejada": None, "dias_passados": 0,
-        "dias_planejados": 0, "percentual_concluido": 0.0, "ritmo_medio_dia": 0.0,
-        "dias_estimados_total": 0.0, "dias_restantes_estimados": 0.0,
-        "previsao_termino": None, "status_previsao": "sem_base",
+        "data_inicio": None,
+        "data_fim_planejada": None,
+        "dias_passados": 0,
+        "dias_planejados": 0,
+        "percentual_concluido": 0.0,
+        "ritmo_medio_dia": 0.0,
+        "dias_estimados_total": 0.0,
+        "dias_restantes_estimados": 0.0,
+        "previsao_termino": None,
+        "status_previsao": "sem_base",
     }
     EMPTY_HEAT = pd.DataFrame(columns=["grupo", "setor", "calor_score"])
-    EMPTY_CRIT = pd.DataFrame(columns=["ranking_criticidade", "Equipamento", "grupo", "criticidade_score", "travados", "pendentes", "pct_concluido"])
-    EMPTY_TL = pd.DataFrame(columns=["dia", "movimentacoes", "concluidos", "restantes"])
+    EMPTY_CRIT = pd.DataFrame(
+        columns=[
+            "ranking_criticidade",
+            "Equipamento",
+            "grupo",
+            "criticidade_score",
+            "travados",
+            "pendentes",
+            "pct_concluido"])
+    EMPTY_TL = pd.DataFrame(
+        columns=[
+            "dia",
+            "movimentacoes",
+            "concluidos",
+            "restantes"])
 
     if base is None or base.empty:
         return EMPTY_RISCO, EMPTY_PREV, EMPTY_HEAT, EMPTY_CRIT, EMPTY_TL
@@ -232,18 +335,33 @@ def build_inteligencia(base: pd.DataFrame) -> tuple[dict, dict, pd.DataFrame, pd
     andamento = int((valid["state"] == "em_andamento").sum())
     concl = int((valid["state"] == "concluido").sum())
 
-    risco = calc_risco(travados=trav, pendentes=pend, em_andamento=andamento, concluidos=concl, total=total_valid, pct_concluido=pct)
+    risco = calc_risco(
+        travados=trav,
+        pendentes=pend,
+        em_andamento=andamento,
+        concluidos=concl,
+        total=total_valid,
+        pct_concluido=pct)
 
-    data_inicio = pd.to_datetime(valid["data_inicio"], errors="coerce").dropna().min() if "data_inicio" in valid.columns else pd.NaT
-    data_fim = pd.to_datetime(valid["data_fim"], errors="coerce").dropna().max() if "data_fim" in valid.columns else pd.NaT
+    data_inicio = pd.to_datetime(valid["data_inicio"], errors="coerce").dropna(
+    ).min() if "data_inicio" in valid.columns else pd.NaT
+    data_fim = pd.to_datetime(valid["data_fim"], errors="coerce").dropna(
+    ).max() if "data_fim" in valid.columns else pd.NaT
     hoje = pd.Timestamp(_now_brt()).normalize().tz_localize(None)
-    dias_passados = int(max((hoje - data_inicio.normalize()).days, 0)) if pd.notna(data_inicio) else 0
-    dias_planejados = int(max((data_fim.normalize() - data_inicio.normalize()).days, 0)) if pd.notna(data_inicio) and pd.notna(data_fim) else 0
+    dias_passados = int(
+        max((hoje - data_inicio.normalize()).days, 0)) if pd.notna(data_inicio) else 0
+    dias_planejados = int(max((data_fim.normalize() - data_inicio.normalize()).days, 0)
+                          ) if pd.notna(data_inicio) and pd.notna(data_fim) else 0
     ritmo = round(pct / max(dias_passados, 1), 4) if pct > 0 else 0.0
     dias_est_total = round(100.0 / ritmo, 2) if ritmo > 0 else 0.0
-    dias_rest = round(max(dias_est_total - dias_passados, 0), 2) if ritmo > 0 else 0.0
-    prev_termino = (data_inicio + pd.to_timedelta(int(round(dias_est_total)), unit="D")) if (pd.notna(data_inicio) and ritmo > 0) else pd.NaT
-    status_prev = "sem_base" if pct <= 0 else ("no_prazo" if (pd.notna(prev_termino) and (pd.isna(data_fim) or prev_termino <= data_fim)) else "atraso")
+    dias_rest = round(max(dias_est_total - dias_passados, 0),
+                      2) if ritmo > 0 else 0.0
+    prev_termino = (data_inicio + pd.to_timedelta(int(round(dias_est_total)),
+                    unit="D")) if (pd.notna(data_inicio) and ritmo > 0) else pd.NaT
+    status_prev = "sem_base" if pct <= 0 else (
+        "no_prazo" if (
+            pd.notna(prev_termino) and (
+                pd.isna(data_fim) or prev_termino <= data_fim)) else "atraso")
     previsao: dict[str, Any] = {
         "data_inicio": None if pd.isna(data_inicio) else data_inicio,
         "data_fim_planejada": None if pd.isna(data_fim) else data_fim,
@@ -257,28 +375,35 @@ def build_inteligencia(base: pd.DataFrame) -> tuple[dict, dict, pd.DataFrame, pd
         "status_previsao": status_prev,
     }
 
-    heat = (
-        valid.groupby(["grupo", "setor"], dropna=False)
-        .apply(lambda s: ((s["state"] == "travado").sum() * 3.0 + (s["state"] == "pendente").sum() * 1.5 + (s["state"] == "em_andamento").sum()) / max(len(s), 1))
-        .reset_index(name="calor_score")
-    ) if "grupo" in valid.columns and "setor" in valid.columns else EMPTY_HEAT
+    heat = (valid.groupby(["grupo", "setor"], dropna=False) .apply(lambda s: ((s["state"] == "travado").sum() *
+                                                                              3.0 +
+                                                                              (s["state"] == "pendente").sum() *
+                                                                              1.5 +
+                                                                              (s["state"] == "em_andamento").sum()) /
+                                                                   max(len(s), 1)) .reset_index(name="calor_score")) if "grupo" in valid.columns and "setor" in valid.columns else EMPTY_HEAT
 
     crit_rows = []
     for eid, sub in valid.groupby("equipamento_id", dropna=False):
         expected = int(len(sub) * 3)
-        pct_eq = round(float(sub["ok_count"].sum()) / max(expected, 1) * 100, 1) if expected else 0.0
-        crit_rows.append({
-            "equipamento_id": eid,
-            "Equipamento": str(sub["frota"].iloc[0] if "frota" in sub.columns else "—"),
-            "grupo": str(sub["grupo"].iloc[0] if "grupo" in sub.columns else "—"),
-            "criticidade_score": round(((sub["state"] == "travado").sum() * 3.0 + (sub["state"] == "pendente").sum() * 1.5 + (sub["state"] == "em_andamento").sum()) / max(len(sub), 1), 2),
-            "travados": int((sub["state"] == "travado").sum()),
-            "pendentes": int((sub["state"] == "pendente").sum()),
-            "pct_concluido": max(0.0, min(100.0, pct_eq)),
-        })
+        pct_eq = round(float(sub["ok_count"].sum()) /
+                       max(expected, 1) * 100, 1) if expected else 0.0
+        crit_rows.append(
+            {
+                "equipamento_id": eid, "Equipamento": str(
+                    sub["frota"].iloc[0] if "frota" in sub.columns else "—"), "grupo": str(
+                    sub["grupo"].iloc[0] if "grupo" in sub.columns else "—"), "criticidade_score": round(
+                    ((sub["state"] == "travado").sum() * 3.0 + (
+                        sub["state"] == "pendente").sum() * 1.5 + (
+                            sub["state"] == "em_andamento").sum()) / max(
+                                len(sub), 1), 2), "travados": int(
+                                    (sub["state"] == "travado").sum()), "pendentes": int(
+                                        (sub["state"] == "pendente").sum()), "pct_concluido": max(
+                                            0.0, min(
+                                                100.0, pct_eq)), })
     crit = pd.DataFrame(crit_rows)
     if not crit.empty:
-        crit = crit.sort_values(["criticidade_score", "pct_concluido", "Equipamento"], ascending=[False, True, True]).reset_index(drop=True)
+        crit = crit.sort_values(["criticidade_score", "pct_concluido", "Equipamento"], ascending=[
+                                False, True, True]).reset_index(drop=True)
         crit["ranking_criticidade"] = range(1, len(crit) + 1)
 
     tl = EMPTY_TL

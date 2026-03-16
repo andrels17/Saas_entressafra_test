@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
-from postgrest.exceptions import APIError
 
-from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_role
 
 # Tenta usar service role (mais robusto para telas admin, evita RLS)
 get_supabase_service = None
-for _path in ("src.db.supabase_client", "src.supabase_client", "supabase_client"):
+for _path in (
+    "src.db.supabase_client",
+    "src.supabase_client",
+        "supabase_client"):
     try:
         mod = __import__(_path, fromlist=["get_supabase_service"])
         get_supabase_service = getattr(mod, "get_supabase_service", None)
@@ -16,7 +17,10 @@ for _path in ("src.db.supabase_client", "src.supabase_client", "supabase_client"
         continue
 
 get_supabase_service = None
-for _path in ("src.db.supabase_client", "src.supabase_client", "supabase_client"):
+for _path in (
+    "src.db.supabase_client",
+    "src.supabase_client",
+        "supabase_client"):
     try:
         mod = __import__(_path, fromlist=["get_supabase_service"])
         get_supabase_service = getattr(mod, "get_supabase_service", None)
@@ -67,7 +71,8 @@ def _coerce_types(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _rerun():
-    # Alguns projetos têm um helper nav.rerun_keep_menu(); se não existir, usa st.rerun()
+    # Alguns projetos têm um helper nav.rerun_keep_menu(); se não existir, usa
+    # st.rerun()
     try:
         import nav  # type: ignore
         if hasattr(nav, "rerun_keep_menu"):
@@ -105,7 +110,7 @@ def _detect_mapping(df_cols: list[str]) -> dict[str, str]:
 
 def _chunked(iterable, n: int):
     for i in range(0, len(iterable), n):
-        yield iterable[i:i+n]
+        yield iterable[i:i + n]
 
 
 def _safe_int(v):
@@ -117,7 +122,13 @@ def _safe_int(v):
         return None
 
 
-def _audit(sb, tenant_id: str, action: str, payload: dict, equipamento_id: str | None = None, user_id: str | None = None):
+def _audit(
+        sb,
+        tenant_id: str,
+        action: str,
+        payload: dict,
+        equipamento_id: str | None = None,
+        user_id: str | None = None):
     """
     Auditoria best-effort.
     - Usa tabela 'equip_audit' (você criou).
@@ -179,12 +190,15 @@ def _load_departamentos(sb, tenant_id: str):
     except Exception:
         deps = []
 
-    name_to_id = {str(d["nome"]).strip().lower(): d["id"] for d in deps if d.get("nome")}
-    id_to_name = {d["id"]: str(d["nome"]).strip() for d in deps if d.get("id") and d.get("nome")}
+    name_to_id = {str(d["nome"]).strip().lower(): d["id"]
+                  for d in deps if d.get("nome")}
+    id_to_name = {d["id"]: str(d["nome"]).strip()
+                  for d in deps if d.get("id") and d.get("nome")}
     return name_to_id, id_to_name
 
 
-def _ensure_departamentos(sb, tenant_id: str, dep_names: list[str]) -> dict[str, str]:
+def _ensure_departamentos(
+        sb, tenant_id: str, dep_names: list[str]) -> dict[str, str]:
     """Garante que departamentos existam (best-effort) e retorna map nome_lower->id atualizado."""
     dep_names = [str(x).strip() for x in dep_names if x and str(x).strip()]
     if not dep_names:
@@ -198,18 +212,25 @@ def _ensure_departamentos(sb, tenant_id: str, dep_names: list[str]) -> dict[str,
             missing.append(n)
 
     if missing:
-        rows = [{"tenant_id": tenant_id, "nome": n, "ativo": True} for n in sorted(set(missing))]
+        rows = [{"tenant_id": tenant_id, "nome": n, "ativo": True}
+                for n in sorted(set(missing))]
         try:
             sb.table("departamentos").insert(rows).execute()
         except Exception:
-            # Pode falhar por duplicidade (índice em lower(nome)) ou RLS; seguimos e recarregamos.
+            # Pode falhar por duplicidade (índice em lower(nome)) ou RLS;
+            # seguimos e recarregamos.
             pass
         name_to_id, _ = _load_departamentos(sb, tenant_id)
 
     return name_to_id
 
 
-def _ensure_grupos(sb, tenant_id: str, grupo_pairs: list[tuple[str, str | None]]) -> dict[tuple[str | None, str], str]:
+def _ensure_grupos(sb,
+                   tenant_id: str,
+                   grupo_pairs: list[tuple[str,
+                                           str | None]]) -> dict[tuple[str | None,
+                                                                       str],
+                                                                 str]:
     """Garante grupos (equip_grupos) e retorna map (departamento_id, nome_lower)->id.
 
     Isso suporta o mesmo nome de grupo em departamentos diferentes.
@@ -261,7 +282,8 @@ def _ensure_grupos(sb, tenant_id: str, grupo_pairs: list[tuple[str, str | None]]
         if dep_id and gname.lower() in null_dep_by_name:
             updates.append((null_dep_by_name[gname.lower()], dep_id))
             continue
-        inserts.append({"tenant_id": tenant_id, "nome": gname, "departamento_id": dep_id})
+        inserts.append({"tenant_id": tenant_id, "nome": gname,
+                       "departamento_id": dep_id})
 
     if inserts:
         try:
@@ -273,7 +295,8 @@ def _ensure_grupos(sb, tenant_id: str, grupo_pairs: list[tuple[str, str | None]]
     if updates:
         for gid, dep_id in updates:
             try:
-                sb.table("equip_grupos").update({"departamento_id": dep_id}).eq("tenant_id", tenant_id).eq("id", gid).execute()
+                sb.table("equip_grupos").update({"departamento_id": dep_id}).eq(
+                    "tenant_id", tenant_id).eq("id", gid).execute()
             except Exception:
                 pass
 
@@ -325,6 +348,3 @@ def _load_user_names(sb, user_ids: list[str]) -> dict[str, str]:
     except Exception:
         return {}
     return out
-
-
-from src.ui.core.styles import page_header as _ph

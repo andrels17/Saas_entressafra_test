@@ -16,30 +16,30 @@ import streamlit as st
 # Mapeamento de substrings de erro → mensagem amigável
 _ERROR_MAP: list[tuple[str, str]] = [
     # Autenticação / Supabase
-    ("Invalid login credentials",  "E-mail ou senha incorretos."),
-    ("invalid_credentials",        "E-mail ou senha incorretos."),
-    ("Email not confirmed",        "Confirme seu e-mail antes de entrar."),
-    ("User not found",             "Nenhuma conta encontrada com este e-mail."),
-    ("paused",                     "O projeto Supabase esta pausado. Reative em app.supabase.com."),
-    ("inactive",                   "O projeto Supabase esta inativo. Verifique sua conta."),
-    ("Too many requests",          "Muitas tentativas seguidas. Aguarde alguns minutos."),
-    ("rate limit",                 "Limite de requisicoes atingido. Tente novamente em instantes."),
-    ("JWT expired",                "Sua sessao expirou. Faca login novamente."),
-    ("refresh_token_not_found",    "Sessao invalida. Faca login novamente."),
+    ("Invalid login credentials", "E-mail ou senha incorretos."),
+    ("invalid_credentials", "E-mail ou senha incorretos."),
+    ("Email not confirmed", "Confirme seu e-mail antes de entrar."),
+    ("User not found", "Nenhuma conta encontrada com este e-mail."),
+    ("paused", "O projeto Supabase esta pausado. Reative em app.supabase.com."),
+    ("inactive", "O projeto Supabase esta inativo. Verifique sua conta."),
+    ("Too many requests", "Muitas tentativas seguidas. Aguarde alguns minutos."),
+    ("rate limit", "Limite de requisicoes atingido. Tente novamente em instantes."),
+    ("JWT expired", "Sua sessao expirou. Faca login novamente."),
+    ("refresh_token_not_found", "Sessao invalida. Faca login novamente."),
     # Rede / conectividade
-    ("Failed to establish",        "Sem conexao com o servidor. Verifique sua internet."),
-    ("Connection refused",         "Servico indisponivel. Tente novamente em instantes."),
-    ("timeout",                    "A requisicao demorou demais. Tente novamente."),
+    ("Failed to establish", "Sem conexao com o servidor. Verifique sua internet."),
+    ("Connection refused", "Servico indisponivel. Tente novamente em instantes."),
+    ("timeout", "A requisicao demorou demais. Tente novamente."),
     # Banco de dados
-    ("unique constraint",          "Ja existe um registro com esse nome ou identificador."),
-    ("duplicate key",              "Registro duplicado. Verifique se o item ja foi cadastrado."),
-    ("foreign key",                "Operacao nao permitida: este registro esta vinculado a outros dados."),
-    ("permission denied",          "Voce nao tem permissao para realizar esta acao."),
-    ("RLS",                        "Acesso negado pela politica de seguranca do banco."),
-    ("relation",                   "Tabela nao encontrada. Verifique se as migracoes foram aplicadas."),
+    ("unique constraint", "Ja existe um registro com esse nome ou identificador."),
+    ("duplicate key", "Registro duplicado. Verifique se o item ja foi cadastrado."),
+    ("foreign key", "Operacao nao permitida: este registro esta vinculado a outros dados."),
+    ("permission denied", "Voce nao tem permissao para realizar esta acao."),
+    ("RLS", "Acesso negado pela politica de seguranca do banco."),
+    ("relation", "Tabela nao encontrada. Verifique se as migracoes foram aplicadas."),
     # Generico
-    ("null value",                 "Um campo obrigatorio nao foi preenchido."),
-    ("violates not-null",          "Preencha todos os campos obrigatorios antes de salvar."),
+    ("null value", "Um campo obrigatorio nao foi preenchido."),
+    ("violates not-null", "Preencha todos os campos obrigatorios antes de salvar."),
 ]
 
 _FALLBACK = (

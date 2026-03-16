@@ -81,7 +81,9 @@ def render_login():
                 "senha", type="password", placeholder="••••••••",
                 label_visibility="collapsed",
             )
-            st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div style='height:4px'></div>",
+                unsafe_allow_html=True)
             entrar = st.form_submit_button(
                 "→  Entrar na plataforma",
                 use_container_width=True,
@@ -107,7 +109,7 @@ def render_login():
         if entrar:
             reset_for_login_attempt()
             email_norm = (email or "").strip().lower()
-            senha_val  = (senha or "").strip()
+            senha_val = (senha or "").strip()
 
             if not email_norm or not senha_val:
                 st.warning("⚠️ Informe seu e-mail e senha para continuar.")
@@ -143,15 +145,22 @@ def render_login():
                     audit_login_success(email_norm, user_id)
 
                     # Evita herdar tenant/role/menu de sessão anterior
-                    for k in ("current_tenant_id", "current_role", "_tenant_user_id",
-                              "__nav_to", "__current_page", "__menu", "menu"):
+                    for k in (
+                        "current_tenant_id",
+                        "current_role",
+                        "_tenant_user_id",
+                        "__nav_to",
+                        "__current_page",
+                        "__menu",
+                            "menu"):
                         st.session_state.pop(k, None)
                     st.session_state["_identity_user_id"] = user_id
                     st.success("✅ Login realizado!")
                     nav.goto("Início")
 
                 except Exception as e:
-                    # Falha: incrementa contador e avisa quantas tentativas restam
+                    # Falha: incrementa contador e avisa quantas tentativas
+                    # restam
                     remaining = record_failure(rl_key)
                     audit_login_failure(email_norm)
                     if remaining > 0:
@@ -160,7 +169,8 @@ def render_login():
                             f"Você tem mais {remaining} tentativa(s) antes do bloqueio temporário."
                         )
                     else:
-                        st.error("🔒 Conta bloqueada temporariamente por excesso de tentativas.")
+                        st.error(
+                            "🔒 Conta bloqueada temporariamente por excesso de tentativas.")
                     show_error(e)
 
         # ── Recuperação de senha ────────────────────────────────────────────
@@ -173,6 +183,7 @@ def render_login():
                 try:
                     sb.auth.reset_password_for_email(email_norm)
                     audit_password_reset(email_norm)
-                    st.success("📧 Se o e-mail estiver cadastrado, enviaremos um link.")
+                    st.success(
+                        "📧 Se o e-mail estiver cadastrado, enviaremos um link.")
                 except Exception as e:
                     st.error(f"Erro: `{repr(e)}`")

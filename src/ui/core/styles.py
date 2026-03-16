@@ -20,49 +20,49 @@ import streamlit as st
 # Mapeamento pagina → (icone, grupo, label_curto)
 # ─────────────────────────────────────────────────────────────────────────────
 NAV_CONFIG = {
-    "Início":               ("⌂",  "core",  "Início"),
-    "Dashboard":            ("▣",  "core",  "Dashboard"),
-    "Painel do Gestor":     ("◈",  "core",  "Gestor"),
-    "Auditoria":            ("◎",  "core",  "Auditoria"),
-    "Apontamento":          ("◉",  "core",  "Apontamento"),
-    "Matriz":               ("⊞",  "core",  "Matriz"),
-    "Configuração Guiada":  ("⚙",  "admin", "Setup"),
-    "Admin - Usuários":     ("⊹",  "admin", "Usuários"),
-    "Admin - Departamentos":("◩",  "admin", "Depart."),
-    "Admin - Grupos":       ("⊕",  "admin", "Grupos"),
-    "Admin - Equipamentos": ("◫",  "admin", "Equipamentos"),
-    "Admin - Integridade":  ("🧪", "admin", "Integridade"),
+    "Início": ("⌂", "core", "Início"),
+    "Dashboard": ("▣", "core", "Dashboard"),
+    "Painel do Gestor": ("◈", "core", "Gestor"),
+    "Auditoria": ("◎", "core", "Auditoria"),
+    "Apontamento": ("◉", "core", "Apontamento"),
+    "Matriz": ("⊞", "core", "Matriz"),
+    "Configuração Guiada": ("⚙", "admin", "Setup"),
+    "Admin - Usuários": ("⊹", "admin", "Usuários"),
+    "Admin - Departamentos": ("◩", "admin", "Depart."),
+    "Admin - Grupos": ("⊕", "admin", "Grupos"),
+    "Admin - Equipamentos": ("◫", "admin", "Equipamentos"),
+    "Admin - Integridade": ("🧪", "admin", "Integridade"),
     "Admin - Setores & Serviços": ("◧", "admin", "Setores"),
-    "Admin - Templates":    ("◪",  "admin", "Templates"),
-    "Admin - Revisões":     ("◑",  "admin", "Revisões"),
+    "Admin - Templates": ("◪", "admin", "Templates"),
+    "Admin - Revisões": ("◑", "admin", "Revisões"),
     "Admin - Branding & Relatórios": ("◒", "admin", "Branding"),
 }
 
 # Mapeamento de status para (label visivel, cor st.badge)
 _STATUS_BADGE: dict[str, tuple[str, str]] = {
     # Tarefas
-    "pendente":     ("Pendente",     "orange"),
+    "pendente": ("Pendente", "orange"),
     "em_andamento": ("Em andamento", "blue"),
-    "concluido":    ("Concluido",    "green"),
-    "travado":      ("Travado",      "red"),
-    "nao_aplica":   ("N/A",          "gray"),
+    "concluido": ("Concluido", "green"),
+    "travado": ("Travado", "red"),
+    "nao_aplica": ("N/A", "gray"),
     # Revisoes
-    "ativa":        ("Ativa",        "green"),
-    "fechada":      ("Fechada",      "gray"),
-    "arquivada":    ("Arquivada",    "orange"),
+    "ativa": ("Ativa", "green"),
+    "fechada": ("Fechada", "gray"),
+    "arquivada": ("Arquivada", "orange"),
     # Risco
-    "alto":         ("Alto",         "red"),
-    "medio":        ("Medio",        "orange"),
-    "baixo":        ("Baixo",        "green"),
+    "alto": ("Alto", "red"),
+    "medio": ("Medio", "orange"),
+    "baixo": ("Baixo", "green"),
 }
 
 # Cores hex correspondentes (para contextos HTML que nao aceitam st.badge)
 _STATUS_HEX: dict[str, str] = {
     "orange": "#D69E2E",
-    "blue":   "#3182CE",
-    "green":  "#38A169",
-    "red":    "#C53030",
-    "gray":   "#718096",
+    "blue": "#3182CE",
+    "green": "#38A169",
+    "red": "#C53030",
+    "gray": "#718096",
 }
 
 
@@ -78,7 +78,10 @@ def _load_css(filename: str) -> str:
 
 
 def inject_global_css() -> None:
-    st.markdown(f"<style>{_load_css('global.css')}</style>", unsafe_allow_html=True)
+    st.markdown(
+        f"<style>{
+            _load_css('global.css')}</style>",
+        unsafe_allow_html=True)
 
 
 def inject_mobile_css() -> None:
@@ -86,7 +89,10 @@ def inject_mobile_css() -> None:
 
     Objetivos: alvos de toque maiores, menos densidade, sidebar escondida.
     """
-    st.markdown(f"<style>{_load_css('mobile.css')}</style>", unsafe_allow_html=True)
+    st.markdown(
+        f"<style>{
+            _load_css('mobile.css')}</style>",
+        unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -139,15 +145,19 @@ def status_chip(status: str) -> str:
 
 _ACCENT_COLORS = {
     "primary": "#FFD100",
-    "ok":      "#38A169",
-    "warn":    "#D69E2E",
-    "danger":  "#C53030",
-    "blue":    "#3182CE",
+    "ok": "#38A169",
+    "warn": "#D69E2E",
+    "danger": "#C53030",
+    "blue": "#3182CE",
     "neutral": "rgba(255,255,255,0.15)",
 }
 
 
-def kpi_card(title: str, value: str, subtitle: str = "", accent: str = "primary") -> None:
+def kpi_card(
+        title: str,
+        value: str,
+        subtitle: str = "",
+        accent: str = "primary") -> None:
     """Card KPI com barra lateral colorida (componente HTML via .ea-card CSS).
 
     Prefira st.metric para dados simples. Use kpi_card quando precisar de
@@ -173,10 +183,10 @@ def kpi_card(title: str, value: str, subtitle: str = "", accent: str = "primary"
 def pill(text: str, variant: str = "") -> None:
     """Exibe uma pilula colorida usando st.badge nativo (1.42+)."""
     _variant_color = {
-        "ok":      "green",
-        "warn":    "orange",
-        "danger":  "red",
-        "info":    "blue",
+        "ok": "green",
+        "warn": "orange",
+        "danger": "red",
+        "info": "blue",
         "neutral": "gray",
         "primary": "violet",
     }
@@ -214,14 +224,15 @@ def page_header(
 
         page_header("▣", "Dashboard", "Visao geral", actions=_acoes)
     """
-    icon     = kwargs.pop("icon",     "")
-    title    = kwargs.pop("title",    "")
+    icon = kwargs.pop("icon", "")
+    title = kwargs.pop("title", "")
     subtitle = kwargs.pop("subtitle", "")
 
     if kwargs:
         raise TypeError(
-            f"page_header() recebeu kwargs inesperados: {', '.join(kwargs.keys())}"
-        )
+            f"page_header() recebeu kwargs inesperados: {
+                ', '.join(
+                    kwargs.keys())}")
 
     if args:
         if len(args) == 1:
@@ -231,10 +242,11 @@ def page_header(
         elif len(args) == 3:
             icon, title, subtitle = args
         else:
-            raise TypeError("page_header() aceita 1, 2 ou 3 argumentos posicionais")
+            raise TypeError(
+                "page_header() aceita 1, 2 ou 3 argumentos posicionais")
 
-    icon     = str(icon or "").strip()
-    title    = str(title or "").strip()
+    icon = str(icon or "").strip()
+    title = str(title or "").strip()
     subtitle = str(subtitle or "").strip()
 
     if actions is not None:

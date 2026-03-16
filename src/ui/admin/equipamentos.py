@@ -11,7 +11,8 @@ from src.ui.admin.equipamentos_tabs.audit import render_audit_tab
 
 
 def render_admin_equipamentos():
-    _ph("◫", "Equipamentos", "Importe frotas e organize em grupos. Remanejamento em lote suportado.")
+    _ph("◫", "Equipamentos",
+        "Importe frotas e organize em grupos. Remanejamento em lote suportado.")
     inject_design_system_css()
 
     role = current_role()
@@ -30,7 +31,8 @@ def render_admin_equipamentos():
     if sb is None:
         sb = sb_for_user()
 
-    tab1, tab2, tab3 = st.tabs(["Importar CSV", "Organizar / Remanejar", "Histórico (Auditoria)"])
+    tab1, tab2, tab3 = st.tabs(
+        ["Importar CSV", "Organizar / Remanejar", "Histórico (Auditoria)"])
     with tab1:
         render_import_csv_tab(sb, tenant_id)
     with tab2:

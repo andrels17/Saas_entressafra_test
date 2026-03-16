@@ -48,20 +48,26 @@ def _load_revisao(sb, tenant_id: str) -> dict | None:
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def _load_base_cached(_tenant_id: str, _revisao_id: str, _ver: str = "0") -> tuple[list, list]:
+def _load_base_cached(_tenant_id: str, _revisao_id: str,
+                      _ver: str = "0") -> tuple[list, list]:
     sb = sb_for_user()
     try:
-        raw = sb.table("mv_matriz_base").select("*").eq("tenant_id", _tenant_id).eq("revisao_id", _revisao_id).execute().data or []
+        raw = sb.table("mv_matriz_base").select("*").eq("tenant_id",
+                                                        _tenant_id).eq("revisao_id", _revisao_id).execute().data or []
     except Exception:
         raw = []
     try:
-        eq_meta = sb.table("equipamentos").select("id,frota,modelo,departamento_id").eq("tenant_id", _tenant_id).eq("ativo", True).execute().data or []
+        eq_meta = sb.table("equipamentos").select("id,frota,modelo,departamento_id").eq(
+            "tenant_id", _tenant_id).eq("ativo", True).execute().data or []
     except Exception:
         eq_meta = []
     return raw, eq_meta
 
 
-def _load_base(sb, tenant_id: str, revisao_id: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+def _load_base(sb,
+               tenant_id: str,
+               revisao_id: str) -> tuple[pd.DataFrame,
+                                         pd.DataFrame]:
     ver = str(st.session_state.get("data_version", "0"))
     raw_list, eq_list = _load_base_cached(tenant_id, revisao_id, ver)
     raw = pd.DataFrame(raw_list)
@@ -105,7 +111,12 @@ def _load_grupos(_tenant_id: str, _ver: str = "0") -> list[dict]:
         return []
 
 
-def _render_pct_rank_chart(df: pd.DataFrame, category_col: str, value_col: str, title: str, top_n: int = 10) -> None:
+def _render_pct_rank_chart(
+        df: pd.DataFrame,
+        category_col: str,
+        value_col: str,
+        title: str,
+        top_n: int = 10) -> None:
     chart_df = df.copy()
     if chart_df.empty or category_col not in chart_df.columns or value_col not in chart_df.columns:
         st.info("Sem dados para exibir.")
@@ -113,7 +124,11 @@ def _render_pct_rank_chart(df: pd.DataFrame, category_col: str, value_col: str, 
 
     chart_df = chart_df[[category_col, value_col]].copy()
     chart_df[category_col] = chart_df[category_col].fillna("—").astype(str)
-    chart_df[value_col] = pd.to_numeric(chart_df[value_col], errors="coerce").fillna(0).clip(0, 100)
+    chart_df[value_col] = pd.to_numeric(
+        chart_df[value_col],
+        errors="coerce").fillna(0).clip(
+        0,
+        100)
     chart_df = chart_df.sort_values(value_col, ascending=False).head(top_n)
     chart_df = chart_df.sort_values(value_col, ascending=True)
     chart_df["label"] = chart_df[value_col].map(lambda v: f"{v:.1f}%")
@@ -126,7 +141,10 @@ def _render_pct_rank_chart(df: pd.DataFrame, category_col: str, value_col: str, 
         text="label",
         title=title,
     )
-    fig.update_traces(textposition="outside", cliponaxis=False, hovertemplate="%{y}<br>% Concluído: %{x:.1f}%<extra></extra>")
+    fig.update_traces(
+        textposition="outside",
+        cliponaxis=False,
+        hovertemplate="%{y}<br>% Concluído: %{x:.1f}%<extra></extra>")
     fig.update_layout(
         height=max(380, 42 * len(chart_df) + 80),
         margin=dict(l=10, r=90, t=48, b=10),
@@ -137,39 +155,74 @@ def _render_pct_rank_chart(df: pd.DataFrame, category_col: str, value_col: str, 
         font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=11),
         showlegend=False,
     )
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(
+        fig, use_container_width=True, config={
+            "displayModeBar": False})
 
 
 @st.fragment
 def _fragment_kpis_globais(overall: dict) -> None:
     from src.utils.ui_helpers import mobile_columns
     cols = mobile_columns(5, 2)
-    labels = [
-        ("% Concluído", f"{overall['pct']:.1f}%", None, "off", "Percentual global alinhado à mesma regra da Matriz/Home."),
-        ("Concluídos", overall["concl"], None, "off", None),
-        ("Em andamento", overall["andamento"], None, "off", None),
-        ("Pendentes", overall["pend"], None, "off", None),
-        ("Travados", overall["trav"], None, "off", None),
-    ]
+    labels = [("% Concluído",
+               f"{overall['pct']:.1f}%",
+               None,
+               "off",
+               "Percentual global alinhado à mesma regra da Matriz/Home."),
+              ("Concluídos",
+               overall["concl"],
+               None,
+               "off",
+               None),
+              ("Em andamento",
+               overall["andamento"],
+               None,
+               "off",
+               None),
+              ("Pendentes",
+               overall["pend"],
+               None,
+               "off",
+               None),
+              ("Travados",
+               overall["trav"],
+               None,
+               "off",
+               None),
+              ]
     for i, (label, value, delta, delta_color, help_text) in enumerate(labels):
         with cols[i % len(cols)]:
-            st.metric(label, value, delta=delta, delta_color=delta_color, help=help_text)
+            st.metric(
+                label,
+                value,
+                delta=delta,
+                delta_color=delta_color,
+                help=help_text)
 
 
 @st.fragment
 def _fragment_previsao(previsao: dict, risco: dict) -> None:
     _RISCO_ICONS = {"baixo": "🟢", "medio": "🟡", "alto": "🔴"}
-    _PREV_LABELS = {"no_prazo": "✅ No prazo", "atraso": "⚠️ Com atraso", "sem_base": "— Sem base"}
+    _PREV_LABELS = {
+        "no_prazo": "✅ No prazo",
+        "atraso": "⚠️ Com atraso",
+        "sem_base": "— Sem base"}
     status_prev = previsao.get("status_previsao", "sem_base")
     status_risco = risco.get("status_risco", "baixo")
 
     c1, c2 = st.columns(2)
     with c1:
-        st.metric("Previsão de término", _PREV_LABELS.get(status_prev, status_prev))
+        st.metric(
+            "Previsão de término",
+            _PREV_LABELS.get(
+                status_prev,
+                status_prev))
         if previsao.get("previsao_termino"):
-            st.caption(f"Data estimada: **{fmt_date(previsao['previsao_termino'])}**")
+            st.caption(
+                f"Data estimada: **{fmt_date(previsao['previsao_termino'])}**")
         if previsao.get("data_fim_planejada"):
-            st.caption(f"Data planejada: **{fmt_date(previsao['data_fim_planejada'])}**")
+            st.caption(
+                f"Data planejada: **{fmt_date(previsao['data_fim_planejada'])}**")
     with c2:
         icon = _RISCO_ICONS.get(status_risco, "⚪")
         st.metric(
@@ -185,25 +238,45 @@ def _fragment_previsao(previsao: dict, risco: dict) -> None:
 
 
 @st.fragment
-def _fragment_grupos(base: pd.DataFrame, dept_map: dict, group_kpis_df: pd.DataFrame | None = None, top_n: int = 10) -> None:
-    gdf = group_kpis_df.copy() if group_kpis_df is not None and not group_kpis_df.empty else group_progress(base)
+def _fragment_grupos(
+        base: pd.DataFrame,
+        dept_map: dict,
+        group_kpis_df: pd.DataFrame | None = None,
+        top_n: int = 10) -> None:
+    gdf = group_kpis_df.copy(
+    ) if group_kpis_df is not None and not group_kpis_df.empty else group_progress(base)
     if gdf.empty:
-        empty_state(icon="⊕", title="Sem dados de grupos", description="Nenhum grupo com tarefas para esta revisão.")
+        empty_state(icon="⊕", title="Sem dados de grupos",
+                    description="Nenhum grupo com tarefas para esta revisão.")
         return
     gdf = gdf.copy()
     gdf["Departamento"] = gdf["departamento_id"].map(dept_map).fillna("—")
-    gdf["pct_concluido"] = pd.to_numeric(gdf["pct_concluido"], errors="coerce").fillna(0).clip(0, 100)
+    gdf["pct_concluido"] = pd.to_numeric(
+        gdf["pct_concluido"],
+        errors="coerce").fillna(0).clip(
+        0,
+        100)
     display = (
         gdf[["grupo", "Departamento", "pct_concluido"]]
         .rename(columns={"grupo": "Grupo", "pct_concluido": "% Concluído"})
         .sort_values(["% Concluído", "Grupo"], ascending=[False, True])
     )
-    _render_pct_rank_chart(display, "Grupo", "% Concluído", f"Top {top_n} grupos por % de conclusão", top_n=top_n)
+    _render_pct_rank_chart(
+        display,
+        "Grupo",
+        "% Concluído",
+        f"Top {top_n} grupos por % de conclusão",
+        top_n=top_n)
     st.dataframe(
         display.head(top_n),
         use_container_width=True,
         hide_index=True,
-        column_config={"% Concluído": st.column_config.ProgressColumn("% Concluído", min_value=0, max_value=100, format="%.1f%%")},
+        column_config={
+            "% Concluído": st.column_config.ProgressColumn(
+                "% Concluído",
+                min_value=0,
+                max_value=100,
+                format="%.1f%%")},
     )
     with st.expander("⬇ Exportar", expanded=False):
         from src.utils.ui_helpers import df_to_xlsx
@@ -217,10 +290,14 @@ def _fragment_grupos(base: pd.DataFrame, dept_map: dict, group_kpis_df: pd.DataF
             )
         with col_xlsx:
             st.download_button(
-                "XLSX", df_to_xlsx(_exp, sheet_name="Grupos"),
+                "XLSX",
+                df_to_xlsx(
+                    _exp,
+                    sheet_name="Grupos"),
                 file_name="dashboard_grupos.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True, key="dash_grupos_xlsx",
+                use_container_width=True,
+                key="dash_grupos_xlsx",
             )
 
 
@@ -230,13 +307,27 @@ def _fragment_setores(base: pd.DataFrame, top_n: int = 10) -> None:
     if sdf.empty:
         st.info("Sem dados de setores.")
         return
-    display = sdf.rename(columns={"setor": "Setor", "pct_concluido": "% Concluído"}).sort_values(["% Concluído", "Setor"], ascending=[False, True])
-    _render_pct_rank_chart(display, "Setor", "% Concluído", f"Top {top_n} setores por % de conclusão", top_n=top_n)
+    display = sdf.rename(columns={"setor": "Setor", "pct_concluido": "% Concluído"}).sort_values(
+        ["% Concluído", "Setor"], ascending=[False, True])
+    _render_pct_rank_chart(
+        display,
+        "Setor",
+        "% Concluído",
+        f"Top {top_n} setores por % de conclusão",
+        top_n=top_n)
     st.dataframe(
-        display.head(top_n)[["Setor", "% Concluído"]],
+        display.head(top_n)[
+            [
+                "Setor",
+                "% Concluído"]],
         use_container_width=True,
         hide_index=True,
-        column_config={"% Concluído": st.column_config.ProgressColumn("% Concluído", min_value=0, max_value=100, format="%.1f%%")},
+        column_config={
+            "% Concluído": st.column_config.ProgressColumn(
+                "% Concluído",
+                min_value=0,
+                max_value=100,
+                format="%.1f%%")},
     )
     with st.expander("⬇ Exportar", expanded=False):
         from src.utils.ui_helpers import df_to_xlsx
@@ -250,15 +341,22 @@ def _fragment_setores(base: pd.DataFrame, top_n: int = 10) -> None:
             )
         with col_xlsx:
             st.download_button(
-                "XLSX", df_to_xlsx(_exp, sheet_name="Setores"),
+                "XLSX",
+                df_to_xlsx(
+                    _exp,
+                    sheet_name="Setores"),
                 file_name="dashboard_setores.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True, key="dash_setores_xlsx",
+                use_container_width=True,
+                key="dash_setores_xlsx",
             )
 
 
 @st.fragment
-def _fragment_equipamentos(base: pd.DataFrame, dept_map: dict, top_n: int = 10) -> None:
+def _fragment_equipamentos(
+        base: pd.DataFrame,
+        dept_map: dict,
+        top_n: int = 10) -> None:
     edf = equipment_progress(base)
     if edf.empty:
         st.info("Sem dados de equipamentos.")
@@ -269,7 +367,10 @@ def _fragment_equipamentos(base: pd.DataFrame, dept_map: dict, top_n: int = 10) 
     edf["Modelo"] = edf["Modelo"].fillna("—").astype(str).str.strip()
     edf["Departamento"] = edf["departamento_id"].map(dept_map).fillna("—")
 
-    busca = st.text_input("Buscar frota / modelo", placeholder="Ex.: 2055, JD 6190…", key="dash_busca_eq")
+    busca = st.text_input(
+        "Buscar frota / modelo",
+        placeholder="Ex.: 2055, JD 6190…",
+        key="dash_busca_eq")
     if busca.strip():
         termo = busca.strip().lower()
         mask = (
@@ -282,42 +383,80 @@ def _fragment_equipamentos(base: pd.DataFrame, dept_map: dict, top_n: int = 10) 
         st.info("Nenhum equipamento encontrado para o filtro informado.")
         return
 
-    # Consolida por código de frota + modelo para evitar linhas duplicadas no gráfico.
-    agg = (
-        edf.groupby(["Frota", "Modelo", "Departamento"], dropna=False, as_index=False)
-        .agg({
-            "Total": "sum",
-            "Pendentes": "sum",
-            "Em andamento": "sum",
-            "Travados": "sum",
-            "Não aplica": "sum",
-            "Concluídos": "sum",
-            "done_steps": "sum",
-            "expected_steps": "sum",
-        })
-    )
+    # Consolida por código de frota + modelo para evitar linhas duplicadas no
+    # gráfico.
+    agg = (edf.groupby(["Frota",
+                        "Modelo",
+                        "Departamento"],
+                       dropna=False,
+                       as_index=False) .agg({"Total": "sum",
+                                             "Pendentes": "sum",
+                                             "Em andamento": "sum",
+                                             "Travados": "sum",
+                                             "Não aplica": "sum",
+                                             "Concluídos": "sum",
+                                             "done_steps": "sum",
+                                             "expected_steps": "sum",
+                                             }))
     agg["% Concluído"] = (
-        (pd.to_numeric(agg["done_steps"], errors="coerce").fillna(0)
-         / pd.to_numeric(agg["expected_steps"], errors="coerce").replace(0, pd.NA)) * 100
-    ).fillna(0).clip(0, 100).round(1)
+        (pd.to_numeric(
+            agg["done_steps"],
+            errors="coerce").fillna(0) /
+            pd.to_numeric(
+            agg["expected_steps"],
+            errors="coerce").replace(
+                0,
+                pd.NA)) *
+        100).fillna(0).clip(
+        0,
+        100).round(1)
     agg["Equipamento"] = agg.apply(
-        lambda r: f"{r['Frota']} — {r['Modelo']}" if str(r["Modelo"]).strip() not in {"", "—"} else str(r["Frota"]),
+        lambda r: f"{
+            r['Frota']} — {
+            r['Modelo']}" if str(
+                r["Modelo"]).strip() not in {
+                    "",
+                    "—"} else str(
+                        r["Frota"]),
         axis=1,
     )
 
-    rank_df = agg.sort_values(["% Concluído", "Concluídos", "Equipamento"], ascending=[False, False, True]).head(top_n)
-    _render_pct_rank_chart(rank_df, "Equipamento", "% Concluído", f"Top {top_n} equipamentos por % de conclusão", top_n=top_n)
+    rank_df = agg.sort_values(["% Concluído", "Concluídos", "Equipamento"], ascending=[
+                              False, False, True]).head(top_n)
+    _render_pct_rank_chart(
+        rank_df,
+        "Equipamento",
+        "% Concluído",
+        f"Top {top_n} equipamentos por % de conclusão",
+        top_n=top_n)
 
-    cols = ["Equipamento", "Frota", "Modelo", "Departamento", "Total", "% Concluído", "Pendentes", "Em andamento", "Travados", "Não aplica", "Concluídos"]
+    cols = [
+        "Equipamento",
+        "Frota",
+        "Modelo",
+        "Departamento",
+        "Total",
+        "% Concluído",
+        "Pendentes",
+        "Em andamento",
+        "Travados",
+        "Não aplica",
+        "Concluídos"]
     st.dataframe(
         rank_df[cols],
         use_container_width=True,
         hide_index=True,
-        column_config={"% Concluído": st.column_config.ProgressColumn("% Concluído", min_value=0, max_value=100, format="%.1f%%")},
+        column_config={
+            "% Concluído": st.column_config.ProgressColumn(
+                "% Concluído",
+                min_value=0,
+                max_value=100,
+                format="%.1f%%")},
     )
     with st.expander("⬇ Exportar tabela completa", expanded=False):
         from src.utils.ui_helpers import df_to_xlsx
-        _exp = agg[cols].sort_values(["% Concluído", "Equipamento"], ascending=[False, True])
+        _exp = agg[cols].sort_values(
+            ["% Concluído", "Equipamento"], ascending=[False, True])
         col_csv, col_xlsx = st.columns(2)
         with col_csv:
             st.download_button(
@@ -327,10 +466,14 @@ def _fragment_equipamentos(base: pd.DataFrame, dept_map: dict, top_n: int = 10) 
             )
         with col_xlsx:
             st.download_button(
-                "XLSX", df_to_xlsx(_exp, sheet_name="Equipamentos"),
+                "XLSX",
+                df_to_xlsx(
+                    _exp,
+                    sheet_name="Equipamentos"),
                 file_name="dashboard_equipamentos.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True, key="dash_eq_xlsx",
+                use_container_width=True,
+                key="dash_eq_xlsx",
             )
 
 
@@ -345,7 +488,10 @@ def _fragment_heatmap(heat: pd.DataFrame) -> None:
         y="grupo",
         z="calor_score",
         color_continuous_scale="RdYlGn_r",
-        labels={"setor": "Setor", "grupo": "Grupo", "calor_score": "Score de risco"},
+        labels={
+            "setor": "Setor",
+            "grupo": "Grupo",
+            "calor_score": "Score de risco"},
         title="Heatmap de Risco — Grupo × Setor",
     )
     fig.update_layout(
@@ -355,8 +501,11 @@ def _fragment_heatmap(heat: pd.DataFrame) -> None:
         plot_bgcolor="#0C111A",
         font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=11),
     )
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-    st.caption("Score: travado × 3 + pendente × 1.5 + em_andamento × 1, normalizado por total.")
+    st.plotly_chart(
+        fig, use_container_width=True, config={
+            "displayModeBar": False})
+    st.caption(
+        "Score: travado × 3 + pendente × 1.5 + em_andamento × 1, normalizado por total.")
 
 
 @st.fragment
@@ -364,18 +513,21 @@ def _fragment_criticidade(crit: pd.DataFrame) -> None:
     if crit.empty:
         st.info("Sem equipamentos críticos para exibir.")
         return
-    cols = ["ranking_criticidade", "Equipamento", "grupo", "criticidade_score", "travados", "pendentes", "pct_concluido"]
+    cols = [
+        "ranking_criticidade",
+        "Equipamento",
+        "grupo",
+        "criticidade_score",
+        "travados",
+        "pendentes",
+        "pct_concluido"]
     present = [c for c in cols if c in crit.columns]
     st.dataframe(
-        crit[present].head(20),
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "ranking_criticidade": st.column_config.NumberColumn("#", width="small"),
-            "criticidade_score": st.column_config.NumberColumn("Score", format="%.2f"),
-            "pct_concluido": st.column_config.ProgressColumn("% Concluído", min_value=0, max_value=100),
-        },
-    )
+        crit[present].head(20), use_container_width=True, hide_index=True, column_config={
+            "ranking_criticidade": st.column_config.NumberColumn(
+                "#", width="small"), "criticidade_score": st.column_config.NumberColumn(
+                "Score", format="%.2f"), "pct_concluido": st.column_config.ProgressColumn(
+                    "% Concluído", min_value=0, max_value=100), }, )
 
 
 @st.fragment
@@ -384,8 +536,14 @@ def _fragment_timeline(tl: pd.DataFrame) -> None:
         st.info("Sem movimentações registradas nesta revisão.")
         return
     plot_df = tl.copy().sort_values("dia")
-    plot_df["dia_label"] = pd.to_datetime(plot_df["dia"], errors="coerce").dt.strftime("%d/%m")
-    fig = px.bar(plot_df, x="dia_label", y="movimentacoes", text="movimentacoes", title="Movimentações por dia")
+    plot_df["dia_label"] = pd.to_datetime(
+        plot_df["dia"], errors="coerce").dt.strftime("%d/%m")
+    fig = px.bar(
+        plot_df,
+        x="dia_label",
+        y="movimentacoes",
+        text="movimentacoes",
+        title="Movimentações por dia")
     fig.update_traces(textposition="outside", cliponaxis=False)
     fig.update_layout(
         height=360,
@@ -397,7 +555,9 @@ def _fragment_timeline(tl: pd.DataFrame) -> None:
         font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=11),
         showlegend=False,
     )
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(
+        fig, use_container_width=True, config={
+            "displayModeBar": False})
     st.dataframe(
         tl.sort_values("dia", ascending=False),
         use_container_width=True,
@@ -437,7 +597,11 @@ def render_dashboard() -> None:
         st.markdown(f"## {rev.get('titulo', 'Revisão')}")
         status_badge(rev.get("status"))
     with h2:
-        if st.button("Atualizar", icon=":material/refresh:", use_container_width=True, key="dash_refresh_btn"):
+        if st.button(
+            "Atualizar",
+            icon=":material/refresh:",
+            use_container_width=True,
+                key="dash_refresh_btn"):
             st.session_state["data_version"] = str(time.time())
             st.toast("Atualizado", icon=":material/refresh:")
             st.rerun()
@@ -448,9 +612,11 @@ def render_dashboard() -> None:
         departamentos = _load_departamentos(tenant_id, ver)
         grupos = _load_grupos(tenant_id, ver)
 
-    dept_map = {d["id"]: d.get("nome", "—") for d in departamentos if d.get("id")}
+    dept_map = {d["id"]: d.get("nome", "—")
+                for d in departamentos if d.get("id")}
     gid_to_name = {g["id"]: g.get("nome", "—") for g in grupos if g.get("id")}
-    gid_to_dept = {g["id"]: g.get("departamento_id") for g in grupos if g.get("id")}
+    gid_to_dept = {g["id"]: g.get("departamento_id")
+                   for g in grupos if g.get("id")}
 
     base = normalize_matriz_base(raw, eq_meta)
     if base.empty:
@@ -462,43 +628,77 @@ def render_dashboard() -> None:
     group_kpis_df = get_group_kpis(tenant_id, revisao_id, ver)
     if group_kpis_df is not None and not group_kpis_df.empty:
         if grp_scope_ids:
-            group_kpis_df = group_kpis_df[group_kpis_df["grupo_id"].isin(grp_scope_ids)]
+            group_kpis_df = group_kpis_df[group_kpis_df["grupo_id"].isin(
+                grp_scope_ids)]
         if dep_scope_ids:
-            group_kpis_df = group_kpis_df[group_kpis_df["grupo_id"].map(gid_to_dept).isin(dep_scope_ids)]
+            group_kpis_df = group_kpis_df[group_kpis_df["grupo_id"].map(
+                gid_to_dept).isin(dep_scope_ids)]
         dashboard_groups = group_kpis_df.copy()
-        dashboard_groups["grupo"] = dashboard_groups["grupo_id"].map(gid_to_name).fillna("—")
-        dashboard_groups["departamento_id"] = dashboard_groups["grupo_id"].map(gid_to_dept)
-        dashboard_groups["pct_concluido"] = pd.to_numeric(dashboard_groups.get("pct", 0), errors="coerce").fillna(0).clip(0, 100)
+        dashboard_groups["grupo"] = dashboard_groups["grupo_id"].map(
+            gid_to_name).fillna("—")
+        dashboard_groups["departamento_id"] = dashboard_groups["grupo_id"].map(
+            gid_to_dept)
+        dashboard_groups["pct_concluido"] = pd.to_numeric(
+            dashboard_groups.get(
+                "pct", 0), errors="coerce").fillna(0).clip(
+            0, 100)
     else:
         dashboard_groups = group_progress(base)
 
     st.markdown("### Filtros")
     c1, c2, c3 = st.columns([1.1, 1.4, 0.6])
-    dept_options = [(d["id"], d.get("nome", "—")) for d in departamentos if d.get("id")]
-    dept_options = [o for o in dept_options if not dep_scope_ids or o[0] in dep_scope_ids]
+    dept_options = [(d["id"], d.get("nome", "—"))
+                    for d in departamentos if d.get("id")]
+    dept_options = [
+        o for o in dept_options if not dep_scope_ids or o[0] in dep_scope_ids]
     dept_label_to_id = {name: did for did, name in dept_options}
-    dept_selected_names = c1.multiselect("Departamento", options=[name for _, name in dept_options], key="dash_filter_dept")
-    dept_selected_ids = [dept_label_to_id[name] for name in dept_selected_names]
+    dept_selected_names = c1.multiselect(
+        "Departamento",
+        options=[
+            name for _,
+            name in dept_options],
+        key="dash_filter_dept")
+    dept_selected_ids = [dept_label_to_id[name]
+                         for name in dept_selected_names]
 
-    group_options = [(g["id"], g.get("nome", "—"), g.get("departamento_id")) for g in grupos if g.get("id")]
+    group_options = [(g["id"], g.get("nome", "—"), g.get(
+        "departamento_id")) for g in grupos if g.get("id")]
     if grp_scope_ids:
         group_options = [o for o in group_options if o[0] in grp_scope_ids]
     if dept_selected_ids:
         group_options = [o for o in group_options if o[2] in dept_selected_ids]
     group_label_to_id = {name: gid for gid, name, _ in group_options}
-    group_selected_names = c2.multiselect("Grupo", options=[name for _, name, _ in group_options], key="dash_filter_group")
-    group_selected_ids = [group_label_to_id[name] for name in group_selected_names]
-    top_n = int(c3.selectbox("Top", options=[5, 10, 15], index=1, key="dash_filter_top"))
+    group_selected_names = c2.multiselect(
+        "Grupo",
+        options=[
+            name for _,
+            name,
+            _ in group_options],
+        key="dash_filter_group")
+    group_selected_ids = [group_label_to_id[name]
+                          for name in group_selected_names]
+    top_n = int(
+        c3.selectbox(
+            "Top",
+            options=[
+                5,
+                10,
+                15],
+            index=1,
+            key="dash_filter_top"))
 
     base_filtered = apply_filters(base, dept_selected_ids, group_selected_ids)
     dashboard_groups_filtered = dashboard_groups.copy()
     if dept_selected_ids and "departamento_id" in dashboard_groups_filtered.columns:
-        dashboard_groups_filtered = dashboard_groups_filtered[dashboard_groups_filtered["departamento_id"].isin(dept_selected_ids)]
+        dashboard_groups_filtered = dashboard_groups_filtered[dashboard_groups_filtered["departamento_id"].isin(
+            dept_selected_ids)]
     if group_selected_ids and "grupo_id" in dashboard_groups_filtered.columns:
-        dashboard_groups_filtered = dashboard_groups_filtered[dashboard_groups_filtered["grupo_id"].isin(group_selected_ids)]
+        dashboard_groups_filtered = dashboard_groups_filtered[dashboard_groups_filtered["grupo_id"].isin(
+            group_selected_ids)]
 
     if base_filtered.empty:
-        st.warning("Os filtros selecionados não retornaram dados para esta revisão.")
+        st.warning(
+            "Os filtros selecionados não retornaram dados para esta revisão.")
         return
 
     if dashboard_groups_filtered is None or dashboard_groups_filtered.empty:
@@ -521,7 +721,13 @@ def render_dashboard() -> None:
     _fragment_previsao(previsao, risco)
     st.divider()
 
-    tabs = ["🏗️ Grupos", "🔧 Equipamentos", "📋 Setores", "🌡️ Heatmap", "⚠️ Criticidade", "📈 Timeline"]
+    tabs = [
+        "🏗️ Grupos",
+        "🔧 Equipamentos",
+        "📋 Setores",
+        "🌡️ Heatmap",
+        "⚠️ Criticidade",
+        "📈 Timeline"]
 
     def _on_tab_change() -> None:
         st.session_state["_dash_tab"] = st.session_state["_dash_tab_ctrl"]
@@ -530,12 +736,22 @@ def render_dashboard() -> None:
     if active not in tabs:
         active = tabs[0]
 
-    st.segmented_control("Visão", tabs, default=active, key="_dash_tab_ctrl", on_change=_on_tab_change, label_visibility="collapsed")
+    st.segmented_control(
+        "Visão",
+        tabs,
+        default=active,
+        key="_dash_tab_ctrl",
+        on_change=_on_tab_change,
+        label_visibility="collapsed")
     active = st.session_state.get("_dash_tab", tabs[0])
 
     if active == "🏗️ Grupos":
         st.markdown("### Progresso por grupo")
-        _fragment_grupos(base_filtered, dept_map, dashboard_groups_filtered, top_n=top_n)
+        _fragment_grupos(
+            base_filtered,
+            dept_map,
+            dashboard_groups_filtered,
+            top_n=top_n)
     elif active == "🔧 Equipamentos":
         st.markdown("### Progresso por equipamento")
         _fragment_equipamentos(base_filtered, dept_map, top_n=top_n)

@@ -31,7 +31,8 @@ def _safe_select_equipamentos(sb, tenant_id: str):
 
 
 def render_admin_integridade():
-    _ph("🧪", "Integridade", "Diagnóstico e correção rápida de inconsistências (órfãos, vazios e campos faltando).")
+    _ph("🧪", "Integridade",
+        "Diagnóstico e correção rápida de inconsistências (órfãos, vazios e campos faltando).")
 
     role = current_role()
     if role not in ("admin", "superadmin"):
@@ -43,13 +44,17 @@ def render_admin_integridade():
 
     # ---- Fetch (best-effort; tabelas podem variar entre bases) ----
     try:
-        deps = (sb.table("departamentos").select("id,nome,ativo").eq("tenant_id", tenant_id).execute().data) or []
+        deps = (sb.table("departamentos").select("id,nome,ativo").eq(
+            "tenant_id", tenant_id).execute().data) or []
     except Exception as e:
         st.error(f"Falha ao ler departamentos (RLS/colunas): {e}")
         deps = []
 
     try:
-        grps = (sb.table("equip_grupos").select("id,nome,ativo,departamento_id").eq("tenant_id", tenant_id).execute().data) or []
+        grps = (
+            sb.table("equip_grupos").select("id,nome,ativo,departamento_id").eq(
+                "tenant_id",
+                tenant_id).execute().data) or []
     except Exception as e:
         st.error(f"Falha ao ler grupos (RLS/colunas): {e}")
         grps = []
@@ -63,9 +68,16 @@ def render_admin_integridade():
     dep_ids = {d.get("id") for d in deps if d.get("id")}
 
     # ---- Anomalias ----
-    equipamentos_sem_grupo = [e for e in eqs if e.get("ativo", True) and not e.get("grupo_id")]
-    equipamentos_sem_dep = [e for e in eqs if e.get("ativo", True) and not e.get("departamento_id")]
-    grupos_sem_dep = [g for g in grps if g.get("ativo", True) and (g.get("departamento_id") is None or g.get("departamento_id") not in dep_ids)]
+    equipamentos_sem_grupo = [
+        e for e in eqs if e.get(
+            "ativo",
+            True) and not e.get("grupo_id")]
+    equipamentos_sem_dep = [e for e in eqs if e.get(
+        "ativo", True) and not e.get("departamento_id")]
+    grupos_sem_dep = [
+        g for g in grps if g.get(
+            "ativo", True) and (
+            g.get("departamento_id") is None or g.get("departamento_id") not in dep_ids)]
 
     # contagens
     grp_to_eq_cnt: dict[str, int] = {}
@@ -79,8 +91,18 @@ def render_admin_integridade():
         if did:
             dep_to_grp_cnt[did] = dep_to_grp_cnt.get(did, 0) + 1
 
-    grupos_vazios = [g for g in grps if g.get("ativo", True) and grp_to_eq_cnt.get(g.get("id"), 0) == 0]
-    deps_vazios = [d for d in deps if d.get("ativo", True) and dep_to_grp_cnt.get(d.get("id"), 0) == 0]
+    grupos_vazios = [
+        g for g in grps if g.get(
+            "ativo",
+            True) and grp_to_eq_cnt.get(
+            g.get("id"),
+            0) == 0]
+    deps_vazios = [
+        d for d in deps if d.get(
+            "ativo",
+            True) and dep_to_grp_cnt.get(
+            d.get("id"),
+            0) == 0]
 
     k1, k2, k3, k4 = st.columns(4, gap="small")
     k1.metric("Equip. sem Grupo", len(equipamentos_sem_grupo))
@@ -93,7 +115,9 @@ def render_admin_integridade():
     # Link rápido para o Supabase Studio (abre em nova aba)
     _supabase_url = st.secrets.get("SUPABASE_URL", "")
     if _supabase_url:
-        _studio_url = _supabase_url.replace(".supabase.co", ".supabase.co/project/_/editor") if "supabase.co" in _supabase_url else _supabase_url
+        _studio_url = _supabase_url.replace(
+            ".supabase.co",
+            ".supabase.co/project/_/editor") if "supabase.co" in _supabase_url else _supabase_url
         st.link_button(
             "Abrir Supabase Studio",
             url=_studio_url,
@@ -108,14 +132,16 @@ def render_admin_integridade():
         with c1:
             st.subheader("Equipamentos sem Grupo")
             if equipamentos_sem_grupo:
-                df = pd.DataFrame([{ "id": e.get("id"), "frota": e.get("frota"), "modelo": e.get("modelo") } for e in equipamentos_sem_grupo[:500]])
+                df = pd.DataFrame([{"id": e.get("id"), "frota": e.get(
+                    "frota"), "modelo": e.get("modelo")} for e in equipamentos_sem_grupo[:500]])
                 st.dataframe(df, use_container_width=True, hide_index=True)
             else:
                 st.info("Nenhum encontrado.")
         with c2:
             st.subheader("Grupos sem Departamento")
             if grupos_sem_dep:
-                df = pd.DataFrame([{ "id": g.get("id"), "nome": g.get("nome"), "departamento_id": g.get("departamento_id") } for g in grupos_sem_dep[:500]])
+                df = pd.DataFrame([{"id": g.get("id"), "nome": g.get(
+                    "nome"), "departamento_id": g.get("departamento_id")} for g in grupos_sem_dep[:500]])
                 st.dataframe(df, use_container_width=True, hide_index=True)
             else:
                 st.info("Nenhum encontrado.")
@@ -125,14 +151,16 @@ def render_admin_integridade():
         with c3:
             st.subheader("Departamentos vazios (sem grupos)")
             if deps_vazios:
-                df = pd.DataFrame([{ "id": d.get("id"), "nome": d.get("nome") } for d in deps_vazios[:500]])
+                df = pd.DataFrame(
+                    [{"id": d.get("id"), "nome": d.get("nome")} for d in deps_vazios[:500]])
                 st.dataframe(df, use_container_width=True, hide_index=True)
             else:
                 st.info("Nenhum encontrado.")
         with c4:
             st.subheader("Grupos vazios (sem equipamentos)")
             if grupos_vazios:
-                df = pd.DataFrame([{ "id": g.get("id"), "nome": g.get("nome"), "departamento_id": g.get("departamento_id") } for g in grupos_vazios[:500]])
+                df = pd.DataFrame([{"id": g.get("id"), "nome": g.get(
+                    "nome"), "departamento_id": g.get("departamento_id")} for g in grupos_vazios[:500]])
                 st.dataframe(df, use_container_width=True, hide_index=True)
             else:
                 st.info("Nenhum encontrado.")
@@ -140,7 +168,8 @@ def render_admin_integridade():
         st.divider()
         st.subheader("Equipamentos sem Departamento")
         if equipamentos_sem_dep:
-            df = pd.DataFrame([{ "id": e.get("id"), "frota": e.get("frota"), "modelo": e.get("modelo") } for e in equipamentos_sem_dep[:500]])
+            df = pd.DataFrame([{"id": e.get("id"), "frota": e.get(
+                "frota"), "modelo": e.get("modelo")} for e in equipamentos_sem_dep[:500]])
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
             st.info("Nenhum encontrado.")
@@ -151,30 +180,53 @@ def render_admin_integridade():
 
         b1, b2, b3 = st.columns(3, gap="small")
         with b1:
-            if st.button("Desativar grupos vazios", icon=":material/block:", use_container_width=True, disabled=(len(grupos_vazios) == 0)):
+            if st.button(
+                "Desativar grupos vazios",
+                icon=":material/block:",
+                use_container_width=True,
+                disabled=(
+                    len(grupos_vazios) == 0)):
                 with st.status("Desativando grupos vazios…", expanded=False):
                     ids = [g.get("id") for g in grupos_vazios if g.get("id")]
                     for i in range(0, len(ids), 200):
-                        sb.table("equip_grupos").update({"ativo": False}).eq("tenant_id", tenant_id).in_("id", ids[i:i+200]).execute()
+                        sb.table("equip_grupos").update({"ativo": False}).eq(
+                            "tenant_id", tenant_id).in_("id", ids[i:i + 200]).execute()
                 st.toast("Grupos vazios desativados.", icon=":material/block:")
                 st.rerun()
 
         with b2:
-            if st.button("Desativar departamentos vazios", icon=":material/block:", use_container_width=True, disabled=(len(deps_vazios) == 0)):
+            if st.button(
+                "Desativar departamentos vazios",
+                icon=":material/block:",
+                use_container_width=True,
+                disabled=(
+                    len(deps_vazios) == 0)):
                 with st.status("Desativando departamentos vazios…", expanded=False):
                     ids = [d.get("id") for d in deps_vazios if d.get("id")]
                     for i in range(0, len(ids), 200):
-                        sb.table("departamentos").update({"ativo": False}).eq("tenant_id", tenant_id).in_("id", ids[i:i+200]).execute()
-                st.toast("Departamentos vazios desativados.", icon=":material/block:")
+                        sb.table("departamentos").update({"ativo": False}).eq(
+                            "tenant_id", tenant_id).in_("id", ids[i:i + 200]).execute()
+                st.toast(
+                    "Departamentos vazios desativados.",
+                    icon=":material/block:")
                 st.rerun()
 
         with b3:
-            if st.button("Desativar equipamentos sem grupo", icon=":material/block:", use_container_width=True, disabled=(len(equipamentos_sem_grupo) == 0)):
+            if st.button(
+                "Desativar equipamentos sem grupo",
+                icon=":material/block:",
+                use_container_width=True,
+                disabled=(
+                    len(equipamentos_sem_grupo) == 0)):
                 with st.status("Desativando equipamentos sem grupo…", expanded=False):
-                    ids = [e.get("id") for e in equipamentos_sem_grupo if e.get("id")]
+                    ids = [e.get("id")
+                           for e in equipamentos_sem_grupo if e.get("id")]
                     for i in range(0, len(ids), 200):
-                        sb.table("equipamentos").update({"ativo": False}).eq("tenant_id", tenant_id).in_("id", ids[i:i+200]).execute()
-                st.toast("Equipamentos sem grupo desativados.", icon=":material/block:")
+                        sb.table("equipamentos").update({"ativo": False}).eq(
+                            "tenant_id", tenant_id).in_("id", ids[i:i + 200]).execute()
+                st.toast(
+                    "Equipamentos sem grupo desativados.",
+                    icon=":material/block:")
                 st.rerun()
 
         st.divider()
@@ -182,10 +234,12 @@ def render_admin_integridade():
         st.caption("Move todos os grupos órfãos para um departamento escolhido.")
 
         if not deps:
-            st.warning("Nenhum departamento encontrado. Crie um departamento antes.")
+            st.warning(
+                "Nenhum departamento encontrado. Crie um departamento antes.")
             return
 
-        dep_labels = [f"{d.get('nome') or 'Sem nome'} ({str(d.get('id'))[:8]})" for d in deps]
+        dep_labels = [
+            f"{d.get('nome') or 'Sem nome'} ({str(d.get('id'))[:8]})" for d in deps]
         dep_choice = st.selectbox("Departamento destino", dep_labels, index=0)
         dest_dep_id = deps[dep_labels.index(dep_choice)].get("id")
 
@@ -199,6 +253,7 @@ def render_admin_integridade():
             with st.status("Atualizando grupos…", expanded=False):
                 ids = [g.get("id") for g in grupos_sem_dep if g.get("id")]
                 for i in range(0, len(ids), 200):
-                    sb.table("equip_grupos").update({"departamento_id": dest_dep_id}).eq("tenant_id", tenant_id).in_("id", ids[i:i+200]).execute()
+                    sb.table("equip_grupos").update({"departamento_id": dest_dep_id}).eq(
+                        "tenant_id", tenant_id).in_("id", ids[i:i + 200]).execute()
             st.toast("Grupos atualizados.", icon=":material/check:")
             st.rerun()

@@ -12,7 +12,7 @@ Funcionalidades:
 from __future__ import annotations
 
 import io
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
@@ -26,11 +26,13 @@ from src.utils.supabase_helpers import (
 from src.utils.nav import get_current_revisao
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# ── helpers ─────────────────────────────────────────────────────────────
 
 def _risk_color(pct: int) -> str:
-    if pct >= 80: return "#12B76A"
-    if pct >= 50: return "#F59E0B"
+    if pct >= 80:
+        return "#12B76A"
+    if pct >= 50:
+        return "#F59E0B"
     return "#EF4444"
 
 
@@ -95,12 +97,14 @@ def _dias_desde(ts_str: str | None) -> int | None:
         return None
 
 
-# ── Processamento de alertas ──────────────────────────────────────────────────
+# ── Processamento de alertas ────────────────────────────────────────────
 
 def _build_alertas(tarefas: list[dict], revisao: dict,
                    dias_travado: int, dias_sem_update: int) -> dict:
     """Classifica cada tarefa em categorias de alerta."""
-    semana_atual = _semana_atual(revisao.get("data_inicio"), revisao.get("semanas_total") or 99)
+    semana_atual = _semana_atual(
+        revisao.get("data_inicio"),
+        revisao.get("semanas_total") or 99)
     semanas_total = revisao.get("semanas_total") or 99
 
     travados, sem_inicio, sem_update, risco_prazo = [], [], [], []
@@ -145,7 +149,8 @@ def _build_alertas(tarefas: list[dict], revisao: dict,
             setor = (svc.get("setores") or {}).get("nome") or "—"
             svc_nome = svc.get("nome") or "—"
             status = t.get("status") or "pendente"
-            updated = t.get("updated_at") or t.get("dt_etapa_m") or t.get("dt_etapa_r") or t.get("dt_etapa_d")
+            updated = t.get("updated_at") or t.get("dt_etapa_m") or t.get(
+                "dt_etapa_r") or t.get("dt_etapa_d")
             dias = _dias_desde(updated)
 
             row = {**base, "Setor": setor, "Serviço": svc_nome,
@@ -153,12 +158,15 @@ def _build_alertas(tarefas: list[dict], revisao: dict,
 
             # Travado há X dias
             if status == "travado" and (dias is None or dias >= dias_travado):
-                travados.append({**row, "Dias travado": dias if dias is not None else "?"})
+                travados.append(
+                    {**row, "Dias travado": dias if dias is not None else "?"})
 
             # Sem nenhum apontamento (0 etapas)
-            if not t.get("etapa_d") and not t.get("etapa_r") and not t.get("etapa_m"):
+            if not t.get("etapa_d") and not t.get(
+                    "etapa_r") and not t.get("etapa_m"):
                 if dias is None or dias >= dias_sem_update:
-                    sem_inicio.append({**row, "Dias sem update": dias if dias is not None else "?"})
+                    sem_inicio.append(
+                        {**row, "Dias sem update": dias if dias is not None else "?"})
 
             # Sem atualização há muito tempo (não travado, não concluído)
             if status not in ("concluido", "nao_aplica", "travado"):
@@ -169,16 +177,16 @@ def _build_alertas(tarefas: list[dict], revisao: dict,
         if pct < esperado_pct - 15 and pct < 100:
             atraso = esperado_pct - pct
             risco_prazo.append({**base,
-                "Atraso (p.p.)": atraso,
-                "Etapas feitas": done,
-                "Etapas total": total,
-            })
+                                "Atraso (p.p.)": atraso,
+                                "Etapas feitas": done,
+                                "Etapas total": total,
+                                })
 
     return {
-        "travados":   pd.DataFrame(travados)   if travados   else pd.DataFrame(),
+        "travados": pd.DataFrame(travados) if travados else pd.DataFrame(),
         "sem_inicio": pd.DataFrame(sem_inicio) if sem_inicio else pd.DataFrame(),
         "sem_update": pd.DataFrame(sem_update) if sem_update else pd.DataFrame(),
-        "risco_prazo":pd.DataFrame(risco_prazo)if risco_prazo else pd.DataFrame(),
+        "risco_prazo": pd.DataFrame(risco_prazo)if risco_prazo else pd.DataFrame(),
         "semana_atual": semana_atual,
         "semanas_total": semanas_total,
     }
@@ -197,16 +205,24 @@ def _resumo_por_grupo(alertas: dict) -> pd.DataFrame:
         if df.empty or "Grupo" not in df.columns:
             continue
         for grupo, cnt in df["Grupo"].value_counts().items():
-            grupos.setdefault(str(grupo), {"Grupo": str(grupo), "Travados": 0,
-                                           "Sem início": 0, "Parados": 0, "Risco prazo": 0})
+            grupos.setdefault(str(grupo),
+                              {"Grupo": str(grupo),
+                               "Travados": 0,
+                               "Sem início": 0,
+                               "Parados": 0,
+                               "Risco prazo": 0})
             key_map = {"travados": "Travados", "sem_inicio": "Sem início",
                        "sem_update": "Parados", "risco_prazo": "Risco prazo"}
             grupos[str(grupo)][key_map[categoria]] = int(cnt)
     if not grupos:
         return pd.DataFrame()
     df_res = pd.DataFrame(list(grupos.values()))
-    df_res["Total alertas"] = df_res[["Travados","Sem início","Parados","Risco prazo"]].sum(axis=1)
-    return df_res.sort_values("Total alertas", ascending=False).reset_index(drop=True)
+    df_res["Total alertas"] = df_res[["Travados",
+                                      "Sem início", "Parados", "Risco prazo"]].sum(axis=1)
+    return df_res.sort_values(
+        "Total alertas",
+        ascending=False).reset_index(
+        drop=True)
 
 
 def _build_pdf_alertas(alertas: dict, revisao: dict) -> bytes:
@@ -216,68 +232,86 @@ def _build_pdf_alertas(alertas: dict, revisao: dict) -> bytes:
         from reportlab.lib.units import cm
         from reportlab.lib import colors
         from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
-                                        Table, TableStyle, PageBreak)
+                                        Table, TableStyle)
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
+        from reportlab.lib.enums import TA_RIGHT
     except Exception:
         return b""
 
     sty = getSampleStyleSheet()
     h1 = ParagraphStyle("h1", parent=sty["Heading1"], fontSize=14, leading=18,
-                         textColor=colors.HexColor("#111827"), spaceAfter=2)
-    h2 = ParagraphStyle("h2", parent=sty["Heading2"], fontSize=11, leading=14,
-                         textColor=colors.HexColor("#111827"), spaceBefore=8, spaceAfter=3)
-    p  = ParagraphStyle("p", parent=sty["BodyText"], fontSize=9, leading=12,
-                         textColor=colors.HexColor("#374151"))
+                        textColor=colors.HexColor("#111827"), spaceAfter=2)
+    h2 = ParagraphStyle(
+        "h2",
+        parent=sty["Heading2"],
+        fontSize=11,
+        leading=14,
+        textColor=colors.HexColor("#111827"),
+        spaceBefore=8,
+        spaceAfter=3)
+    p = ParagraphStyle("p", parent=sty["BodyText"], fontSize=9, leading=12,
+                       textColor=colors.HexColor("#374151"))
     sm = ParagraphStyle("sm", parent=sty["BodyText"], fontSize=8, leading=10,
-                         textColor=colors.grey)
-    htp = ParagraphStyle("ht", parent=sty["BodyText"], fontSize=8, leading=9,
-                          alignment=TA_CENTER, textColor=colors.white)
+                        textColor=colors.grey)
 
     buf = io.BytesIO()
     PAGE = A4
-    MARGIN = 1.5*cm
-    pw = PAGE[0] - 2*MARGIN
+    MARGIN = 1.5 * cm
+    pw = PAGE[0] - 2 * MARGIN
     doc = SimpleDocTemplate(buf, pagesize=PAGE,
-        leftMargin=MARGIN, rightMargin=MARGIN,
-        topMargin=MARGIN, bottomMargin=MARGIN)
+                            leftMargin=MARGIN, rightMargin=MARGIN,
+                            topMargin=MARGIN, bottomMargin=MARGIN)
 
     now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
-    ts_style = ParagraphStyle("ts", parent=sty["BodyText"], fontSize=8,
-                               alignment=TA_RIGHT, textColor=colors.HexColor("#6B7280"))
+    ts_style = ParagraphStyle(
+        "ts",
+        parent=sty["BodyText"],
+        fontSize=8,
+        alignment=TA_RIGHT,
+        textColor=colors.HexColor("#6B7280"))
 
     header_data = [[
         Paragraph("Relatório de Alertas — Notificações", h1),
         Paragraph(f"Emitido em<br/>{now_str}", ts_style),
     ]]
-    header_t = Table(header_data, colWidths=[pw - 3.5*cm, 3.5*cm], rowHeights=[1*cm])
+    header_t = Table(
+        header_data,
+        colWidths=[
+            pw - 3.5 * cm,
+            3.5 * cm],
+        rowHeights=[
+            1 * cm])
     header_t.setStyle(TableStyle([
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-        ("ALIGN",  (1,0), (1,0),  "RIGHT"),
-        ("LINEBELOW", (0,0), (-1,0), 1.0, colors.HexColor("#E5E7EB")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+        ("LINEBELOW", (0, 0), (-1, 0), 1.0, colors.HexColor("#E5E7EB")),
     ]))
 
     meta_lbl = ParagraphStyle("ml", parent=sty["BodyText"], fontSize=8,
-                               textColor=colors.HexColor("#6B7280"))
-    meta_val = ParagraphStyle("mv", parent=sty["BodyText"], fontSize=10,
-                               textColor=colors.HexColor("#111827"), fontName="Helvetica-Bold")
+                              textColor=colors.HexColor("#6B7280"))
+    meta_val = ParagraphStyle(
+        "mv",
+        parent=sty["BodyText"],
+        fontSize=10,
+        textColor=colors.HexColor("#111827"),
+        fontName="Helvetica-Bold")
     meta_data = [
         [Paragraph("Revisão", meta_lbl), Paragraph("Semana", meta_lbl)],
         [Paragraph(revisao.get("titulo") or "—", meta_val),
          Paragraph(f'{alertas["semana_atual"]} / {alertas["semanas_total"]}', meta_val)],
     ]
-    meta_t = Table(meta_data, colWidths=[pw*0.6, pw*0.4])
+    meta_t = Table(meta_data, colWidths=[pw * 0.6, pw * 0.4])
     meta_t.setStyle(TableStyle([
-        ("TOPPADDING", (0,0), (-1,-1), 3),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 3),
-        ("LEFTPADDING", (0,0), (-1,-1), 0),
-        ("LINEBELOW", (0,1), (-1,1), 0.5, colors.HexColor("#E5E7EB")),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("LINEBELOW", (0, 1), (-1, 1), 0.5, colors.HexColor("#E5E7EB")),
     ]))
 
     # KPIs
     n_trav = len(alertas["travados"])
-    n_sem  = len(alertas["sem_inicio"])
-    n_upd  = len(alertas["sem_update"])
+    n_sem = len(alertas["sem_inicio"])
+    n_upd = len(alertas["sem_update"])
     n_risc = len(alertas["risco_prazo"])
     kpi_data = [[
         Paragraph(f'<font color="#6B7280" size="8">🚫 Travados</font><br/>'
@@ -289,96 +323,126 @@ def _build_pdf_alertas(alertas: dict, revisao: dict) -> bytes:
         Paragraph(f'<font color="#6B7280" size="8">⚠️ Risco prazo</font><br/>'
                   f'<b><font size="16" color="#F59E0B">{n_risc}</font></b>', p),
     ]]
-    kpi_t = Table(kpi_data, colWidths=[pw/4]*4, rowHeights=[1.4*cm])
+    kpi_t = Table(kpi_data, colWidths=[pw / 4] * 4, rowHeights=[1.4 * cm])
     kpi_t.setStyle(TableStyle([
-        ("BOX", (0,0), (-1,-1), 0.5, colors.HexColor("#E5E7EB")),
-        ("LINEAFTER", (0,0), (2,0), 0.5, colors.HexColor("#E5E7EB")),
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-        ("ALIGN", (0,0), (-1,-1), "CENTER"),
-        ("TOPPADDING", (0,0), (-1,-1), 8),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 8),
-        ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#F9FAFB")),
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5E7EB")),
+        ("LINEAFTER", (0, 0), (2, 0), 0.5, colors.HexColor("#E5E7EB")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F9FAFB")),
     ]))
 
-    story = [header_t, Spacer(1, 0.3*cm), meta_t, Spacer(1, 0.4*cm),
-             kpi_t, Spacer(1, 0.5*cm)]
+    story = [header_t, Spacer(1, 0.3 * cm), meta_t, Spacer(1, 0.4 * cm),
+             kpi_t, Spacer(1, 0.5 * cm)]
 
     def _df_table(df: pd.DataFrame, cols_show: list, title: str,
                   accent: tuple = (colors.HexColor("#111827"), colors.white)):
         story.append(Paragraph(title, h2))
         if df.empty:
             story.append(Paragraph("Nenhum item nesta categoria.", sm))
-            story.append(Spacer(1, 0.2*cm))
+            story.append(Spacer(1, 0.2 * cm))
             return
         cols_ok = [c for c in cols_show if c in df.columns]
         if not cols_ok:
             story.append(Paragraph("Sem dados.", sm))
             return
         story.append(Paragraph(f"{len(df)} item(s) encontrado(s).", sm))
-        story.append(Spacer(1, 0.1*cm))
+        story.append(Spacer(1, 0.1 * cm))
         data_rows = [cols_ok] + df[cols_ok].fillna("").values.tolist()
-        n_cols = len(cols_ok)
-        col_w = pw / n_cols
         # Equipamento/Frota gets more space if present
         cw = []
-        frota_idx = cols_ok.index("Frota") if "Frota" in cols_ok else -1
         for i, c in enumerate(cols_ok):
-            if c in ("Frota", "Equipamento"): cw.append(pw*0.18)
-            elif c in ("Modelo", "Serviço", "Setor", "Obs."): cw.append(pw*0.20)
-            else: cw.append(pw*0.12)
+            if c in ("Frota", "Equipamento"):
+                cw.append(pw * 0.18)
+            elif c in ("Modelo", "Serviço", "Setor", "Obs."):
+                cw.append(pw * 0.20)
+            else:
+                cw.append(pw * 0.12)
         # Normalize widths
         total_w = sum(cw)
         cw = [w * pw / total_w for w in cw]
 
         t = Table(data_rows, colWidths=cw, repeatRows=1)
         ts = [
-            ("BACKGROUND", (0,0), (-1,0), accent[0]),
-            ("TEXTCOLOR",  (0,0), (-1,0), accent[1]),
-            ("FONTNAME",   (0,0), (-1,0), "Helvetica-Bold"),
-            ("FONTSIZE",   (0,0), (-1,0), 8),
-            ("ALIGN",      (0,0), (-1,0), "CENTER"),
-            ("VALIGN",     (0,0), (-1,-1), "MIDDLE"),
-            ("FONTSIZE",   (0,1), (-1,-1), 7.5),
-            ("GRID",       (0,0), (-1,-1), 0.25, colors.lightgrey),
-            ("TOPPADDING", (0,0), (-1,-1), 3),
-            ("BOTTOMPADDING", (0,0), (-1,-1), 3),
-            ("LEFTPADDING", (0,0), (-1,-1), 3),
-            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#F9FAFB")]),
-            ("BOX", (0,0), (-1,-1), 0.5, colors.HexColor("#374151")),
+            ("BACKGROUND", (0, 0), (-1, 0), accent[0]),
+            ("TEXTCOLOR", (0, 0), (-1, 0), accent[1]),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 8),
+            ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("FONTSIZE", (0, 1), (-1, -1), 7.5),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F9FAFB")]),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#374151")),
         ]
         t.setStyle(TableStyle(ts))
         story.append(t)
-        story.append(Spacer(1, 0.4*cm))
+        story.append(Spacer(1, 0.4 * cm))
 
     _df_table(alertas["travados"],
-              ["Frota","Modelo","Grupo","Setor","Serviço","Dias travado","Obs."],
+              ["Frota",
+               "Modelo",
+               "Grupo",
+               "Setor",
+               "Serviço",
+               "Dias travado",
+               "Obs."],
               "🚫 Travados sem resolução",
-              (colors.HexColor("#7F1D1D"), colors.white))
+              (colors.HexColor("#7F1D1D"),
+               colors.white))
     _df_table(alertas["sem_inicio"],
-              ["Frota","Modelo","Grupo","Setor","Serviço","Dias sem update"],
+              ["Frota",
+               "Modelo",
+               "Grupo",
+               "Setor",
+               "Serviço",
+               "Dias sem update"],
               "⬜ Sem nenhum apontamento",
-              (colors.HexColor("#1E3A5F"), colors.white))
+              (colors.HexColor("#1E3A5F"),
+               colors.white))
     _df_table(alertas["sem_update"],
-              ["Frota","Modelo","Grupo","Setor","Serviço","Status","Dias parado"],
+              ["Frota",
+               "Modelo",
+               "Grupo",
+               "Setor",
+               "Serviço",
+               "Status",
+               "Dias parado"],
               "⏸ Parados (sem atualização)",
-              (colors.HexColor("#374151"), colors.white))
+              (colors.HexColor("#374151"),
+               colors.white))
     _df_table(alertas["risco_prazo"],
-              ["Frota","Modelo","Grupo","% Atual","% Esperado","Atraso (p.p.)"],
+              ["Frota",
+               "Modelo",
+               "Grupo",
+               "% Atual",
+               "% Esperado",
+               "Atraso (p.p.)"],
               "⚠️ Risco de não concluir no prazo",
-              (colors.HexColor("#78350F"), colors.white))
+              (colors.HexColor("#78350F"),
+               colors.white))
 
     def _footer(canvas, _doc):
         canvas.saveState()
         canvas.setFont("Helvetica", 8)
         canvas.setFillColor(colors.grey)
-        canvas.drawRightString(PAGE[0] - MARGIN, 0.8*cm, f"Página {canvas.getPageNumber()}")
+        canvas.drawRightString(
+            PAGE[0] - MARGIN,
+            0.8 * cm,
+            f"Página {
+                canvas.getPageNumber()}")
         canvas.restoreState()
 
     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
     return buf.getvalue()
 
 
-# ── Fragmentos de UI ──────────────────────────────────────────────────────────
+# ── Fragmentos de UI ────────────────────────────────────────────────────
 
 def _df_download(df: pd.DataFrame, label: str, fname: str) -> None:
     if df.empty:
@@ -399,26 +463,29 @@ def _fragment_resumo(alertas: dict, revisao: dict) -> None:
     semana = alertas["semana_atual"]
     total_s = alertas["semanas_total"]
     n_trav = len(alertas["travados"])
-    n_sem  = len(alertas["sem_inicio"])
-    n_upd  = len(alertas["sem_update"])
+    n_sem = len(alertas["sem_inicio"])
+    n_upd = len(alertas["sem_update"])
     n_risc = len(alertas["risco_prazo"])
 
     st.markdown(
         f'<div style="font-size:.85rem;color:rgba(255,255,255,.55);margin-bottom:8px">'
         f'Semana <b style="color:#fff">{semana}</b> de <b style="color:#fff">{total_s}</b>'
-        f' · Revisão: <b style="color:#FFD100">{revisao.get("titulo","—")}</b></div>',
+        f' · Revisão: <b style="color:#FFD100">{revisao.get("titulo", "—")}</b></div>',
         unsafe_allow_html=True,
     )
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("🚫 Travados",        n_trav,  delta="crítico" if n_trav else "ok",
+    c1.metric("🚫 Travados", n_trav, delta="crítico" if n_trav else "ok",
               delta_color="inverse" if n_trav else "off")
-    c2.metric("⬜ Sem início",       n_sem,   delta="atenção" if n_sem else "ok",
+    c2.metric("⬜ Sem início", n_sem, delta="atenção" if n_sem else "ok",
               delta_color="inverse" if n_sem else "off")
-    c3.metric("⏸ Parados",          n_upd,   delta="atenção" if n_upd else "ok",
+    c3.metric("⏸ Parados", n_upd, delta="atenção" if n_upd else "ok",
               delta_color="inverse" if n_upd else "off")
-    c4.metric("⚠️ Risco de prazo",  n_risc,  delta="atraso vs meta" if n_risc else "no prazo",
-              delta_color="inverse" if n_risc else "off")
+    c4.metric(
+        "⚠️ Risco de prazo",
+        n_risc,
+        delta="atraso vs meta" if n_risc else "no prazo",
+        delta_color="inverse" if n_risc else "off")
 
     if n_trav == 0 and n_sem == 0 and n_upd == 0 and n_risc == 0:
         st.success("✅ Nenhum alerta ativo com os thresholds configurados.")
@@ -431,14 +498,26 @@ def _fragment_travados(df: pd.DataFrame) -> None:
         st.success("Nenhum item travado no período configurado.")
         return
     st.caption(f"{len(df)} tarefa(s) travada(s) sem resolução.")
-    cols_show = [c for c in ["Frota","Modelo","Grupo","Setor","Serviço","Dias travado","Obs."] if c in df.columns]
+    cols_show = [
+        c for c in [
+            "Frota",
+            "Modelo",
+            "Grupo",
+            "Setor",
+            "Serviço",
+            "Dias travado",
+            "Obs."] if c in df.columns]
     st.dataframe(
-        df[cols_show].sort_values("Dias travado", ascending=False) if "Dias travado" in df.columns else df[cols_show],
-        use_container_width=True, hide_index=True,
+        df[cols_show].sort_values(
+            "Dias travado",
+            ascending=False) if "Dias travado" in df.columns else df[cols_show],
+        use_container_width=True,
+        hide_index=True,
         column_config={
-            "Dias travado": st.column_config.NumberColumn("Dias travado", help="Dias desde última atualização"),
-        }
-    )
+            "Dias travado": st.column_config.NumberColumn(
+                "Dias travado",
+                help="Dias desde última atualização"),
+        })
     _df_download(df, "Exportar CSV", "alertas_travados.csv")
 
 
@@ -449,7 +528,14 @@ def _fragment_sem_inicio(df: pd.DataFrame) -> None:
         st.success("Todos os itens tiveram pelo menos um apontamento.")
         return
     st.caption(f"{len(df)} tarefa(s) sem nenhuma etapa marcada.")
-    cols_show = [c for c in ["Frota","Modelo","Grupo","Setor","Serviço","Dias sem update"] if c in df.columns]
+    cols_show = [
+        c for c in [
+            "Frota",
+            "Modelo",
+            "Grupo",
+            "Setor",
+            "Serviço",
+            "Dias sem update"] if c in df.columns]
     st.dataframe(df[cols_show], use_container_width=True, hide_index=True)
     _df_download(df, "Exportar CSV", "alertas_sem_inicio.csv")
 
@@ -461,15 +547,25 @@ def _fragment_parados(df: pd.DataFrame) -> None:
         st.success("Nenhum item parado no período configurado.")
         return
     st.caption(f"{len(df)} tarefa(s) sem atualização no período.")
-    cols_show = [c for c in ["Frota","Modelo","Grupo","Setor","Serviço","Status","Dias parado"] if c in df.columns]
+    cols_show = [
+        c for c in [
+            "Frota",
+            "Modelo",
+            "Grupo",
+            "Setor",
+            "Serviço",
+            "Status",
+            "Dias parado"] if c in df.columns]
     st.dataframe(
-        df[cols_show].sort_values("Dias parado", ascending=False) if "Dias parado" in df.columns else df[cols_show],
-        use_container_width=True, hide_index=True,
+        df[cols_show].sort_values(
+            "Dias parado",
+            ascending=False) if "Dias parado" in df.columns else df[cols_show],
+        use_container_width=True,
+        hide_index=True,
         column_config={
             "Dias parado": st.column_config.NumberColumn("Dias parado"),
             "Status": st.column_config.TextColumn("Status"),
-        }
-    )
+        })
     _df_download(df, "Exportar CSV", "alertas_parados.csv")
 
 
@@ -479,17 +575,38 @@ def _fragment_risco_prazo(df: pd.DataFrame) -> None:
     if df.empty:
         st.success("Todos os equipamentos estão dentro da meta linear.")
         return
-    st.caption(f"{len(df)} equipamento(s) com atraso acima de 15 p.p. em relação à meta.")
-    cols_show = [c for c in ["Frota","Modelo","Grupo","% Atual","% Esperado","Atraso (p.p.)","Etapas feitas","Etapas total"] if c in df.columns]
-    df_show = df[cols_show].sort_values("Atraso (p.p.)", ascending=False) if "Atraso (p.p.)" in df.columns else df[cols_show]
+    st.caption(
+        f"{len(df)} equipamento(s) com atraso acima de 15 p.p. em relação à meta.")
+    cols_show = [
+        c for c in [
+            "Frota",
+            "Modelo",
+            "Grupo",
+            "% Atual",
+            "% Esperado",
+            "Atraso (p.p.)",
+            "Etapas feitas",
+            "Etapas total"] if c in df.columns]
+    df_show = df[cols_show].sort_values(
+        "Atraso (p.p.)",
+        ascending=False) if "Atraso (p.p.)" in df.columns else df[cols_show]
     st.dataframe(
-        df_show, use_container_width=True, hide_index=True,
+        df_show,
+        use_container_width=True,
+        hide_index=True,
         column_config={
-            "% Atual":       st.column_config.ProgressColumn("% Atual",    min_value=0, max_value=100),
-            "% Esperado":    st.column_config.ProgressColumn("% Esperado", min_value=0, max_value=100),
-            "Atraso (p.p.)": st.column_config.NumberColumn("Atraso (p.p.)", help="Diferença entre esperado e atual"),
-        }
-    )
+            "% Atual": st.column_config.ProgressColumn(
+                "% Atual",
+                min_value=0,
+                max_value=100),
+            "% Esperado": st.column_config.ProgressColumn(
+                "% Esperado",
+                min_value=0,
+                max_value=100),
+            "Atraso (p.p.)": st.column_config.NumberColumn(
+                "Atraso (p.p.)",
+                help="Diferença entre esperado e atual"),
+        })
     _df_download(df, "Exportar CSV", "alertas_risco_prazo.csv")
 
 
@@ -506,22 +623,33 @@ def _fragment_resumo_grupos(alertas: dict) -> None:
     # Mini-cards por grupo
     for _, row in df_res.iterrows():
         total = int(row.get("Total alertas", 0))
-        trav  = int(row.get("Travados", 0))
-        sem   = int(row.get("Sem início", 0))
-        par   = int(row.get("Parados", 0))
-        risc  = int(row.get("Risco prazo", 0))
-        color = "#EF4444" if trav > 0 else ("#F59E0B" if (par + risc) > 0 else "#F59E0B")
+        trav = int(row.get("Travados", 0))
+        sem = int(row.get("Sem início", 0))
+        par = int(row.get("Parados", 0))
+        risc = int(row.get("Risco prazo", 0))
+        color = "#EF4444" if trav > 0 else (
+            "#F59E0B" if (par + risc) > 0 else "#F59E0B")
         badges = []
-        if trav:  badges.append(f'<span style="background:rgba(239,68,68,.2);color:#EF4444;padding:2px 8px;border-radius:999px;font-size:.78rem">🚫 {trav} travado{"s" if trav>1 else ""}</span>')
-        if sem:   badges.append(f'<span style="background:rgba(107,114,128,.2);color:#9CA3AF;padding:2px 8px;border-radius:999px;font-size:.78rem">⬜ {sem} sem início</span>')
-        if par:   badges.append(f'<span style="background:rgba(245,158,11,.2);color:#F59E0B;padding:2px 8px;border-radius:999px;font-size:.78rem">⏸ {par} parado{"s" if par>1 else ""}</span>')
-        if risc:  badges.append(f'<span style="background:rgba(245,158,11,.2);color:#F59E0B;padding:2px 8px;border-radius:999px;font-size:.78rem">⚠️ {risc} risco prazo</span>')
+        if trav:
+            badges.append(
+                f'<span style="background:rgba(239,68,68,.2);color:#EF4444;padding:2px 8px;border-radius:999px;font-size:.78rem">🚫 {trav} travado{
+                    "s" if trav > 1 else ""}</span>')
+        if sem:
+            badges.append(
+                f'<span style="background:rgba(107,114,128,.2);color:#9CA3AF;padding:2px 8px;border-radius:999px;font-size:.78rem">⬜ {sem} sem início</span>')
+        if par:
+            badges.append(
+                f'<span style="background:rgba(245,158,11,.2);color:#F59E0B;padding:2px 8px;border-radius:999px;font-size:.78rem">⏸ {par} parado{
+                    "s" if par > 1 else ""}</span>')
+        if risc:
+            badges.append(
+                f'<span style="background:rgba(245,158,11,.2);color:#F59E0B;padding:2px 8px;border-radius:999px;font-size:.78rem">⚠️ {risc} risco prazo</span>')
         badges_html = " ".join(badges)
         st.markdown(
             f'<div style="padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.08);'
             f'background:rgba(255,255,255,.03);margin-bottom:8px">'
             f'<div style="font-size:.9rem;font-weight:700;margin-bottom:6px">'
-            f'{row["Grupo"]} <span style="color:{color};font-size:.8rem">({total} alerta{"s" if total>1 else ""})</span></div>'
+            f'{row["Grupo"]} <span style="color:{color};font-size:.8rem">({total} alerta{"s" if total > 1 else ""})</span></div>'
             f'<div style="display:flex;flex-wrap:wrap;gap:6px">{badges_html}</div>'
             f'</div>',
             unsafe_allow_html=True,
@@ -529,24 +657,26 @@ def _fragment_resumo_grupos(alertas: dict) -> None:
 
     # Exportar CSV do resumo
     cols_pub = [c for c in df_res.columns if c != "dept_id"]
-    st.download_button("⬇️ Exportar resumo por grupo (CSV)",
-        data=df_res[cols_pub].to_csv(index=False).encode("utf-8"),
+    st.download_button(
+        "⬇️ Exportar resumo por grupo (CSV)",
+        data=df_res[cols_pub].to_csv(
+            index=False).encode("utf-8"),
         file_name="alertas_resumo_grupos.csv",
-        mime="text/csv", use_container_width=True, key="dl_resumo_grupos")
-
-
+        mime="text/csv",
+        use_container_width=True,
+        key="dl_resumo_grupos")
 
 
 @st.fragment
 def _fragment_disparo_manual(tenant_id: str, revisao_id: str, is_admin: bool,
-                              dias_travado: int, dias_sem_update: int) -> None:
+                             dias_travado: int, dias_sem_update: int) -> None:
     """UI de disparo manual de e-mail semanal por departamento."""
 
     if not is_admin:
         st.info("Apenas administradores podem disparar o envio de e-mails.")
         return
 
-    # ── 1. Status do SMTP ─────────────────────────────────────────────────────
+    # ── 1. Status do SMTP ───────────────────────────────────────────────────
     smtp_ok = True
     smtp_erro = ""
     try:
@@ -584,23 +714,24 @@ def _fragment_disparo_manual(tenant_id: str, revisao_id: str, is_admin: bool,
                 if smtp_erro:
                     st.caption(f"Erro atual: `{smtp_erro}`")
 
-    # ── 2. Destinatários ──────────────────────────────────────────────────────
+    # ── 2. Destinatários ────────────────────────────────────────────────────
     with col_dest:
         try:
             from src.services.email.recipients import get_recipient_groups, get_executive_recipients
-            groups_dest  = get_recipient_groups(tenant_id)
-            exec_recs    = get_executive_recipients(tenant_id)
+            groups_dest = get_recipient_groups(tenant_id)
+            exec_recs = get_executive_recipients(tenant_id)
             total_gestor = sum(len(g.recipients) for g in groups_dest)
-            total_exec   = len(exec_recs)
-            total_dest   = total_gestor + total_exec
+            total_exec = len(exec_recs)
+            total_dest = total_gestor + total_exec
             if total_dest:
-                st.success(f"✅ {total_gestor} gestor(es) · {total_exec} supervisor(es)/admin(s)")
+                st.success(
+                    f"✅ {total_gestor} gestor(es) · {total_exec} supervisor(es)/admin(s)")
             else:
                 st.warning("⚠️ Nenhum destinatário encontrado")
         except Exception as e:
             st.warning(f"Não foi possível carregar destinatários: {e}")
 
-    # ── 2b. Configuração de destinatários ─────────────────────────────────────
+    # ── 2b. Configuração de destinatários ───────────────────────────────────
     with st.expander("👥 Configurar destinatários e tipo de relatório", expanded=False):
         st.caption(
             "**Tipo padrão por role:** gestor → relatório de departamento · "
@@ -613,12 +744,15 @@ def _fragment_disparo_manual(tenant_id: str, revisao_id: str, is_admin: bool,
             if users_prefs:
                 role_icons = {"admin": "🔴", "supervisor": "🟣", "gestor": "🟠",
                               "executor": "🟡", "viewer": "⚪"}
-                tipo_opts  = ["gestor", "executivo", "nenhum"]
-                tipo_labels = {"gestor": "📋 Departamento", "executivo": "📊 Executivo", "nenhum": "🚫 Não enviar"}
+                tipo_opts = ["gestor", "executivo", "nenhum"]
+                tipo_labels = {
+                    "gestor": "📋 Departamento",
+                    "executivo": "📊 Executivo",
+                    "nenhum": "🚫 Não enviar"}
 
                 changed = {}
                 for u in users_prefs:
-                    icon  = role_icons.get(u["role"], "⚪")
+                    icon = role_icons.get(u["role"], "⚪")
                     label = f"{icon} **{u['nome']}** `{u['role']}` — {u['email']}"
                     override_note = " _(override manual)_" if u["override"] else ""
                     col_u, col_sel = st.columns([3, 2])
@@ -630,15 +764,20 @@ def _fragment_disparo_manual(tenant_id: str, revisao_id: str, is_admin: bool,
                             "Tipo",
                             options=tipo_opts,
                             index=tipo_opts.index(cur_tipo) if cur_tipo in tipo_opts else 0,
-                            format_func=lambda t: tipo_labels.get(t, t),
-                            key=f"emailpref_{u['user_id']}",
+                            format_func=lambda t: tipo_labels.get(
+                                t,
+                                t),
+                            key=f"emailpref_{
+                                u['user_id']}",
                             label_visibility="collapsed",
                         )
                         if novo != cur_tipo:
                             changed[u["user_id"]] = novo
 
                 if changed:
-                    if st.button("💾 Salvar preferências", key="save_email_prefs"):
+                    if st.button(
+                        "💾 Salvar preferências",
+                            key="save_email_prefs"):
                         from src.services.email.recipients import save_email_pref
                         ok = all(
                             save_email_pref(tenant_id, uid, tipo, ativo=(tipo != "nenhum"))
@@ -648,7 +787,8 @@ def _fragment_disparo_manual(tenant_id: str, revisao_id: str, is_admin: bool,
                             st.success("✅ Preferências salvas!")
                             st.rerun()
                         else:
-                            st.error("Erro ao salvar. Verifique se a tabela `tenant_email_prefs` existe no Supabase.")
+                            st.error(
+                                "Erro ao salvar. Verifique se a tabela `tenant_email_prefs` existe no Supabase.")
                             with st.expander("📋 SQL para criar a tabela", expanded=True):
                                 st.code("""
 CREATE TABLE tenant_email_prefs (
@@ -670,7 +810,7 @@ CREATE POLICY "service_role_all" ON tenant_email_prefs
 
     st.divider()
 
-    # ── 3. Modo de envio ──────────────────────────────────────────────────────
+    # ── 3. Modo de envio ────────────────────────────────────────────────────
     dry_run = st.toggle(
         "🧪 Modo teste — gerar PDFs sem enviar e-mails",
         value=True,
@@ -684,10 +824,11 @@ CREATE POLICY "service_role_all" ON tenant_email_prefs
         if not smtp_ok:
             st.error("Configure o SMTP antes de enviar e-mails reais.")
         else:
-            st.warning("⚠️ Modo real — os e-mails **serão enviados** aos responsáveis de cada departamento.")
+            st.warning(
+                "⚠️ Modo real — os e-mails **serão enviados** aos responsáveis de cada departamento.")
 
-    # ── 4. Botão de disparo ───────────────────────────────────────────────────
-    btn_label   = "🧪 Testar geração de PDFs" if dry_run else "📧 Enviar relatórios agora"
+    # ── 4. Botão de disparo ─────────────────────────────────────────────────
+    btn_label = "🧪 Testar geração de PDFs" if dry_run else "📧 Enviar relatórios agora"
 
     do_send = st.button(
         btn_label,
@@ -696,10 +837,11 @@ CREATE POLICY "service_role_all" ON tenant_email_prefs
         key="ntf_send_btn",
     )
 
-    # ── 5. Execução ───────────────────────────────────────────────────────────
+    # ── 5. Execução ─────────────────────────────────────────────────────────
     if do_send:
         if not dry_run and not smtp_ok:
-            st.error("Configure o SMTP no `secrets.toml` antes de enviar e-mails reais.")
+            st.error(
+                "Configure o SMTP no `secrets.toml` antes de enviar e-mails reais.")
             return
         from src.services.email.dispatcher import dispatch_relatorio_semanal
         log_lines: list[str] = []
@@ -720,11 +862,16 @@ CREATE POLICY "service_role_all" ON tenant_email_prefs
 
         if result.failed == 0 and result.sent > 0:
             if dry_run:
-                st.success(f"✅ Teste concluído — {result.sent} PDF(s) gerado(s) com sucesso. Nenhum e-mail enviado.")
+                st.success(
+                    f"✅ Teste concluído — {
+                        result.sent} PDF(s) gerado(s) com sucesso. Nenhum e-mail enviado.")
             else:
-                st.success(f"✅ {result.sent} e-mail(s) enviado(s) com sucesso!")
+                st.success(
+                    f"✅ {
+                        result.sent} e-mail(s) enviado(s) com sucesso!")
         elif result.sent == 0 and result.skipped > 0:
-            st.warning("Nenhum departamento com destinatário válido encontrado.")
+            st.warning(
+                "Nenhum departamento com destinatário válido encontrado.")
         elif result.failed > 0:
             st.warning(f"Concluído com {result.failed} falha(s).")
 
@@ -755,7 +902,7 @@ def _fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
     with st.spinner("", show_time=False):
         cfg = load_schedule_config(tenant_id)
 
-    # ── Status atual ──────────────────────────────────────────────────────────
+    # ── Status atual ────────────────────────────────────────────────────────
     col_status, col_prox = st.columns(2)
     with col_status:
         if cfg.ativo:
@@ -771,11 +918,15 @@ def _fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
 
     st.divider()
 
-    # ── Formulário ────────────────────────────────────────────────────────────
+    # ── Formulário ──────────────────────────────────────────────────────────
     col1, col2 = st.columns(2)
     with col1:
-        ativo = st.toggle("Agendamento ativo", value=cfg.ativo, key="sch_ativo")
-        periodicidade_idx = PERIODICIDADE_OPTS.index(cfg.periodicidade) if cfg.periodicidade in PERIODICIDADE_OPTS else 0
+        ativo = st.toggle(
+            "Agendamento ativo",
+            value=cfg.ativo,
+            key="sch_ativo")
+        periodicidade_idx = PERIODICIDADE_OPTS.index(
+            cfg.periodicidade) if cfg.periodicidade in PERIODICIDADE_OPTS else 0
         periodicidade = st.selectbox(
             "Periodicidade",
             options=PERIODICIDADE_OPTS,
@@ -783,27 +934,46 @@ def _fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
             format_func=lambda x: PERIODICIDADE_LABELS.get(x, x),
             key="sch_period",
         )
-        dias_travado = st.number_input("Alertar travado há (dias)", min_value=1, max_value=30,
-                                       value=cfg.dias_travado, key="sch_dias_trav")
+        dias_travado = st.number_input(
+            "Alertar travado há (dias)",
+            min_value=1,
+            max_value=30,
+            value=cfg.dias_travado,
+            key="sch_dias_trav")
 
     with col2:
-        hora_envio = st.text_input("Horário (HH:MM — Brasília)", value=cfg.hora_envio or "07:00", key="sch_hora")
+        hora_envio = st.text_input(
+            "Horário (HH:MM — Brasília)",
+            value=cfg.hora_envio or "07:00",
+            key="sch_hora")
 
         if periodicidade == "mensal":
-            dia_mes = st.number_input("Dia do mês", min_value=1, max_value=28,
-                                      value=cfg.dia_mes or 1, key="sch_dia_mes")
+            dia_mes = st.number_input(
+                "Dia do mês",
+                min_value=1,
+                max_value=28,
+                value=cfg.dia_mes or 1,
+                key="sch_dia_mes")
             dia_semana = cfg.dia_semana
         else:
-            dia_semana = st.selectbox("Dia da semana", options=list(range(7)),
-                                      index=cfg.dia_semana % 7,
-                                      format_func=lambda i: DIAS_SEMANA_LABELS[i],
-                                      key="sch_dia_sem")
+            dia_semana = st.selectbox(
+                "Dia da semana",
+                options=list(
+                    range(7)),
+                index=cfg.dia_semana %
+                7,
+                format_func=lambda i: DIAS_SEMANA_LABELS[i],
+                key="sch_dia_sem")
             dia_mes = cfg.dia_mes
 
-        dias_parado = st.number_input("Alertar parado há (dias)", min_value=1, max_value=30,
-                                      value=cfg.dias_parado, key="sch_dias_par")
+        dias_parado = st.number_input(
+            "Alertar parado há (dias)",
+            min_value=1,
+            max_value=30,
+            value=cfg.dias_parado,
+            key="sch_dias_par")
 
-    # ── Validação e salvar ────────────────────────────────────────────────────
+    # ── Validação e salvar ──────────────────────────────────────────────────
     hora_valida = True
     try:
         hh, mm = hora_envio.split(":")
@@ -827,14 +997,19 @@ def _fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
                 st.success("✅ Configuração salva!")
                 st.rerun()
             else:
-                st.error("Falha ao salvar. Verifique se a tabela `email_schedule_config` existe no Supabase.")
+                st.error(
+                    "Falha ao salvar. Verifique se a tabela `email_schedule_config` existe no Supabase.")
     with col_preview:
         if hora_valida:
             try:
                 preview_cfg = ScheduleConfig(
-                    tenant_id=tenant_id, ativo=ativo, periodicidade=periodicidade,
-                    dia_semana=int(dia_semana), dia_mes=int(dia_mes),
-                    hora_envio=hora_envio.strip(), dias_travado=int(dias_travado),
+                    tenant_id=tenant_id,
+                    ativo=ativo,
+                    periodicidade=periodicidade,
+                    dia_semana=int(dia_semana),
+                    dia_mes=int(dia_mes),
+                    hora_envio=hora_envio.strip(),
+                    dias_travado=int(dias_travado),
                     dias_parado=int(dias_parado),
                 )
                 prox = preview_cfg.proximo_disparo_brt().strftime("%d/%m/%Y às %H:%M")
@@ -860,10 +1035,12 @@ O `scheduler.py` e o GitHub Actions lêem esta configuração automaticamente do
 | `SCHEDULER_TENANT_ID` | `{tenant_id}` |
 """)
 
-# ── Ponto de entrada público ──────────────────────────────────────────────────
+# ── Ponto de entrada público ────────────────────────────────────────────
+
 
 def render_notificacoes() -> None:
-    _ph("🔔", "Notificações", "Alertas proativos: travados, parados, sem início e risco de prazo.")
+    _ph("🔔", "Notificações",
+        "Alertas proativos: travados, parados, sem início e risco de prazo.")
 
     tenant_id = current_tenant_id()
     if not tenant_id:
@@ -873,7 +1050,8 @@ def render_notificacoes() -> None:
     ver = str(st.session_state.get("data_version", "0"))
     revisao_id = get_current_revisao()
     if not revisao_id:
-        st.warning("Nenhuma revisão ativa selecionada. Acesse a Matriz ou Home para selecionar.")
+        st.warning(
+            "Nenhuma revisão ativa selecionada. Acesse a Matriz ou Home para selecionar.")
         return
 
     # ── Configurações dos thresholds ─────────────────────────────────────────
@@ -881,14 +1059,22 @@ def render_notificacoes() -> None:
         tc1, tc2 = st.columns(2)
         with tc1:
             dias_travado = st.number_input(
-                "Alertar travado há (dias)", min_value=1, max_value=30, value=2, step=1,
-                key="ntf_dias_trav", help="Tarefas com status 'travado' há pelo menos X dias."
-            )
+                "Alertar travado há (dias)",
+                min_value=1,
+                max_value=30,
+                value=2,
+                step=1,
+                key="ntf_dias_trav",
+                help="Tarefas com status 'travado' há pelo menos X dias.")
         with tc2:
             dias_sem_update = st.number_input(
-                "Alertar parado há (dias)", min_value=1, max_value=30, value=5, step=1,
-                key="ntf_dias_upd", help="Tarefas não concluídas sem atualização há X dias."
-            )
+                "Alertar parado há (dias)",
+                min_value=1,
+                max_value=30,
+                value=5,
+                step=1,
+                key="ntf_dias_upd",
+                help="Tarefas não concluídas sem atualização há X dias.")
 
     # ── Carregamento ─────────────────────────────────────────────────────────
     with st.spinner("", show_time=False):
@@ -912,14 +1098,18 @@ def render_notificacoes() -> None:
                 if (t.get("equipamentos") or {}).get("grupo_id") in grp_ids
             ]
 
-    alertas = _build_alertas(tarefas, revisao, int(dias_travado), int(dias_sem_update))
+    alertas = _build_alertas(
+        tarefas,
+        revisao,
+        int(dias_travado),
+        int(dias_sem_update))
 
-    # ── Resumo global ─────────────────────────────────────────────────────────
+    # ── Resumo global ───────────────────────────────────────────────────────
     _fragment_resumo(alertas, revisao)
 
     st.markdown("---")
 
-    # ── Abas por categoria + resumo por grupo ─────────────────────────────────
+    # ── Abas por categoria + resumo por grupo ───────────────────────────────
     tab_trav, tab_sem, tab_par, tab_risc, tab_grupos, tab_export, tab_email = st.tabs([
         f"🚫 Travados ({len(alertas['travados'])})",
         f"⬜ Sem início ({len(alertas['sem_inicio'])})",
@@ -947,21 +1137,36 @@ def render_notificacoes() -> None:
 
     with tab_export:
         st.markdown("### ⬇️ Exportações")
-        st.caption("Baixe os alertas em formato CSV por categoria ou PDF consolidado.")
+        st.caption(
+            "Baixe os alertas em formato CSV por categoria ou PDF consolidado.")
 
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("**CSV por categoria**")
-            _df_download(alertas["travados"],   "Travados",   "alertas_travados_exp.csv")
-            _df_download(alertas["sem_inicio"], "Sem início", "alertas_sem_inicio_exp.csv")
-            _df_download(alertas["sem_update"], "Parados",    "alertas_parados_exp.csv")
-            _df_download(alertas["risco_prazo"],"Risco prazo","alertas_risco_prazo_exp.csv")
+            _df_download(
+                alertas["travados"],
+                "Travados",
+                "alertas_travados_exp.csv")
+            _df_download(
+                alertas["sem_inicio"],
+                "Sem início",
+                "alertas_sem_inicio_exp.csv")
+            _df_download(
+                alertas["sem_update"],
+                "Parados",
+                "alertas_parados_exp.csv")
+            _df_download(
+                alertas["risco_prazo"],
+                "Risco prazo",
+                "alertas_risco_prazo_exp.csv")
         with col2:
             st.markdown("**PDF consolidado**")
             try:
                 import reportlab  # noqa: F401
                 pdf_bytes = _build_pdf_alertas(alertas, revisao)
-                titulo_rev = (revisao.get("titulo") or "revisao").replace("/", "-")
+                titulo_rev = (
+                    revisao.get("titulo") or "revisao").replace(
+                    "/", "-")
                 st.download_button(
                     "⬇️ Baixar PDF completo",
                     data=pdf_bytes,
@@ -972,18 +1177,20 @@ def render_notificacoes() -> None:
                     key="ntf_pdf_dl",
                 )
             except ImportError:
-                st.info("Instale `reportlab` no requirements.txt para habilitar exportação em PDF.")
+                st.info(
+                    "Instale `reportlab` no requirements.txt para habilitar exportação em PDF.")
 
     with tab_email:
         st.markdown("### 📧 Envio de Relatório por E-mail")
-        st.caption("Envie manualmente ou configure o agendamento automático por departamento.")
+        st.caption(
+            "Envie manualmente ou configure o agendamento automático por departamento.")
         st.divider()
         _fragment_disparo_manual(tenant_id, revisao_id, is_admin,
                                  int(dias_travado), int(dias_sem_update))
         st.divider()
         _fragment_configurar_agendamento(tenant_id, is_admin)
 
-    # ── Botão de atualizar ────────────────────────────────────────────────────
+    # ── Botão de atualizar ──────────────────────────────────────────────────
     import time as _time
     if st.button("🔄 Atualizar alertas", key="ntf_refresh"):
         st.session_state["data_version"] = str(_time.time())

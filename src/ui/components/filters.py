@@ -7,7 +7,9 @@ def filter_shell():
 
 
 def filter_caption(text: str):
-    st.markdown(f'<div class="ds-filter-caption">{text}</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="ds-filter-caption">{text}</div>',
+        unsafe_allow_html=True)
 
 
 def filter_hint(text: str):

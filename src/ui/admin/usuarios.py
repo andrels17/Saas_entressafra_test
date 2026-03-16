@@ -26,7 +26,8 @@ def _safe_json(e):
 
 
 def render_admin_usuarios():
-    _ph("⊹", "Usuários", "Crie e gerencie usuários (sem convite), roles e permissões por setor.")
+    _ph("⊹", "Usuários",
+        "Crie e gerencie usuários (sem convite), roles e permissões por setor.")
 
     tenant_id = current_tenant_id()
     role = current_role()

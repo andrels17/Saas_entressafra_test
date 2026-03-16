@@ -1,9 +1,7 @@
+from src.ui.core.styles import page_header as _ph
 import streamlit as st
-from src.ui.core.design_system import inject_design_system_css
 from src.ui.admin_components.layout import admin_block, admin_divider
-from src.ui.admin_components.utils import inject_enterprise_css, clamp, pager, safe_rerun, norm_name
-import re
-import unicodedata
+from src.ui.admin_components.utils import inject_enterprise_css, pager, safe_rerun, norm_name
 from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_role
 
 
@@ -26,8 +24,7 @@ def _render_limpeza_grupos(sb, tenant_id: str, deps: list[dict]):
     with st.expander("🧹 Limpeza de Grupos (anti-duplicidade)", expanded=False):
         st.caption(
             "Deduplicar grupos (mesmo nome) e remover grupos vazios (sem equipamentos). "
-            "Na deduplicação, os equipamentos e vínculos de serviços são reapontados para o grupo canônico."
-        )
+            "Na deduplicação, os equipamentos e vínculos de serviços são reapontados para o grupo canônico.")
 
         # Carrega grupos
         try:
@@ -65,7 +62,10 @@ def _render_limpeza_grupos(sb, tenant_id: str, deps: list[dict]):
             equip_counts = {}
 
         # Opções de chave
-        consider_depto = st.toggle("Considerar Departamento ao deduplicar", value=True, key="grp_dedupe_consider_depto")
+        consider_depto = st.toggle(
+            "Considerar Departamento ao deduplicar",
+            value=True,
+            key="grp_dedupe_consider_depto")
 
         buckets: dict[str, list[dict]] = {}
         for g in grupos:
@@ -80,11 +80,15 @@ def _render_limpeza_grupos(sb, tenant_id: str, deps: list[dict]):
         c1, c2, c3 = st.columns(3, gap="small")
         c1.metric("Grupos", len(grupos))
         c2.metric("Duplicados", sum(len(v) for v in dup_buckets.values()))
-        c3.metric("Sem equipamentos", sum(1 for g in grupos if equip_counts.get(g.get("id"), 0) == 0))
+        c3.metric(
+            "Sem equipamentos", sum(
+                1 for g in grupos if equip_counts.get(
+                    g.get("id"), 0) == 0))
 
         if dup_buckets:
             st.markdown("**Amostra de duplicidades:**")
-            dep_name_by_id = {d.get("id"): d.get("nome") for d in (deps or []) if d.get("id")}
+            dep_name_by_id = {d.get("id"): d.get("nome")
+                              for d in (deps or []) if d.get("id")}
             sample_rows = []
             for k, v in list(dup_buckets.items())[:10]:
                 any_dep = v[0].get("departamento_id")
@@ -95,7 +99,10 @@ def _render_limpeza_grupos(sb, tenant_id: str, deps: list[dict]):
                         "nomes": ", ".join([str(x.get("nome")) for x in v][:6]),
                     }
                 )
-            st.dataframe(sample_rows, use_container_width=True, hide_index=True)
+            st.dataframe(
+                sample_rows,
+                use_container_width=True,
+                hide_index=True)
         else:
             st.info("Nenhuma duplicidade óbvia encontrada.")
 
@@ -104,9 +111,11 @@ def _render_limpeza_grupos(sb, tenant_id: str, deps: list[dict]):
         st.markdown("#### Deduplicar")
         st.caption(
             "Mantém 1 grupo (preferindo **ativo** e com **mais equipamentos**), reaponta: "
-            "- equipamentos.grupo_id\n- grupo_servicos.grupo_id (se existir)\nDepois tenta apagar duplicados; se falhar, desativa."
-        )
-        confirm_txt = st.text_input("Digite DEDUPLICAR", value="", key="grp_dedupe_confirm")
+            "- equipamentos.grupo_id\n- grupo_servicos.grupo_id (se existir)\nDepois tenta apagar duplicados; se falhar, desativa.")
+        confirm_txt = st.text_input(
+            "Digite DEDUPLICAR",
+            value="",
+            key="grp_dedupe_confirm")
         if st.button(
             "Deduplicar agora",
             type="primary",
@@ -119,10 +128,9 @@ def _render_limpeza_grupos(sb, tenant_id: str, deps: list[dict]):
                 def score(g):
                     gid = g.get("id")
                     return (
-                        1 if g.get("ativo") else 0,
-                        equip_counts.get(gid, 0),
-                        "9999" if g.get("created_at") is None else str(g.get("created_at")),
-                    )
+                        1 if g.get("ativo") else 0, equip_counts.get(
+                            gid, 0), "9999" if g.get("created_at") is None else str(
+                            g.get("created_at")), )
 
                 items_sorted = sorted(items, key=score, reverse=True)
                 canon = items_sorted[0]
@@ -134,44 +142,59 @@ def _render_limpeza_grupos(sb, tenant_id: str, deps: list[dict]):
 
                     # 1) Reaponta equipamentos
                     try:
-                        sb.table("equipamentos").update({"grupo_id": canon_id}).eq("tenant_id", tenant_id).eq("grupo_id", gid).execute()
+                        sb.table("equipamentos").update({"grupo_id": canon_id}).eq(
+                            "tenant_id", tenant_id).eq("grupo_id", gid).execute()
                     except Exception as e:
-                        st.error(f"Falha ao atualizar equipamentos.grupo_id ({gid} -> {canon_id}): {e}")
+                        st.error(
+                            f"Falha ao atualizar equipamentos.grupo_id ({gid} -> {canon_id}): {e}")
                         continue
 
                     # 2) Reaponta grupo_servicos (se existir)
                     try:
-                        sb.table("grupo_servicos").update({"grupo_id": canon_id}).eq("tenant_id", tenant_id).eq("grupo_id", gid).execute()
+                        sb.table("grupo_servicos").update({"grupo_id": canon_id}).eq(
+                            "tenant_id", tenant_id).eq("grupo_id", gid).execute()
                     except Exception:
                         pass
 
                     # 3) Apaga ou desativa duplicado
                     try:
-                        sb.table("equip_grupos").delete().eq("tenant_id", tenant_id).eq("id", gid).execute()
+                        sb.table("equip_grupos").delete().eq(
+                            "tenant_id", tenant_id).eq(
+                            "id", gid).execute()
                     except Exception:
                         try:
-                            sb.table("equip_grupos").update({"ativo": False}).eq("tenant_id", tenant_id).eq("id", gid).execute()
+                            sb.table("equip_grupos").update({"ativo": False}).eq(
+                                "tenant_id", tenant_id).eq("id", gid).execute()
                         except Exception as e:
-                            st.error(f"Falha ao desativar grupo duplicado ({gid}): {e}")
+                            st.error(
+                                f"Falha ao desativar grupo duplicado ({gid}): {e}")
                             continue
                     changed += 1
 
-            st.success(f"Deduplicação concluída. Itens processados: {changed}.")
+            st.success(
+                f"Deduplicação concluída. Itens processados: {changed}.")
             safe_rerun()
 
         admin_divider()
 
         st.markdown("#### Remover grupos vazios")
-        st.caption("Remove grupos sem equipamentos. Você pode **desativar** ou **apagar**.")
-        mode = st.radio("Ação", ["Desativar", "Apagar"], horizontal=True, key="grp_empty_mode")
-        confirm2 = st.text_input("Digite LIMPAR", value="", key="grp_empty_confirm")
+        st.caption(
+            "Remove grupos sem equipamentos. Você pode **desativar** ou **apagar**.")
+        mode = st.radio("Ação", ["Desativar", "Apagar"],
+                        horizontal=True, key="grp_empty_mode")
+        confirm2 = st.text_input(
+            "Digite LIMPAR",
+            value="",
+            key="grp_empty_confirm")
         if st.button(
             "Limpar vazios",
             use_container_width=True,
             disabled=(confirm2.strip().upper() != "LIMPAR"),
             key="grp_empty_btn",
         ):
-            empty_ids = [g.get("id") for g in grupos if equip_counts.get(g.get("id"), 0) == 0 and g.get("id")]
+            empty_ids = [
+                g.get("id") for g in grupos if equip_counts.get(
+                    g.get("id"), 0) == 0 and g.get("id")]
             if not empty_ids:
                 st.info("Nenhum grupo vazio encontrado.")
             else:
@@ -181,20 +204,21 @@ def _render_limpeza_grupos(sb, tenant_id: str, deps: list[dict]):
                         if mode == "Apagar":
                             # remove vínculos de serviços antes (best-effort)
                             try:
-                                sb.table("grupo_servicos").delete().eq("tenant_id", tenant_id).eq("grupo_id", gid).execute()
+                                sb.table("grupo_servicos").delete().eq(
+                                    "tenant_id", tenant_id).eq(
+                                    "grupo_id", gid).execute()
                             except Exception:
                                 pass
-                            sb.table("equip_grupos").delete().eq("tenant_id", tenant_id).eq("id", gid).execute()
+                            sb.table("equip_grupos").delete().eq(
+                                "tenant_id", tenant_id).eq("id", gid).execute()
                         else:
-                            sb.table("equip_grupos").update({"ativo": False}).eq("tenant_id", tenant_id).eq("id", gid).execute()
+                            sb.table("equip_grupos").update({"ativo": False}).eq(
+                                "tenant_id", tenant_id).eq("id", gid).execute()
                         ok += 1
                     except Exception as e:
                         st.error(f"Falha ao limpar grupo {gid}: {e}")
                 st.success(f"Limpeza concluída. Itens afetados: {ok}.")
                 safe_rerun()
-
-
-from src.ui.core.styles import page_header as _ph
 
 
 def _render_limpeza_total_grupos(sb, tenant_id: str):
@@ -205,8 +229,7 @@ def _render_limpeza_total_grupos(sb, tenant_id: str):
     with st.expander("🧼 Limpeza completa de Grupos", expanded=False):
         st.caption(
             "Use isso para **limpar de verdade** (em massa) a tabela de grupos. "
-            "Para evitar erros, o sistema tenta desvincular equipamentos e vínculos conhecidos antes de apagar."
-        )
+            "Para evitar erros, o sistema tenta desvincular equipamentos e vínculos conhecidos antes de apagar.")
 
         try:
             grupos = (
@@ -240,7 +263,8 @@ def _render_limpeza_total_grupos(sb, tenant_id: str):
                 import csv as _csv
                 import io as _io
                 buf = _io.StringIO()
-                w = _csv.DictWriter(buf, fieldnames=sorted({k for r in grupos for k in r.keys()}))
+                w = _csv.DictWriter(buf, fieldnames=sorted(
+                    {k for r in grupos for k in r.keys()}))
                 w.writeheader()
                 for r in grupos:
                     w.writerow(r)
@@ -260,22 +284,36 @@ def _render_limpeza_total_grupos(sb, tenant_id: str):
         admin_divider()
 
         st.markdown("#### Limpar em massa")
-        alvo = st.radio("O que limpar", ["Somente inativos", "Todos (inclusive ativos)"], horizontal=True, key="grp_mass_target")
-        acao = st.radio("Como limpar", ["Desativar (soft)", "Apagar definitivamente (hard)"], horizontal=True, key="grp_mass_mode")
+        alvo = st.radio("O que limpar",
+                        ["Somente inativos",
+                         "Todos (inclusive ativos)"],
+                        horizontal=True,
+                        key="grp_mass_target")
+        acao = st.radio("Como limpar",
+                        ["Desativar (soft)",
+                         "Apagar definitivamente (hard)"],
+                        horizontal=True,
+                        key="grp_mass_mode")
 
         st.warning(
             "⚠️ **Apagar definitivamente** pode falhar se existirem vínculos protegidos por Foreign Key. "
-            "Antes de apagar, tentamos desvincular equipamentos e tabelas relacionadas (best-effort)."
-        )
+            "Antes de apagar, tentamos desvincular equipamentos e tabelas relacionadas (best-effort).")
 
-        confirm = st.text_input("Digite LIMPAR GRUPOS", value="", key="grp_mass_confirm")
-        confirm_ck = st.checkbox("Estou ciente e quero executar", value=False, key="grp_mass_ack")
+        confirm = st.text_input(
+            "Digite LIMPAR GRUPOS",
+            value="",
+            key="grp_mass_confirm")
+        confirm_ck = st.checkbox(
+            "Estou ciente e quero executar",
+            value=False,
+            key="grp_mass_ack")
 
         if st.button(
             "Executar limpeza",
             type="primary",
             use_container_width=True,
-            disabled=(confirm.strip().upper() != "LIMPAR GRUPOS" or not confirm_ck),
+            disabled=(
+                confirm.strip().upper() != "LIMPAR GRUPOS" or not confirm_ck),
             key="grp_mass_btn",
         ):
             ids = []
@@ -293,15 +331,18 @@ def _render_limpeza_total_grupos(sb, tenant_id: str):
             for gid in ids:
                 try:
                     if acao.startswith("Desativar"):
-                        sb.table("equip_grupos").update({"ativo": False}).eq("tenant_id", tenant_id).eq("id", gid).execute()
+                        sb.table("equip_grupos").update({"ativo": False}).eq(
+                            "tenant_id", tenant_id).eq("id", gid).execute()
                         ok += 1
                         continue
 
                     # HARD DELETE: desvincula e apaga
                     try:
-                        sb.table("equipamentos").update({"grupo_id": None}).eq("tenant_id", tenant_id).eq("grupo_id", gid).execute()
+                        sb.table("equipamentos").update({"grupo_id": None}).eq(
+                            "tenant_id", tenant_id).eq("grupo_id", gid).execute()
                     except Exception as e:
-                        st.error(f"Falha ao desvincular equipamentos do grupo {gid}: {e}")
+                        st.error(
+                            f"Falha ao desvincular equipamentos do grupo {gid}: {e}")
                         raise
 
                     # Tabelas relacionadas (best-effort)
@@ -311,15 +352,21 @@ def _render_limpeza_total_grupos(sb, tenant_id: str):
                         ("grupos_servicos", "grupo_id"),
                     ]:
                         try:
-                            sb.table(tbl).delete().eq("tenant_id", tenant_id).eq(col, gid).execute()
+                            sb.table(tbl).delete().eq(
+                                "tenant_id", tenant_id).eq(
+                                col, gid).execute()
                         except Exception:
-                            # tenta pelo menos setar NULL caso delete não seja permitido
+                            # tenta pelo menos setar NULL caso delete não seja
+                            # permitido
                             try:
-                                sb.table(tbl).update({col: None}).eq("tenant_id", tenant_id).eq(col, gid).execute()
+                                sb.table(tbl).update({col: None}).eq(
+                                    "tenant_id", tenant_id).eq(col, gid).execute()
                             except Exception:
                                 pass
 
-                    sb.table("equip_grupos").delete().eq("tenant_id", tenant_id).eq("id", gid).execute()
+                    sb.table("equip_grupos").delete().eq(
+                        "tenant_id", tenant_id).eq(
+                        "id", gid).execute()
                     ok += 1
                 except Exception as e:
                     st.error(f"Erro ao limpar grupo {gid}: {e}")
@@ -330,7 +377,8 @@ def _render_limpeza_total_grupos(sb, tenant_id: str):
 
 
 def render_admin_grupos():
-    _ph("⊕", "Grupos de Equipamentos", "Crie e gerencie grupos. Mova equipamentos em lote para cada grupo.")
+    _ph("⊕", "Grupos de Equipamentos",
+        "Crie e gerencie grupos. Mova equipamentos em lote para cada grupo.")
     inject_enterprise_css()
 
     role = current_role()
@@ -357,7 +405,6 @@ def render_admin_grupos():
     dep_map = {d["nome"]: d["id"] for d in deps}
     dep_names = ["(sem departamento)"] + [d["nome"] for d in deps]
 
-
     tab_manage, tab_clean = st.tabs(["📋 Gerenciar", "🧹 Limpeza"])
 
     with tab_clean:
@@ -368,13 +415,16 @@ def render_admin_grupos():
         _render_limpeza_total_grupos(sb, tenant_id)
 
     with tab_manage:
-            # Criar grupo
+        # Criar grupo
         with st.form("create_group"):
-            nome = st.text_input("Novo grupo", placeholder="Ex.: Tratores Transbordos")
+            nome = st.text_input("Novo grupo",
+                                 placeholder="Ex.: Tratores Transbordos")
             dep_sel = None
             if deps:
-                dep_sel = st.selectbox("Departamento (opcional)", dep_names, index=0)
-            submitted = st.form_submit_button("Criar grupo", use_container_width=True)
+                dep_sel = st.selectbox(
+                    "Departamento (opcional)", dep_names, index=0)
+            submitted = st.form_submit_button(
+                "Criar grupo", use_container_width=True)
 
         if submitted:
             nome_norm = (nome or "").strip()
@@ -401,27 +451,41 @@ def render_admin_grupos():
         # ------------------------------
         # Listar grupos (com busca + paginação)
         # ------------------------------
-        admin_block("Lista de grupos", "Gerencie busca, status e paginação dos grupos.")
+        admin_block(
+            "Lista de grupos",
+            "Gerencie busca, status e paginação dos grupos.")
 
         f1, f2, f3, f4 = st.columns([0.46, 0.18, 0.18, 0.18], gap="small")
         with f1:
-            grp_search = st.text_input("Buscar", placeholder="Buscar por nome…", key="grp_search")
+            grp_search = st.text_input(
+                "Buscar",
+                placeholder="Buscar por nome…",
+                key="grp_search")
         with f2:
-            only_active = st.toggle("Só ativos", value=True, key="grp_only_active")
+            only_active = st.toggle(
+                "Só ativos", value=True, key="grp_only_active")
         with f3:
-            sort_mode = st.selectbox(
-                "Ordenar",
-                ["A–Z", "Z–A", "Ativos primeiro", "Inativos primeiro", "Mais recentes", "Mais antigos"],
-                index=0,
-                key="grp_sort_mode",
-            )
+            sort_mode = st.selectbox("Ordenar",
+                                     ["A–Z",
+                                      "Z–A",
+                                      "Ativos primeiro",
+                                      "Inativos primeiro",
+                                      "Mais recentes",
+                                      "Mais antigos"],
+                                     index=0,
+                                     key="grp_sort_mode",
+                                     )
         with f4:
-            page_size = st.selectbox("Por página", [10, 20, 50], index=0, key="grp_page_size")
+            page_size = st.selectbox(
+                "Por página", [
+                    10, 20, 50], index=0, key="grp_page_size")
 
         try:
-            q = sb.table("equip_grupos").select("id, nome, ativo, created_at, departamento_id").eq("tenant_id", tenant_id).order("nome")
+            q = sb.table("equip_grupos").select("id, nome, ativo, created_at, departamento_id").eq(
+                "tenant_id", tenant_id).order("nome")
         except Exception:
-            q = sb.table("equip_grupos").select("id, nome, ativo, created_at").eq("tenant_id", tenant_id).order("nome")
+            q = sb.table("equip_grupos").select("id, nome, ativo, created_at").eq(
+                "tenant_id", tenant_id).order("nome")
         if only_active:
             q = q.eq("ativo", True)
 
@@ -434,7 +498,11 @@ def render_admin_grupos():
         grupos = q.execute().data or []
         if grp_search:
             ss = grp_search.strip().lower()
-            grupos = [g for g in grupos if ss in str(g.get("nome", "")).lower()]
+            grupos = [
+                g for g in grupos if ss in str(
+                    g.get(
+                        "nome",
+                        "")).lower()]
 
         # Ordenação local (garante opções como mais recentes)
         try:
@@ -442,22 +510,46 @@ def render_admin_grupos():
         except Exception:
             sm = "A–Z"
         if sm == "A–Z":
-            grupos = sorted(grupos, key=lambda x: str(x.get("nome", "")).lower())
+            grupos = sorted(
+                grupos,
+                key=lambda x: str(
+                    x.get(
+                        "nome",
+                        "")).lower())
         elif sm == "Z–A":
-            grupos = sorted(grupos, key=lambda x: str(x.get("nome", "")).lower(), reverse=True)
+            grupos = sorted(
+                grupos,
+                key=lambda x: str(
+                    x.get(
+                        "nome",
+                        "")).lower(),
+                reverse=True)
         elif sm == "Ativos primeiro":
-            grupos = sorted(grupos, key=lambda x: (0 if x.get("ativo") else 1, str(x.get("nome", "")).lower()))
+            grupos = sorted(
+                grupos, key=lambda x: (
+                    0 if x.get("ativo") else 1, str(
+                        x.get(
+                            "nome", "")).lower()))
         elif sm == "Inativos primeiro":
-            grupos = sorted(grupos, key=lambda x: (0 if not x.get("ativo") else 1, str(x.get("nome", "")).lower()))
+            grupos = sorted(
+                grupos, key=lambda x: (
+                    0 if not x.get("ativo") else 1, str(
+                        x.get(
+                            "nome", "")).lower()))
         elif sm == "Mais recentes":
-            grupos = sorted(grupos, key=lambda x: str(x.get("created_at", "")), reverse=True)
+            grupos = sorted(
+                grupos,
+                key=lambda x: str(
+                    x.get(
+                        "created_at",
+                        "")),
+                reverse=True)
         elif sm == "Mais antigos":
             grupos = sorted(grupos, key=lambda x: str(x.get("created_at", "")))
 
         if not grupos:
             st.info("Nenhum grupo encontrado.")
             return
-
 
         # KPIs rápidos (best-effort)
         try:
@@ -478,7 +570,8 @@ def render_admin_grupos():
         k3.metric("Departamentos", len(deps) if deps else 0)
 
         st.caption(f"Total: **{len(grupos)}**")
-        page_idx, _ = pager("grps", total=len(grupos), page_size=int(page_size))
+        page_idx, _ = pager("grps", total=len(
+            grupos), page_size=int(page_size))
         start = page_idx * int(page_size)
         end = start + int(page_size)
         grupos_page = grupos[start:end]
@@ -502,13 +595,12 @@ def render_admin_grupos():
             dep_nome = "(sem)"
             if deps:
                 dep_nome = next(
-                    (d["nome"] for d in deps if d["id"] == g.get("departamento_id")),
-                    "(sem)",
-                )
+                    (d["nome"] for d in deps if d["id"] == g.get("departamento_id")), "(sem)", )
 
             with st.expander(f"{g['nome']}", expanded=False):
                 status_txt = "ATIVO" if g.get("ativo") else "INATIVO"
-                status_cls = "badge-active" if g.get("ativo") else "badge-inactive"
+                status_cls = "badge-active" if g.get(
+                    "ativo") else "badge-inactive"
                 st.markdown(
                     f"""
     <div class='card-enterprise'>
@@ -535,19 +627,28 @@ def render_admin_grupos():
                 with c1:
                     st.caption(f"Ativo: {'Sim' if g.get('ativo') else 'Não'}")
                 with c2:
-                    novo_nome = st.text_input("Renomear", value=g["nome"], key=f"rename_{gid}")
+                    novo_nome = st.text_input(
+                        "Renomear", value=g["nome"], key=f"rename_{gid}")
                 with c3:
                     dep_new = None
                     if deps:
-                        current_dep_name = next((d["nome"] for d in deps if d["id"] == g.get("departamento_id")), "(sem departamento)")
-                        idx = dep_names.index(current_dep_name) if current_dep_name in dep_names else 0
-                        dep_new = st.selectbox("Departamento", dep_names, index=idx, key=f"dep_sel_{gid}")
+                        current_dep_name = next(
+                            (d["nome"] for d in deps if d["id"] == g.get("departamento_id")),
+                            "(sem departamento)")
+                        idx = dep_names.index(
+                            current_dep_name) if current_dep_name in dep_names else 0
+                        dep_new = st.selectbox(
+                            "Departamento", dep_names, index=idx, key=f"dep_sel_{gid}")
                     else:
                         st.caption("Departamentos: rode a etapa9")
 
                 a1, a2, a3 = st.columns([1, 1, 1], gap="small")
                 with a1:
-                    if st.button("Salvar", icon=":material/save:", key=f"save_{gid}", use_container_width=True):
+                    if st.button(
+                        "Salvar",
+                        icon=":material/save:",
+                        key=f"save_{gid}",
+                            use_container_width=True):
                         nn = (novo_nome or "").strip()
                         if not nn:
                             st.warning("Nome inválido.")
@@ -555,22 +656,30 @@ def render_admin_grupos():
                         try:
                             payload = {"nome": nn}
                             if deps and dep_new is not None:
-                                payload["departamento_id"] = None if dep_new == "(sem departamento)" else dep_map.get(dep_new)
+                                payload["departamento_id"] = None if dep_new == "(sem departamento)" else dep_map.get(
+                                    dep_new)
                             try:
-                                sb.table("equip_grupos").update(payload).eq("tenant_id", tenant_id).eq("id", gid).execute()
+                                sb.table("equip_grupos").update(payload).eq(
+                                    "tenant_id", tenant_id).eq("id", gid).execute()
                             except Exception:
                                 payload.pop("departamento_id", None)
-                                sb.table("equip_grupos").update(payload).eq("tenant_id", tenant_id).eq("id", gid).execute()
-                            st.toast("✓ Atualizado", icon=":material/check_circle:")
+                                sb.table("equip_grupos").update(payload).eq(
+                                    "tenant_id", tenant_id).eq("id", gid).execute()
+                            st.toast(
+                                "✓ Atualizado", icon=":material/check_circle:")
                             safe_rerun()
                         except Exception as e:
                             st.error(f"Erro ao salvar: {e}")
 
                 with a2:
                     label = "Desativar" if g.get("ativo") else "Ativar"
-                    if st.button(label, key=f"toggle_{gid}", use_container_width=True):
+                    if st.button(
+                            label,
+                            key=f"toggle_{gid}",
+                            use_container_width=True):
                         try:
-                            sb.table("equip_grupos").update({"ativo": (not g.get("ativo"))}).eq("tenant_id", tenant_id).eq("id", gid).execute()
+                            sb.table("equip_grupos").update({"ativo": (not g.get("ativo"))}).eq(
+                                "tenant_id", tenant_id).eq("id", gid).execute()
                             st.toast("✓ Ok", icon=":material/check_circle:")
                             safe_rerun()
                         except Exception as e:
@@ -578,16 +687,25 @@ def render_admin_grupos():
 
                 with a3:
                     with st.popover("Excluir", icon=":material/delete:", help="Remover grupo permanentemente"):
-                        st.caption("Isso remove o grupo. Equipamentos do grupo serão **desvinculados** (grupo_id = NULL).")
+                        st.caption(
+                            "Isso remove o grupo. Equipamentos do grupo serão **desvinculados** (grupo_id = NULL).")
                         st.caption(f"Equipamentos vinculados: **{eq_cnt}**")
-                        confirm = st.checkbox("Confirmo excluir", value=False, key=f"grp_del_ok_{gid}")
-                        if st.button("Apagar agora", type="primary", use_container_width=True, disabled=not confirm, key=f"grp_del_{gid}"):
+                        confirm = st.checkbox(
+                            "Confirmo excluir", value=False, key=f"grp_del_ok_{gid}")
+                        if st.button(
+                            "Apagar agora",
+                            type="primary",
+                            use_container_width=True,
+                            disabled=not confirm,
+                                key=f"grp_del_{gid}"):
                             try:
-                                sb.table("equipamentos").update({"grupo_id": None}).eq("tenant_id", tenant_id).eq("grupo_id", gid).execute()
+                                sb.table("equipamentos").update({"grupo_id": None}).eq(
+                                    "tenant_id", tenant_id).eq("grupo_id", gid).execute()
                             except Exception:
                                 pass
                             try:
-                                sb.table("equip_grupos").delete().eq("tenant_id", tenant_id).eq("id", gid).execute()
+                                sb.table("equip_grupos").delete().eq(
+                                    "tenant_id", tenant_id).eq("id", gid).execute()
                                 st.success("Grupo excluído.")
                                 safe_rerun()
                             except Exception as e:
@@ -599,11 +717,16 @@ def render_admin_grupos():
                 # Equipamentos do grupo (busca + paginação)
                 # ------------------------------
                 st.markdown("#### Equipamentos deste grupo")
-                e1, e2, e3, e4 = st.columns([0.42, 0.18, 0.20, 0.20], gap="small")
+                e1, e2, e3, e4 = st.columns(
+                    [0.42, 0.18, 0.20, 0.20], gap="small")
                 with e1:
-                    eq_search = st.text_input("Buscar equipamentos", placeholder="Buscar por frota/modelo…", key=f"grp_{gid}__eq_search")
+                    eq_search = st.text_input(
+                        "Buscar equipamentos",
+                        placeholder="Buscar por frota/modelo…",
+                        key=f"grp_{gid}__eq_search")
                 with e2:
-                    eq_only_active = st.toggle("Só ativos", value=True, key=f"grp_{gid}__eq_only_active")
+                    eq_only_active = st.toggle(
+                        "Só ativos", value=True, key=f"grp_{gid}__eq_only_active")
                 with e3:
                     eq_sort = st.selectbox(
                         "Ordenar",
@@ -612,15 +735,29 @@ def render_admin_grupos():
                         key=f"grp_{gid}__eq_sort",
                     )
                 with e4:
-                    eq_page_size = st.selectbox("Por página", [10, 20, 50], index=0, key=f"grp_{gid}__eq_page_size")
+                    eq_page_size = st.selectbox(
+                        "Por página", [
+                            10, 20, 50], index=0, key=f"grp_{gid}__eq_page_size")
 
                 # Seleção com fallback (caso algumas colunas não existam)
                 select_cols = "id,frota,modelo,status,ativo,grupo_id"
                 try:
-                    qe = sb.table("equipamentos").select(select_cols, count="exact").eq("tenant_id", tenant_id).eq("grupo_id", gid)
+                    qe = sb.table("equipamentos").select(
+                        select_cols,
+                        count="exact").eq(
+                        "tenant_id",
+                        tenant_id).eq(
+                        "grupo_id",
+                        gid)
                 except Exception:
                     select_cols = "id,frota,ativo,grupo_id"
-                    qe = sb.table("equipamentos").select(select_cols, count="exact").eq("tenant_id", tenant_id).eq("grupo_id", gid)
+                    qe = sb.table("equipamentos").select(
+                        select_cols,
+                        count="exact").eq(
+                        "tenant_id",
+                        tenant_id).eq(
+                        "grupo_id",
+                        gid)
 
                 if eq_only_active:
                     try:
@@ -633,7 +770,8 @@ def render_admin_grupos():
                     term = eq_search.strip()
                     try:
                         # PostgREST: or=(frota.ilike.*x*,modelo.ilike.*x*)
-                        qe = qe.or_(f"frota.ilike.%{term}%,modelo.ilike.%{term}%")
+                        qe = qe.or_(
+                            f"frota.ilike.%{term}%,modelo.ilike.%{term}%")
                     except Exception:
                         pass
 
@@ -666,7 +804,8 @@ def render_admin_grupos():
                 if total_eq <= 0:
                     st.info("Nenhum equipamento encontrado.")
                 else:
-                    eq_page_idx, _ = pager(f"grp_{gid}__eq", total=total_eq, page_size=int(eq_page_size))
+                    eq_page_idx, _ = pager(
+                        f"grp_{gid}__eq", total=total_eq, page_size=int(eq_page_size))
                     rs = eq_page_idx * int(eq_page_size)
                     re = rs + int(eq_page_size) - 1
                     try:
@@ -678,7 +817,8 @@ def render_admin_grupos():
                     if not rows:
                         st.info("Nenhum equipamento nesta página.")
                     else:
-                        # Lista em cards enterprise (mais legível que tabela longa)
+                        # Lista em cards enterprise (mais legível que tabela
+                        # longa)
                         for r in rows:
                             frota = r.get("frota") or "-"
                             modelo = r.get("modelo") or ""
@@ -694,7 +834,7 @@ def render_admin_grupos():
         <div>
           <div style='font-weight:800; font-size:14px; margin-bottom:6px;'>{frota}{(' · ' + modelo) if modelo else ''}</div>
           <div class='small-muted'>{('Status: ' + status) if status else ''}</div>
-          <div class='small-muted'>Equipamento ID: {r.get('id','')}</div>
+          <div class='small-muted'>Equipamento ID: {r.get('id', '')}</div>
         </div>
         <div style='text-align:right; white-space:nowrap;'>
           <span class='badge {b_cls}'>{b_txt}</span>
@@ -705,6 +845,6 @@ def render_admin_grupos():
                                 unsafe_allow_html=True,
                             )
 
-
-
-            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div style='height:6px'></div>",
+                unsafe_allow_html=True)

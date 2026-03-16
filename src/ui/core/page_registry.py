@@ -13,70 +13,70 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable
 
 from src.auth.roles import Role
 
 
 class PageKey(str, Enum):
     """Chaves únicas para cada página da aplicação."""
-    INICIO                = "Início"
-    DASHBOARD             = "Dashboard"
-    MATRIZ                = "Matriz"
-    NOTIFICACOES          = "Notificações"
-    PAINEL_GESTOR         = "Painel do Gestor"
-    AUDITORIA             = "Auditoria"
-    APONTAMENTO           = "Apontamento"
-    CONFIG_GUIADA         = "Configuração Guiada"
-    ADM_USUARIOS          = "Admin - Usuários"
-    ADM_DEPARTAMENTOS     = "Admin - Departamentos"
-    ADM_GRUPOS            = "Admin - Grupos"
-    ADM_EQUIPAMENTOS      = "Admin - Equipamentos"
-    ADM_INTEGRIDADE       = "Admin - Integridade"
-    ADM_SETORES_SERVICOS  = "Admin - Setores & Serviços"
-    ADM_TEMPLATES         = "Admin - Templates"
-    ADM_REVISOES          = "Admin - Revisões"
-    ADM_BRANDING          = "Admin - Branding & Relatórios"
+    INICIO = "Início"
+    DASHBOARD = "Dashboard"
+    MATRIZ = "Matriz"
+    NOTIFICACOES = "Notificações"
+    PAINEL_GESTOR = "Painel do Gestor"
+    AUDITORIA = "Auditoria"
+    APONTAMENTO = "Apontamento"
+    CONFIG_GUIADA = "Configuração Guiada"
+    ADM_USUARIOS = "Admin - Usuários"
+    ADM_DEPARTAMENTOS = "Admin - Departamentos"
+    ADM_GRUPOS = "Admin - Grupos"
+    ADM_EQUIPAMENTOS = "Admin - Equipamentos"
+    ADM_INTEGRIDADE = "Admin - Integridade"
+    ADM_SETORES_SERVICOS = "Admin - Setores & Serviços"
+    ADM_TEMPLATES = "Admin - Templates"
+    ADM_REVISOES = "Admin - Revisões"
+    ADM_BRANDING = "Admin - Branding & Relatórios"
 
 
 @dataclass(frozen=True)
 class PageConfig:
     """Configuração de uma página: metadados + controle de acesso."""
-    key:       PageKey
-    icon:      str
-    label:     str          # label curto para sidebar compacta
-    group:     str          # "core" | "admin"
-    roles:     frozenset[Role] = field(default_factory=frozenset)
+    key: PageKey
+    icon: str
+    label: str          # label curto para sidebar compacta
+    group: str          # "core" | "admin"
+    roles: frozenset[Role] = field(default_factory=frozenset)
     # render_fn é injetado em runtime pelo app.py para evitar import circular
 
 
-# ── Tabela de configuração de todas as páginas ────────────────────────────────
+# ── Tabela de configuração de todas as páginas ──────────────────────────
 #    (ícone, label_curto, grupo, roles_requeridas)
 #
 #    Grupos suportados:
 #      "core"   — aparece no menu principal
 #      "admin"  — aparece no menu de administração (colapsável)
 #      "detail" — NÃO aparece no menu (rota de detalhe, acessível via __nav_to)
-#                 Equivalente a st.Page(visibility="hidden") do Streamlit 1.44+ (#5)
+# Equivalente a st.Page(visibility="hidden") do Streamlit 1.44+ (#5)
 _PAGE_DEFS: list[tuple[PageKey, str, str, str, frozenset[Role]]] = [
-    #  key                          icon   label         group    roles (vazio = todos logados)
-    (PageKey.INICIO,                "⌂",  "Início",        "core",  frozenset()),
-    (PageKey.DASHBOARD,             "▣",  "Dashboard",     "core",  frozenset()),
-    (PageKey.MATRIZ,                "⊞",  "Matriz",        "core",  frozenset()),
-    (PageKey.NOTIFICACOES,          "🔔", "Notificações",  "core",  frozenset()),
-    (PageKey.PAINEL_GESTOR,         "◈",  "Gestor",        "core",  Role.MANAGER_ROLES),
-    (PageKey.AUDITORIA,             "◎",  "Auditoria",   "core",  Role.MANAGER_ROLES),
-    (PageKey.APONTAMENTO,           "◉",  "Apontamento", "core",  Role.ADMIN_ROLES),
-    (PageKey.CONFIG_GUIADA,         "⚙",  "Setup",       "admin", Role.ADMIN_ROLES),
-    (PageKey.ADM_USUARIOS,          "⊹",  "Usuários",    "admin", Role.ADMIN_ROLES),
-    (PageKey.ADM_DEPARTAMENTOS,     "◩",  "Depart.",     "admin", Role.ADMIN_ROLES),
-    (PageKey.ADM_GRUPOS,            "⊕",  "Grupos",      "admin", Role.ADMIN_ROLES),
-    (PageKey.ADM_EQUIPAMENTOS,      "◫",  "Equipamentos","admin", Role.ADMIN_ROLES),
-    (PageKey.ADM_INTEGRIDADE,       "🧪", "Integridade", "admin", Role.ADMIN_ROLES),
-    (PageKey.ADM_SETORES_SERVICOS,  "◧",  "Setores",     "admin", Role.ADMIN_ROLES),
-    (PageKey.ADM_TEMPLATES,         "◪",  "Templates",   "admin", Role.ADMIN_ROLES),
-    (PageKey.ADM_REVISOES,          "◑",  "Revisões",    "admin", Role.ADMIN_ROLES),
-    (PageKey.ADM_BRANDING,          "◒",  "Branding",    "admin", Role.ADMIN_ROLES),
+    # key                          icon   label         group    roles (vazio
+    # = todos logados)
+    (PageKey.INICIO, "⌂", "Início", "core", frozenset()),
+    (PageKey.DASHBOARD, "▣", "Dashboard", "core", frozenset()),
+    (PageKey.MATRIZ, "⊞", "Matriz", "core", frozenset()),
+    (PageKey.NOTIFICACOES, "🔔", "Notificações", "core", frozenset()),
+    (PageKey.PAINEL_GESTOR, "◈", "Gestor", "core", Role.MANAGER_ROLES),
+    (PageKey.AUDITORIA, "◎", "Auditoria", "core", Role.MANAGER_ROLES),
+    (PageKey.APONTAMENTO, "◉", "Apontamento", "core", Role.ADMIN_ROLES),
+    (PageKey.CONFIG_GUIADA, "⚙", "Setup", "admin", Role.ADMIN_ROLES),
+    (PageKey.ADM_USUARIOS, "⊹", "Usuários", "admin", Role.ADMIN_ROLES),
+    (PageKey.ADM_DEPARTAMENTOS, "◩", "Depart.", "admin", Role.ADMIN_ROLES),
+    (PageKey.ADM_GRUPOS, "⊕", "Grupos", "admin", Role.ADMIN_ROLES),
+    (PageKey.ADM_EQUIPAMENTOS, "◫", "Equipamentos", "admin", Role.ADMIN_ROLES),
+    (PageKey.ADM_INTEGRIDADE, "🧪", "Integridade", "admin", Role.ADMIN_ROLES),
+    (PageKey.ADM_SETORES_SERVICOS, "◧", "Setores", "admin", Role.ADMIN_ROLES),
+    (PageKey.ADM_TEMPLATES, "◪", "Templates", "admin", Role.ADMIN_ROLES),
+    (PageKey.ADM_REVISOES, "◑", "Revisões", "admin", Role.ADMIN_ROLES),
+    (PageKey.ADM_BRANDING, "◒", "Branding", "admin", Role.ADMIN_ROLES),
 ]
 
 PAGES: dict[PageKey, PageConfig] = {

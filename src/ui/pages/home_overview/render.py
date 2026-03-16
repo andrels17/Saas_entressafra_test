@@ -21,7 +21,6 @@ from src.domain.kpi import calc_global_kpis, calc_dept_kpis
 from src.ui.core.styles import page_header
 from src.utils import nav
 from src.utils.kpi_engine import get_group_kpis
-from src.utils.mobile import is_mobile
 from src.utils.ui_helpers import status_badge, mobile_columns
 from src.utils.nav import get_current_revisao, set_current_revisao
 from src.utils.supabase_helpers import current_tenant_id
@@ -37,7 +36,7 @@ from .transforms import (
 )
 
 
-# ── Fragment: KPIs principais ─────────────────────────────────────────────────
+# ── Fragment: KPIs principais ───────────────────────────────────────────
 
 @st.fragment
 def _fragment_kpis(
@@ -94,11 +93,14 @@ def _fragment_kpis(
                 "têm equipamentos ativos + template. O % global pode refletir apenas um grupo."
             )
             if st.session_state.get("current_role") in ("admin", "superadmin"):
-                if st.button("Abrir Templates", use_container_width=True, key="home_go_templates_pop"):
+                if st.button(
+                    "Abrir Templates",
+                    use_container_width=True,
+                        key="home_go_templates_pop"):
                     nav.goto("Templates")
 
 
-# ── Fragment: ranking de grupos ───────────────────────────────────────────────
+# ── Fragment: ranking de grupos ─────────────────────────────────────────
 
 @st.fragment
 def _fragment_ranking(
@@ -112,19 +114,21 @@ def _fragment_ranking(
         st.info("Sem grupos configurados (equipamentos + template) para ranquear.")
         return
 
-    best  = scope.sort_values(["pct", "done_steps"], ascending=[False, False]).head(5)
-    worst = scope.sort_values(["pct", "done_steps"], ascending=[True,  True ]).head(5)
+    best = scope.sort_values(["pct", "done_steps"],
+                             ascending=[False, False]).head(5)
+    worst = scope.sort_values(["pct", "done_steps"],
+                              ascending=[True, True]).head(5)
 
     a, b = st.columns(2)
     sector_map = load_group_sector_view(tenant_id, revisao_id, ver)
 
     def _render_grupo_card(row: dict, mode: str) -> None:
-        gid    = row.get("grupo_id")
-        sec    = sector_map.get(str(gid), {})
-        pct    = int(pd.to_numeric(row.get("pct", 0), errors="coerce") or 0)
-        total  = int(sec.get("setores_total") or 0)
-        concl  = int(sec.get("setores_concluidos") or 0)
-        pend   = int(sec.get("setores_pendentes") or 0)
+        gid = row.get("grupo_id")
+        sec = sector_map.get(str(gid), {})
+        pct = int(pd.to_numeric(row.get("pct", 0), errors="coerce") or 0)
+        total = int(sec.get("setores_total") or 0)
+        concl = int(sec.get("setores_concluidos") or 0)
+        pend = int(sec.get("setores_pendentes") or 0)
 
         with st.container(border=True):
             col_l, col_r = st.columns([0.75, 0.25])
@@ -134,15 +138,21 @@ def _fragment_ranking(
                 status_badge("concluido" if mode == "best" else "travado")
 
             mc1, mc2, mc3 = st.columns(3)
-            with mc1: st.metric("Execução",         f"{pct}%")
-            with mc2: st.metric("Setores pend.",     pend, delta_color="inverse" if pend > 0 else "off")
-            with mc3: st.metric("Setores conc.",     f"{concl}/{total}")
+            with mc1:
+                st.metric("Execução", f"{pct}%")
+            with mc2:
+                st.metric(
+                    "Setores pend.",
+                    pend,
+                    delta_color="inverse" if pend > 0 else "off")
+            with mc3:
+                st.metric("Setores conc.", f"{concl}/{total}")
             st.caption("Setor fecha quando D+R+M ok em todos os equipamentos.")
             if st.button("Abrir na Matriz", key=f"rank_open_{mode}_{gid}",
-                          use_container_width=True, type="secondary"):
+                         use_container_width=True, type="secondary"):
                 st.session_state.update({
-                    "matriz_grupo_id":        gid,
-                    "matriz_view":            "group",
+                    "matriz_grupo_id": gid,
+                    "matriz_view": "group",
                     "matriz_departamento_id": None,
                 })
                 nav.goto("Matriz")
@@ -157,7 +167,7 @@ def _fragment_ranking(
             _render_grupo_card(r, "worst")
 
 
-# ── Fragment: departamentos pendentes ─────────────────────────────────────────
+# ── Fragment: departamentos pendentes ───────────────────────────────────
 
 @st.fragment
 def _fragment_departamentos(
@@ -170,11 +180,13 @@ def _fragment_departamentos(
         st.info("Sem dados por departamento.")
         return
 
-    dsum_v             = dsum.copy()
-    dsum_v["Departamento"] = dsum_v["departamento_id"].map(dept_to_name).fillna(dsum_v["departamento_id"].astype(str))
-    dsum_v["Concluído"]    = pd.to_numeric(dsum_v["pct"], errors="coerce").fillna(0) >= 100
+    dsum_v = dsum.copy()
+    dsum_v["Departamento"] = dsum_v["departamento_id"].map(
+        dept_to_name).fillna(dsum_v["departamento_id"].astype(str))
+    dsum_v["Concluído"] = pd.to_numeric(
+        dsum_v["pct"], errors="coerce").fillna(0) >= 100
     pend = dsum_v[~dsum_v["Concluído"]].sort_values("pct")
-    done = dsum_v[ dsum_v["Concluído"]].sort_values("pct", ascending=False)
+    done = dsum_v[dsum_v["Concluído"]].sort_values("pct", ascending=False)
 
     c1, c2 = st.columns(2)
     with c1:
@@ -185,7 +197,7 @@ def _fragment_departamentos(
             st.dataframe(
                 pend[["Departamento", "pct", "grupos"]].rename(columns={"pct": "%", "grupos": "Grupos"}),
                 use_container_width=True, hide_index=True,
-                column_config={"%" : st.column_config.ProgressColumn("%", min_value=0, max_value=100)},
+                column_config={"%": st.column_config.ProgressColumn("%", min_value=0, max_value=100)},
             )
     with c2:
         st.markdown("#### Concluídos")
@@ -195,27 +207,28 @@ def _fragment_departamentos(
             st.dataframe(
                 done[["Departamento", "pct", "grupos"]].rename(columns={"pct": "%", "grupos": "Grupos"}),
                 use_container_width=True, hide_index=True,
-                column_config={"%" : st.column_config.ProgressColumn("%", min_value=0, max_value=100)},
+                column_config={"%": st.column_config.ProgressColumn("%", min_value=0, max_value=100)},
             )
 
     with st.expander("Detalhe por grupos e etapas", expanded=False):
         if not scope.empty:
-            top_backlog = scope.sort_values(["backlog_steps", "pct"], ascending=[False, True]).head(10)
+            top_backlog = scope.sort_values(
+                ["backlog_steps", "pct"], ascending=[False, True]).head(10)
             st.dataframe(
-                top_backlog[["Grupo","pct","done_steps","expected_steps","eq_count","svc_count","backlog_steps"]]
-                .rename(columns={"pct":"%","done_steps":"Feitas","expected_steps":"Esperadas",
-                                  "eq_count":"Equip","svc_count":"Serviços","backlog_steps":"Etapas pend."}),
+                top_backlog[["Grupo", "pct", "done_steps", "expected_steps", "eq_count", "svc_count", "backlog_steps"]]
+                .rename(columns={"pct": "%", "done_steps": "Feitas", "expected_steps": "Esperadas",
+                                 "eq_count": "Equip", "svc_count": "Serviços", "backlog_steps": "Etapas pend."}),
                 use_container_width=True, hide_index=True,
                 column_config={
-                    "%"           : st.column_config.ProgressColumn("%", min_value=0, max_value=100),
-                    "Feitas"      : st.column_config.NumberColumn("Feitas",       format="%,d"),
-                    "Esperadas"   : st.column_config.NumberColumn("Esperadas",    format="%,d"),
+                    "%": st.column_config.ProgressColumn("%", min_value=0, max_value=100),
+                    "Feitas": st.column_config.NumberColumn("Feitas", format="%,d"),
+                    "Esperadas": st.column_config.NumberColumn("Esperadas", format="%,d"),
                     "Etapas pend.": st.column_config.NumberColumn("Etapas pend.", format="%,d"),
                 },
             )
 
 
-# ── Fragment: tendência semanal ────────────────────────────────────────────────
+# ── Fragment: tendência semanal ─────────────────────────────────────────
 
 @st.fragment
 def _fragment_tendencia(
@@ -231,7 +244,7 @@ def _fragment_tendencia(
         return
 
     if st.button("Salvar snapshot desta semana", icon=":material/save:",
-                  use_container_width=True, key="home_save_snapshot"):
+                 use_container_width=True, key="home_save_snapshot"):
         ok, msg = insert_snapshot(tenant_id, revisao_id, week, scope)
         if ok:
             st.toast("✓ Snapshot salvo", icon=":material/check_circle:")
@@ -253,25 +266,34 @@ def _fragment_tendencia(
     fig_t.update_layout(
         height=340, margin=dict(l=12, r=12, t=10, b=10),
         paper_bgcolor="#06080B", plot_bgcolor="#0C111A",
-        xaxis=dict(title="Semana",      gridcolor="rgba(255,255,255,0.06)"),
+        xaxis=dict(title="Semana", gridcolor="rgba(255,255,255,0.06)"),
         yaxis=dict(title="% concluído", range=[0, 105], gridcolor="rgba(255,255,255,0.06)"),
         font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=12),
     )
-    st.plotly_chart(fig_t, use_container_width=True, config={"displayModeBar": False})
-    st.caption("Percentual global ponderado por semana, com base nos snapshots salvos.")
+    st.plotly_chart(fig_t, use_container_width=True,
+                    config={"displayModeBar": False})
+    st.caption(
+        "Percentual global ponderado por semana, com base nos snapshots salvos.")
 
     # Tabela dos snapshots com DatetimeColumn nativa
     if "created_at" in sdf.columns:
         with st.expander("Ver snapshots salvos", expanded=False):
             st.dataframe(
-                sdf.sort_values("week_number", ascending=False).head(50),
-                use_container_width=True, hide_index=True,
+                sdf.sort_values(
+                    "week_number",
+                    ascending=False).head(50),
+                use_container_width=True,
+                hide_index=True,
                 column_config={
                     "created_at": st.column_config.DatetimeColumn(
-                        "Salvo em", format="DD/MM/YYYY HH:mm",
+                        "Salvo em",
+                        format="DD/MM/YYYY HH:mm",
                         timezone="America/Sao_Paulo",
                     ),
-                    "pct": st.column_config.ProgressColumn("% KPI", min_value=0, max_value=100),
+                    "pct": st.column_config.ProgressColumn(
+                        "% KPI",
+                        min_value=0,
+                        max_value=100),
                 },
             )
 
@@ -279,15 +301,20 @@ def _fragment_tendencia(
 # ── Fragment: risco por departamento ─────────────────────────────────────────
 
 @st.fragment
-def _fragment_risco(kdf: pd.DataFrame, gid_to_dept: dict, dept_to_name: dict) -> None:
+def _fragment_risco(
+        kdf: pd.DataFrame,
+        gid_to_dept: dict,
+        dept_to_name: dict) -> None:
     ddf = calc_dept_kpis(kdf, gid_to_dept)
     if ddf.empty:
         st.info("Sem dados por departamento.")
         return
 
     ddf = ddf.copy()
-    ddf["Departamento"] = ddf["departamento_id"].map(dept_to_name).fillna(ddf["departamento_id"].astype(str))
-    ddf["Risco"]        = ((100 - ddf["pct"]) * 2 + (ddf["backlog_steps"] / ddf["grupos"].clip(lower=1))).round().astype(int)
+    ddf["Departamento"] = ddf["departamento_id"].map(
+        dept_to_name).fillna(ddf["departamento_id"].astype(str))
+    ddf["Risco"] = ((100 - ddf["pct"]) * 2 + (ddf["backlog_steps"] /
+                    ddf["grupos"].clip(lower=1))).round().astype(int)
     ddf = ddf.sort_values("Risco", ascending=False)
 
     st.dataframe(
@@ -296,13 +323,13 @@ def _fragment_risco(kdf: pd.DataFrame, gid_to_dept: dict, dept_to_name: dict) ->
         ),
         use_container_width=True, hide_index=True,
         column_config={
-            "%":     st.column_config.ProgressColumn("%", min_value=0, max_value=100),
+            "%": st.column_config.ProgressColumn("%", min_value=0, max_value=100),
             "Risco": st.column_config.NumberColumn("Risco", help="Fórmula: (100-%) × 2 + backlog/grupos"),
         },
     )
 
 
-# ── Ponto de entrada público ──────────────────────────────────────────────────
+# ── Ponto de entrada público ────────────────────────────────────────────
 
 def render_home_overview() -> None:
     page_header("Home")
@@ -321,19 +348,23 @@ def render_home_overview() -> None:
     week = current_week(rev_start, semanas_total)
 
     if rev.get("id"):
-        # Compatível com versões antigas de set_current_revisao que aceitam apenas o ID.
+        # Compatível com versões antigas de set_current_revisao que aceitam
+        # apenas o ID.
         set_current_revisao(rev["id"])
         st.session_state["_sidebar_rev_titulo"] = rev.get("titulo")
         st.session_state["_sidebar_rev_semana"] = week
-    grupos     = load_groups(tenant_id, ver)
-    deps       = load_depts(tenant_id, ver)
-    gid_to_name  = {g["id"]: (g.get("nome") or "—") for g in grupos if g.get("id")}
-    gid_to_dept  = {g["id"]: g.get("departamento_id")  for g in grupos if g.get("id")}
-    dept_to_name = {d["id"]: (d.get("nome") or "—")   for d in deps   if d.get("id")}
+    grupos = load_groups(tenant_id, ver)
+    deps = load_depts(tenant_id, ver)
+    gid_to_name = {g["id"]: (g.get("nome") or "—")
+                   for g in grupos if g.get("id")}
+    gid_to_dept = {g["id"]: g.get("departamento_id")
+                   for g in grupos if g.get("id")}
+    dept_to_name = {d["id"]: (d.get("nome") or "—")
+                    for d in deps if d.get("id")}
 
     dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id)
 
-    # ── Header da revisão ─────────────────────────────────────────────────────
+    # ── Header da revisão ───────────────────────────────────────────────────
     h1_col, h2_col = st.columns([0.82, 0.18])
     with h1_col:
         st.markdown(f"## {rev.get('titulo', 'Revisão')}")
@@ -343,7 +374,7 @@ def render_home_overview() -> None:
         )
         status_badge(rev.get("status"))
 
-        # ── Badge de prazo ────────────────────────────────────────────────────
+        # ── Badge de prazo ───────────────────────────────────────────────────
         try:
             from src.domain.kpi import calc_prazo
             prazo = calc_prazo(
@@ -369,13 +400,17 @@ def render_home_overview() -> None:
             pass
 
     with h2_col:
-        if st.button("Atualizar", icon=":material/refresh:", use_container_width=True, key="home_refresh_btn"):
+        if st.button(
+            "Atualizar",
+            icon=":material/refresh:",
+            use_container_width=True,
+                key="home_refresh_btn"):
             st.session_state["data_version"] = str(time.time())
-            st.session_state["home_pulse"]   = True
+            st.session_state["home_pulse"] = True
             st.toast("Atualizado", icon=":material/refresh:")
             st.rerun()
 
-    # ── Carrega KPIs ──────────────────────────────────────────────────────────
+    # ── Carrega KPIs ────────────────────────────────────────────────────────
     with st.spinner("", show_time=False):
         kdf = get_group_kpis(tenant_id, rev["id"], ver, prefer_mv=True)
 
@@ -384,8 +419,13 @@ def render_home_overview() -> None:
         st.info("Sem KPIs nesta revisão ainda.")
         return
 
-    kdf = enrich_kdf(kdf, gid_to_name, gid_to_dept, dep_scope_ids, grp_scope_ids)
-    gk  = calc_global_kpis(kdf)
+    kdf = enrich_kdf(
+        kdf,
+        gid_to_name,
+        gid_to_dept,
+        dep_scope_ids,
+        grp_scope_ids)
+    gk = calc_global_kpis(kdf)
     cov = compute_coverage(kdf)
     dsum, dep_total, dep_done = compute_dept_summary(kdf, gid_to_dept)
     scope = kdf[(kdf["eq_count"] > 0) & (kdf["svc_count"] > 0)].copy()

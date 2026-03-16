@@ -1,6 +1,7 @@
 
 import streamlit as st
 
+
 def render_global_filters(revisoes, departamentos, grupos, equipamentos):
     """Barra de filtros global"""
 
@@ -13,7 +14,8 @@ def render_global_filters(revisoes, departamentos, grupos, equipamentos):
             revisao = st.selectbox("Revisão", revisoes)
 
         with col2:
-            departamento = st.selectbox("Departamento", ["Todos"] + departamentos)
+            departamento = st.selectbox(
+                "Departamento", ["Todos"] + departamentos)
 
         with col3:
             grupo = st.selectbox("Grupo", ["Todos"] + grupos)

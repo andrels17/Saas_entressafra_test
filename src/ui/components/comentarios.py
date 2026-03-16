@@ -19,13 +19,16 @@ Requer tabela `tarefa_comentarios` no Supabase:
 from __future__ import annotations
 
 import streamlit as st
-from datetime import datetime, timezone
+from datetime import datetime
 
 from src.utils.supabase_helpers import sb_for_user, current_user_id
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def _load_comentarios(_tenant_id: str, _tarefa_id: str, _ver: str = "0") -> list[dict]:
+def _load_comentarios(
+        _tenant_id: str,
+        _tarefa_id: str,
+        _ver: str = "0") -> list[dict]:
     try:
         sb = sb_for_user()
         rows = (
@@ -72,7 +75,9 @@ def render_comentarios(
     ver = str(st.session_state.get("data_version", "0"))
     comentarios = _load_comentarios(tenant_id, tarefa_id, ver)
 
-    label = f"💬 Histórico ({len(comentarios)})" if not compact else f"💬 {len(comentarios)}"
+    label = f"💬 Histórico ({
+        len(comentarios)})" if not compact else f"💬 {
+        len(comentarios)}"
 
     with st.expander(label, expanded=(len(comentarios) > 0 and not compact)):
         if not comentarios:
@@ -80,8 +85,8 @@ def render_comentarios(
         else:
             for c in comentarios:
                 nome = c.get("user_nome") or "Usuário"
-                txt  = c.get("texto") or ""
-                dt   = _fmt_dt(c.get("created_at"))
+                txt = c.get("texto") or ""
+                dt = _fmt_dt(c.get("created_at"))
                 avatar = (nome[:1] or "U").upper()
                 st.markdown(
                     f'<div style="display:flex;gap:8px;margin-bottom:10px;align-items:flex-start">'
@@ -100,9 +105,11 @@ def render_comentarios(
                 )
 
         # Campo para novo comentário
-        st.markdown('<div style="margin-top:4px"></div>', unsafe_allow_html=True)
-        _key_txt  = f"{key_prefix}comt_txt_{tarefa_id}"
-        _key_btn  = f"{key_prefix}comt_btn_{tarefa_id}"
+        st.markdown(
+            '<div style="margin-top:4px"></div>',
+            unsafe_allow_html=True)
+        _key_txt = f"{key_prefix}comt_txt_{tarefa_id}"
+        _key_btn = f"{key_prefix}comt_btn_{tarefa_id}"
         novo_txt = st.text_area(
             "Novo comentário",
             key=_key_txt,
@@ -110,18 +117,22 @@ def render_comentarios(
             placeholder="Descreva o impedimento, peça aguardada, ocorrência…",
             label_visibility="collapsed",
         )
-        if st.button("➕ Adicionar comentário", key=_key_btn, use_container_width=True, type="secondary"):
+        if st.button(
+            "➕ Adicionar comentário",
+            key=_key_btn,
+            use_container_width=True,
+                type="secondary"):
             if not (novo_txt or "").strip():
                 st.warning("Digite algo antes de adicionar.")
             else:
                 try:
                     sb = sb_for_user()
                     sb.table("tarefa_comentarios").insert({
-                        "tenant_id":  tenant_id,
-                        "tarefa_id":  tarefa_id,
-                        "user_id":    current_user_id() or None,
-                        "user_nome":  user_nome,
-                        "texto":      novo_txt.strip(),
+                        "tenant_id": tenant_id,
+                        "tarefa_id": tarefa_id,
+                        "user_id": current_user_id() or None,
+                        "user_nome": user_nome,
+                        "texto": novo_txt.strip(),
                     }).execute()
                     st.toast("✅ Comentário adicionado!")
                     # Limpar campo e invalidar cache

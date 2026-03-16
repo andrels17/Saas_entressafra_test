@@ -74,11 +74,11 @@ def empty_state(
     """
     _inject_once()
 
-    icon_html   = f'<div class="es-icon">{icon}</div>'
-    title_html  = f'<div class="es-title">{title}</div>'
-    desc_html   = f'<div class="es-desc">{description}</div>' if description else ""
-    has_btns    = bool(action_label or secondary_label)
-    close_html  = "" if has_btns else "</div>"
+    icon_html = f'<div class="es-icon">{icon}</div>'
+    title_html = f'<div class="es-title">{title}</div>'
+    desc_html = f'<div class="es-desc">{description}</div>' if description else ""
+    has_btns = bool(action_label or secondary_label)
+    close_html = "" if has_btns else "</div>"
 
     st.markdown(
         f'<div class="es-wrap">{icon_html}{title_html}{desc_html}{close_html}',
@@ -89,7 +89,11 @@ def empty_state(
     if has_btns:
         btns = [(action_label, action_key, action_type, nav_to)]
         if secondary_label and secondary_key:
-            btns.append((secondary_label, secondary_key, "tertiary", secondary_nav_to))
+            btns.append(
+                (secondary_label,
+                 secondary_key,
+                 "tertiary",
+                 secondary_nav_to))
 
         cols_n = len([b for b in btns if b[0]])
         cols = st.columns([1] + [1.2] * cols_n + [1])
@@ -97,7 +101,8 @@ def empty_state(
             if not lbl or not key:
                 continue
             with cols[i + 1]:
-                if st.button(lbl, key=key, type=btype, use_container_width=True):
+                if st.button(lbl, key=key, type=btype,
+                             use_container_width=True):
                     clicked = True
                     if page:
                         st.session_state["__nav_to"] = page

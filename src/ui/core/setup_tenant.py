@@ -10,15 +10,22 @@ def render_setup_tenant():
 
     user_id = current_user_id()
     if not user_id:
-        st.error("Não foi possível identificar seu usuário autenticado. Faça logout/login e tente novamente.")
+        st.error(
+            "Não foi possível identificar seu usuário autenticado. Faça logout/login e tente novamente.")
         st.stop()
 
     with st.form("setup_tenant_form"):
-        nome = st.text_input("Nome da empresa", placeholder="Ex.: Usina Central")
-        submitted = st.form_submit_button("Criar empresa e continuar", type="primary", use_container_width=True)
+        nome = st.text_input(
+            "Nome da empresa",
+            placeholder="Ex.: Usina Central")
+        submitted = st.form_submit_button(
+            "Criar empresa e continuar",
+            type="primary",
+            use_container_width=True)
 
     if not submitted:
-        st.info("Após criar a empresa, você poderá cadastrar setores, grupos, equipamentos e revisões.")
+        st.info(
+            "Após criar a empresa, você poderá cadastrar setores, grupos, equipamentos e revisões.")
         return
 
     nome = (nome or "").strip()

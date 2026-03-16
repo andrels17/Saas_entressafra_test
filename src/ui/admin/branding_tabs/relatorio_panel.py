@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import streamlit as st
 
@@ -66,8 +66,8 @@ def _load_equipamentos(sb, tenant_id: str) -> tuple[list, str]:
 
 
 def _call_rpc_with_fallback(sb, tenant_id: str, dt_ini: date, dt_fim: date,
-                             grupos_ids, status_vals, equipamentos_ids,
-                             agg_semana: bool, revisao_id: Optional[str]):
+                            grupos_ids, status_vals, equipamentos_ids,
+                            agg_semana: bool, revisao_id: Optional[str]):
     """Tenta get_executive_summary v3 → v2 → básico, retornando (data, aviso?)."""
     base = {
         "p_tenant_id": tenant_id,
@@ -99,62 +99,83 @@ def render_tab_relatorio(sb, tenant_id: str, branding: Branding):
     st.subheader("📄 Relatório Executivo PDF")
 
     today = date.today()
-    dt_ini = st.date_input("Data inicial", value=today - timedelta(days=7), key="rep_dt_ini")
-    dt_fim = st.date_input("Data final",   value=today,                      key="rep_dt_fim")
+    dt_ini = st.date_input(
+        "Data inicial",
+        value=today -
+        timedelta(
+            days=7),
+        key="rep_dt_ini")
+    dt_fim = st.date_input("Data final", value=today, key="rep_dt_fim")
 
-    revisoes     = _load_revisoes(sb, tenant_id)
-    grupos       = _load_grupos(sb, tenant_id)
+    revisoes = _load_revisoes(sb, tenant_id)
+    grupos = _load_grupos(sb, tenant_id)
     equipamentos, equip_label_field = _load_equipamentos(sb, tenant_id)
 
-    # ── Filtro: Revisão ───────────────────────────────────────────────────────
+    # ── Filtro: Revisão ─────────────────────────────────────────────────────
     rev_options: dict[str, Any] = {}
     for r in revisoes:
         titulo = r.get("titulo") or "Revisão"
-        ini_s  = str(r.get("data_inicio", ""))[:10]
-        fim_s  = str(r.get("data_fim", ""))[:10]
-        label  = f"{titulo} • {ini_s}–{fim_s}"
+        ini_s = str(r.get("data_inicio", ""))[:10]
+        fim_s = str(r.get("data_fim", ""))[:10]
+        label = f"{titulo} • {ini_s}–{fim_s}"
         if r.get("semanas_total") is not None:
             label += f" • {r['semanas_total']} semanas"
         if r.get("status"):
             label += f" • {r['status']}"
         rev_options[label] = r.get("id")
 
-    rev_label  = st.selectbox("Revisão (recomendado para evolução por semana operacional)",
-                               ["(todas)"] + list(rev_options.keys()))
+    rev_label = st.selectbox(
+        "Revisão (recomendado para evolução por semana operacional)",
+        ["(todas)"] +
+        list(
+            rev_options.keys()))
     revisao_id = None if rev_label == "(todas)" else rev_options.get(rev_label)
 
-    # ── Filtros secundários ───────────────────────────────────────────────────
+    # ── Filtros secundários ─────────────────────────────────────────────────
     st.markdown("**Filtros**")
     cA, cB = st.columns(2)
 
     with cA:
-        grupo_map  = {g.get("nome") or g.get("id"): g.get("id") for g in grupos}
-        grupos_sel = st.multiselect("Grupos", list(grupo_map.keys()), default=[])
+        grupo_map = {g.get("nome") or g.get("id"): g.get("id") for g in grupos}
+        grupos_sel = st.multiselect(
+            "Grupos", list(
+                grupo_map.keys()), default=[])
         grupos_ids = [grupo_map[x] for x in grupos_sel] or None
 
-        status_sel  = st.multiselect("Status",
-                                     ["pendente", "em_andamento", "concluido", "travado", "nao_aplica"],
-                                     default=[])
+        status_sel = st.multiselect(
+            "Status", [
+                "pendente", "em_andamento", "concluido", "travado", "nao_aplica"], default=[])
         status_vals = status_sel or None
 
     with cB:
-        equip_map     = {e.get(equip_label_field) or e.get("id"): e.get("id") for e in equipamentos}
-        equip_sel     = st.multiselect("Equipamentos", list(equip_map.keys()), default=[])
-        equip_ids     = [equip_map[x] for x in equip_sel] or None
+        equip_map = {e.get(equip_label_field) or e.get(
+            "id"): e.get("id") for e in equipamentos}
+        equip_sel = st.multiselect(
+            "Equipamentos", list(
+                equip_map.keys()), default=[])
+        equip_ids = [equip_map[x] for x in equip_sel] or None
 
-        agg_semana   = st.toggle("Mostrar evolução por semana (operacional)", value=True,
-                                  help="Usa tarefas_servico.semana.")
+        agg_semana = st.toggle(
+            "Mostrar evolução por semana (operacional)",
+            value=True,
+            help="Usa tarefas_servico.semana.")
         show_percent = st.toggle("Mostrar % concluído no PDF", value=True)
 
-    # ── Validação ─────────────────────────────────────────────────────────────
+    # ── Validação ───────────────────────────────────────────────────────────
     can_generate = True
     if agg_semana and not revisao_id:
-        st.warning("Para evolução semanal operacional, selecione uma revisão. "
-                   "Sem revisão, semanas de revisões diferentes podem se misturar.")
+        st.warning(
+            "Para evolução semanal operacional, selecione uma revisão. "
+            "Sem revisão, semanas de revisões diferentes podem se misturar.")
         can_generate = False
 
-    # ── Geração ───────────────────────────────────────────────────────────────
-    if st.button("Gerar PDF", icon=":material/picture_as_pdf:", type="primary", use_container_width=True, disabled=not can_generate):
+    # ── Geração ─────────────────────────────────────────────────────────────
+    if st.button(
+        "Gerar PDF",
+        icon=":material/picture_as_pdf:",
+        type="primary",
+        use_container_width=True,
+            disabled=not can_generate):
         with st.spinner("Gerando resumo executivo..."):
             raw = _call_rpc_with_fallback(sb, tenant_id, dt_ini, dt_fim,
                                           grupos_ids, status_vals, equip_ids,
@@ -168,7 +189,9 @@ def render_tab_relatorio(sb, tenant_id: str, branding: Branding):
                 return
 
         with st.spinner("Montando PDF..."):
-            period_label = f"{dt_ini.strftime('%d/%m/%Y')} – {dt_fim.strftime('%d/%m/%Y')}"
+            period_label = f"{
+                dt_ini.strftime('%d/%m/%Y')} – {
+                dt_fim.strftime('%d/%m/%Y')}"
             tenant_label = f"Tenant: {tenant_id[:8]}…"
             pdf_bytes = build_executive_pdf(summary, branding,
                                             period_label=period_label,

@@ -1,7 +1,7 @@
 
 import streamlit as st
-from typing import Optional, Callable, Any, Dict, List, Tuple
-from .styles import status_chip, render_status_chip
+from typing import Optional, Callable, Any, List, Tuple
+from .styles import render_status_chip
 
 
 EVENT_LABELS = {
@@ -9,13 +9,29 @@ EVENT_LABELS = {
     "tarefa_updated": "Atualizado",
 }
 
+
 def clamp_text(text: str, max_lines: int = 2) -> str:
     """Retorna HTML com truncagem por número de linhas + tooltip com texto completo."""
-    safe = (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+    safe = (
+        text or "").replace(
+        "&",
+        "&amp;").replace(
+            "<",
+            "&lt;").replace(
+                ">",
+                "&gt;").replace(
+                    '"',
+        "&quot;")
     cls = f"ea-clamp ea-clamp-{max_lines}"
     return f'<span class="{cls}" title="{safe}">{safe}</span>'
 
-def render_empty_state(title: str, subtitle: str = "", cta_label: str = "", cta_key: str = "", on_cta: Optional[Callable[[], Any]] = None):
+
+def render_empty_state(title: str,
+                       subtitle: str = "",
+                       cta_label: str = "",
+                       cta_key: str = "",
+                       on_cta: Optional[Callable[[],
+                                                 Any]] = None):
     st.markdown(
         f'''
         <div class="ea-empty">
@@ -26,11 +42,16 @@ def render_empty_state(title: str, subtitle: str = "", cta_label: str = "", cta_
         unsafe_allow_html=True
     )
     if cta_label:
-        if st.button(cta_label, key=cta_key or f"cta_{title}", use_container_width=True):
+        if st.button(
+                cta_label,
+                key=cta_key or f"cta_{title}",
+                use_container_width=True):
             if on_cta:
                 on_cta()
 
-def row_actions(label: str, actions: List[Tuple[str, Callable[[], Any]]], key: str):
+
+def row_actions(
+        label: str, actions: List[Tuple[str, Callable[[], Any]]], key: str):
     """Menu de ações compacto por linha. Usa popover quando disponível."""
     if hasattr(st, "popover"):
         with st.popover("⋯", use_container_width=False):
@@ -45,6 +66,7 @@ def row_actions(label: str, actions: List[Tuple[str, Callable[[], Any]]], key: s
             for a_label, fn in actions:
                 if st.button(a_label, key=f"{key}_{a_label}"):
                     fn()
+
 
 def chip(status: str) -> None:
     """Exibe chip de status — usa st.badge nativo (1.42+)."""
@@ -96,5 +118,8 @@ def render_tarefa_history(sb, tenant_id: str, tarefa_id: str, limit: int = 8):
         cols = st.columns([0.55, 0.45])
         cols[0].markdown(f"**{ev}**  ")
         cols[0].caption(when)
-        cols[1].markdown(clamp_text(resumo, 2) if resumo else "", unsafe_allow_html=True)
-
+        cols[1].markdown(
+            clamp_text(
+                resumo,
+                2) if resumo else "",
+            unsafe_allow_html=True)

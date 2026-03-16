@@ -9,10 +9,10 @@ from src.utils.supabase_helpers import sb_for_user
 def _role_pretty(role: str) -> str:
     r = (role or "").strip().lower()
     mapping = {
-        "admin":      "Admin",
+        "admin": "Admin",
         "superadmin": "Super Admin",
         "supervisor": "Supervisor",
-        "gestor":     "Gestor",
+        "gestor": "Gestor",
         "user": "Usuário",
         "usuario": "Usuário",
         "membro": "Membro",
@@ -46,7 +46,8 @@ def get_display_names(tenant_id: str, user_id: str) -> Tuple[str, str]:
     # Tenta tenants.name, tenants.nome, tenants.titulo
     for col in ("name", "nome", "titulo", "company_name"):
         try:
-            res = sb.table("tenants").select(col).eq("id", tenant_id).maybe_single().execute()
+            res = sb.table("tenants").select(col).eq(
+                "id", tenant_id).maybe_single().execute()
             if res and getattr(res, "data", None):
                 tn = _first_nonempty(res.data, [col])
                 if tn:
@@ -75,7 +76,8 @@ def get_display_names(tenant_id: str, user_id: str) -> Tuple[str, str]:
 
     # 2) tenant_users (multi-tenant) costuma ter 'nome' ou 'name'
     if user_name == "Usuário":
-        for cols in (("nome",), ("name",), ("full_name",), ("email",), ("display_name",)):
+        for cols in (("nome",), ("name",), ("full_name",),
+                     ("email",), ("display_name",)):
             try:
                 sel = ",".join(cols)
                 res = (
@@ -96,10 +98,12 @@ def get_display_names(tenant_id: str, user_id: str) -> Tuple[str, str]:
 
     # 3) profiles (se existir)
     if user_name == "Usuário":
-        for cols in (("nome",), ("name",), ("full_name",), ("email",), ("display_name",)):
+        for cols in (("nome",), ("name",), ("full_name",),
+                     ("email",), ("display_name",)):
             try:
                 sel = ",".join(cols)
-                res = sb.table("profiles").select(sel).eq("id", user_id).maybe_single().execute()
+                res = sb.table("profiles").select(sel).eq(
+                    "id", user_id).maybe_single().execute()
                 if res and getattr(res, "data", None):
                     un = _first_nonempty(res.data, list(cols))
                     if un:

@@ -8,7 +8,7 @@ import streamlit as st
 from src.ui.core.design_system import inject_design_system_css
 
 
-# ─── CSS ──────────────────────────────────────────────────────────────────────
+# ─── CSS ────────────────────────────────────────────────────────────────
 
 def inject_enterprise_css() -> None:
     """CSS comum para cards e badges dos painéis admin."""
@@ -48,7 +48,7 @@ def inject_enterprise_css() -> None:
     )
 
 
-# ─── Paginação ────────────────────────────────────────────────────────────────
+# ─── Paginação ──────────────────────────────────────────────────────────
 
 def clamp(n: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, n))
@@ -60,12 +60,18 @@ def pager(key: str, total: int, page_size: int) -> tuple[int, int]:
     ss_key = f"{key}__page"
     if ss_key not in st.session_state:
         st.session_state[ss_key] = 0
-    st.session_state[ss_key] = clamp(int(st.session_state[ss_key]), 0, total_pages - 1)
+    st.session_state[ss_key] = clamp(
+        int(st.session_state[ss_key]), 0, total_pages - 1)
     page_idx = int(st.session_state[ss_key])
 
     c1, c2, c3, c4 = st.columns([1, 2, 2, 1], gap="small")
     with c1:
-        if st.button("◀", key=f"{key}__prev", use_container_width=True, disabled=(page_idx <= 0)):
+        if st.button(
+            "◀",
+            key=f"{key}__prev",
+            use_container_width=True,
+            disabled=(
+                page_idx <= 0)):
             st.session_state[ss_key] = page_idx - 1
             st.rerun()
     with c2:
@@ -82,14 +88,20 @@ def pager(key: str, total: int, page_size: int) -> tuple[int, int]:
             st.session_state[ss_key] = int(go) - 1
             st.rerun()
     with c4:
-        if st.button("▶", key=f"{key}__next", use_container_width=True, disabled=(page_idx >= total_pages - 1)):
+        if st.button(
+            "▶",
+            key=f"{key}__next",
+            use_container_width=True,
+            disabled=(
+                page_idx >= total_pages -
+                1)):
             st.session_state[ss_key] = page_idx + 1
             st.rerun()
 
     return int(st.session_state[ss_key]), total_pages
 
 
-# ─── Misc ─────────────────────────────────────────────────────────────────────
+# ─── Misc ───────────────────────────────────────────────────────────────
 
 def safe_rerun() -> None:
     """st.rerun compatível com o módulo nav legado."""

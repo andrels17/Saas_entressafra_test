@@ -1,9 +1,6 @@
 import streamlit as st
-from src.ui.core.design_system import inject_design_system_css
 from src.ui.admin_components.layout import admin_block, admin_divider
-from src.ui.admin_components.utils import inject_enterprise_css, clamp, pager, safe_rerun, norm_name
-import re
-import unicodedata
+from src.ui.admin_components.utils import inject_enterprise_css, pager, safe_rerun, norm_name
 
 from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_role
 
@@ -30,8 +27,7 @@ def _render_limpeza_departamentos(sb, tenant_id: str):
     with st.expander("🧹 Limpeza de Departamentos (anti-duplicidade)", expanded=False):
         st.caption(
             "Deduplicar departamentos (ex.: 'Tratores' vs 'TRATORES' vs 'Tratores ') e "
-            "remover departamentos vazios (sem grupos)."
-        )
+            "remover departamentos vazios (sem grupos).")
 
         deps = (
             sb.table("departamentos")
@@ -69,15 +65,22 @@ def _render_limpeza_departamentos(sb, tenant_id: str):
         c1, c2, c3 = st.columns(3, gap="small")
         c1.metric("Departamentos", len(deps))
         c2.metric("Duplicados", sum(len(v) for v in dup_buckets.values()))
-        c3.metric("Sem grupos", sum(1 for d in deps if dep_to_group_cnt.get(d.get("id"), 0) == 0))
+        c3.metric(
+            "Sem grupos", sum(
+                1 for d in deps if dep_to_group_cnt.get(
+                    d.get("id"), 0) == 0))
 
         if dup_buckets:
             st.markdown("**Amostra de duplicidades:**")
             sample_rows = []
             for k, v in list(dup_buckets.items())[:10]:
                 nomes = ", ".join([str(x.get("nome")) for x in v][:6])
-                sample_rows.append({"chave": k, "itens": len(v), "nomes": nomes})
-            st.dataframe(sample_rows, use_container_width=True, hide_index=True)
+                sample_rows.append(
+                    {"chave": k, "itens": len(v), "nomes": nomes})
+            st.dataframe(
+                sample_rows,
+                use_container_width=True,
+                hide_index=True)
         else:
             st.info("Nenhuma duplicidade óbvia encontrada.")
 
@@ -86,9 +89,11 @@ def _render_limpeza_departamentos(sb, tenant_id: str):
         st.markdown("#### Deduplicar")
         st.caption(
             "Mantém 1 departamento (preferindo **ativo** e com **mais grupos**), reaponta os grupos e "
-            "tenta apagar os duplicados. Se o banco bloquear, desativa."
-        )
-        confirm_txt = st.text_input("Digite DEDUPLICAR", value="", key="dep_dedupe_confirm")
+            "tenta apagar os duplicados. Se o banco bloquear, desativa.")
+        confirm_txt = st.text_input(
+            "Digite DEDUPLICAR",
+            value="",
+            key="dep_dedupe_confirm")
         if st.button(
             "Deduplicar agora",
             type="primary",
@@ -103,8 +108,10 @@ def _render_limpeza_departamentos(sb, tenant_id: str):
                     return (
                         1 if d.get("ativo") else 0,
                         dep_to_group_cnt.get(did, 0),
-                        # created_at menor (mais antigo) costuma ser o "principal"
-                        "9999" if d.get("created_at") is None else str(d.get("created_at")),
+                        # created_at menor (mais antigo) costuma ser o
+                        # "principal"
+                        "9999" if d.get("created_at") is None else str(
+                            d.get("created_at")),
                     )
 
                 items_sorted = sorted(items, key=score, reverse=True)
@@ -116,43 +123,58 @@ def _render_limpeza_departamentos(sb, tenant_id: str):
                         continue
 
                     try:
-                        sb.table("equip_grupos").update({"departamento_id": canon_id}).eq("tenant_id", tenant_id).eq("departamento_id", did).execute()
+                        sb.table("equip_grupos").update({"departamento_id": canon_id}).eq(
+                            "tenant_id", tenant_id).eq("departamento_id", did).execute()
                     except Exception as e:
-                        st.error(f"Falha ao atualizar equip_grupos.departamento_id ({did} -> {canon_id}): {e}")
+                        st.error(
+                            f"Falha ao atualizar equip_grupos.departamento_id ({did} -> {canon_id}): {e}")
                         continue
 
-                    # se existir equipamentos.departamento_id, reaponta (senão ignora)
+                    # se existir equipamentos.departamento_id, reaponta (senão
+                    # ignora)
                     try:
-                        sb.table("equipamentos").update({"departamento_id": canon_id}).eq("tenant_id", tenant_id).eq("departamento_id", did).execute()
+                        sb.table("equipamentos").update({"departamento_id": canon_id}).eq(
+                            "tenant_id", tenant_id).eq("departamento_id", did).execute()
                     except Exception:
                         pass
 
                     try:
-                        sb.table("departamentos").delete().eq("tenant_id", tenant_id).eq("id", did).execute()
+                        sb.table("departamentos").delete().eq(
+                            "tenant_id", tenant_id).eq(
+                            "id", did).execute()
                     except Exception:
                         try:
-                            sb.table("departamentos").update({"ativo": False}).eq("tenant_id", tenant_id).eq("id", did).execute()
+                            sb.table("departamentos").update({"ativo": False}).eq(
+                                "tenant_id", tenant_id).eq("id", did).execute()
                         except Exception as e:
-                            st.error(f"Falha ao desativar duplicado ({did}): {e}")
+                            st.error(
+                                f"Falha ao desativar duplicado ({did}): {e}")
                             continue
 
                     changed += 1
 
-            st.success(f"Deduplicação concluída. Itens processados: {changed}.")
+            st.success(
+                f"Deduplicação concluída. Itens processados: {changed}.")
             safe_rerun()
 
         admin_divider()
 
         st.markdown("#### Remover departamentos vazios")
-        mode = st.radio("Ação", ["Desativar", "Apagar"], horizontal=True, key="dep_empty_mode")
-        confirm2 = st.text_input("Digite LIMPAR", value="", key="dep_empty_confirm")
+        mode = st.radio("Ação", ["Desativar", "Apagar"],
+                        horizontal=True, key="dep_empty_mode")
+        confirm2 = st.text_input(
+            "Digite LIMPAR",
+            value="",
+            key="dep_empty_confirm")
         if st.button(
             "Limpar vazios",
             use_container_width=True,
             disabled=(confirm2.strip().upper() != "LIMPAR"),
             key="dep_empty_btn",
         ):
-            empty_ids = [d.get("id") for d in deps if dep_to_group_cnt.get(d.get("id"), 0) == 0 and d.get("id")]
+            empty_ids = [
+                d.get("id") for d in deps if dep_to_group_cnt.get(
+                    d.get("id"), 0) == 0 and d.get("id")]
             if not empty_ids:
                 st.info("Nenhum departamento vazio encontrado.")
             else:
@@ -160,16 +182,16 @@ def _render_limpeza_departamentos(sb, tenant_id: str):
                 for did in empty_ids:
                     try:
                         if mode == "Apagar":
-                            sb.table("departamentos").delete().eq("tenant_id", tenant_id).eq("id", did).execute()
+                            sb.table("departamentos").delete().eq(
+                                "tenant_id", tenant_id).eq("id", did).execute()
                         else:
-                            sb.table("departamentos").update({"ativo": False}).eq("tenant_id", tenant_id).eq("id", did).execute()
+                            sb.table("departamentos").update({"ativo": False}).eq(
+                                "tenant_id", tenant_id).eq("id", did).execute()
                         ok += 1
                     except Exception as e:
                         st.error(f"Falha ao limpar departamento {did}: {e}")
                 st.success(f"Limpeza concluída. Itens afetados: {ok}.")
                 safe_rerun()
-
-
 
 
 def _render_limpeza_total_departamentos(sb, tenant_id: str):
@@ -180,8 +202,7 @@ def _render_limpeza_total_departamentos(sb, tenant_id: str):
     with st.expander("🧼 Limpeza completa de Departamentos", expanded=False):
         st.caption(
             "Use isso para **limpar de verdade** (em massa) a tabela de departamentos. "
-            "Recomendado fazer backup antes."
-        )
+            "Recomendado fazer backup antes.")
 
         deps = (
             sb.table("departamentos")
@@ -207,7 +228,8 @@ def _render_limpeza_total_departamentos(sb, tenant_id: str):
                 import csv as _csv
                 import io as _io
                 buf = _io.StringIO()
-                w = _csv.DictWriter(buf, fieldnames=sorted({k for r in deps for k in r.keys()}))
+                w = _csv.DictWriter(buf, fieldnames=sorted(
+                    {k for r in deps for k in r.keys()}))
                 w.writeheader()
                 for r in deps:
                     w.writerow(r)
@@ -227,22 +249,36 @@ def _render_limpeza_total_departamentos(sb, tenant_id: str):
         admin_divider()
 
         st.markdown("#### Limpar em massa")
-        alvo = st.radio("O que limpar", ["Somente inativos", "Todos (inclusive ativos)"], horizontal=True, key="dep_mass_target")
-        acao = st.radio("Como limpar", ["Desativar (soft)", "Apagar definitivamente (hard)"], horizontal=True, key="dep_mass_mode")
+        alvo = st.radio("O que limpar",
+                        ["Somente inativos",
+                         "Todos (inclusive ativos)"],
+                        horizontal=True,
+                        key="dep_mass_target")
+        acao = st.radio("Como limpar",
+                        ["Desativar (soft)",
+                         "Apagar definitivamente (hard)"],
+                        horizontal=True,
+                        key="dep_mass_mode")
 
         st.warning(
             "⚠️ **Apagar definitivamente** pode falhar se existirem vínculos protegidos por Foreign Key. "
-            "Nesses casos, a operação é interrompida e o erro é mostrado."
-        )
+            "Nesses casos, a operação é interrompida e o erro é mostrado.")
 
-        confirm = st.text_input("Digite LIMPAR DEPARTAMENTOS", value="", key="dep_mass_confirm")
-        confirm_ck = st.checkbox("Estou ciente e quero executar", value=False, key="dep_mass_ack")
+        confirm = st.text_input(
+            "Digite LIMPAR DEPARTAMENTOS",
+            value="",
+            key="dep_mass_confirm")
+        confirm_ck = st.checkbox(
+            "Estou ciente e quero executar",
+            value=False,
+            key="dep_mass_ack")
 
         if st.button(
             "Executar limpeza",
             type="primary",
             use_container_width=True,
-            disabled=(confirm.strip().upper() != "LIMPAR DEPARTAMENTOS" or not confirm_ck),
+            disabled=(
+                confirm.strip().upper() != "LIMPAR DEPARTAMENTOS" or not confirm_ck),
             key="dep_mass_btn",
         ):
             ids = []
@@ -260,24 +296,30 @@ def _render_limpeza_total_departamentos(sb, tenant_id: str):
             for did in ids:
                 try:
                     if acao.startswith("Desativar"):
-                        sb.table("departamentos").update({"ativo": False}).eq("tenant_id", tenant_id).eq("id", did).execute()
+                        sb.table("departamentos").update({"ativo": False}).eq(
+                            "tenant_id", tenant_id).eq("id", did).execute()
                         ok += 1
                         continue
 
                     # HARD DELETE: desvincula e apaga
                     try:
-                        sb.table("equip_grupos").update({"departamento_id": None}).eq("tenant_id", tenant_id).eq("departamento_id", did).execute()
+                        sb.table("equip_grupos").update({"departamento_id": None}).eq(
+                            "tenant_id", tenant_id).eq("departamento_id", did).execute()
                     except Exception as e:
-                        st.error(f"Falha ao desvincular grupos do departamento {did}: {e}")
+                        st.error(
+                            f"Falha ao desvincular grupos do departamento {did}: {e}")
                         raise
 
                     # Best-effort: se existir equipamentos.departamento_id
                     try:
-                        sb.table("equipamentos").update({"departamento_id": None}).eq("tenant_id", tenant_id).eq("departamento_id", did).execute()
+                        sb.table("equipamentos").update({"departamento_id": None}).eq(
+                            "tenant_id", tenant_id).eq("departamento_id", did).execute()
                     except Exception:
                         pass
 
-                    sb.table("departamentos").delete().eq("tenant_id", tenant_id).eq("id", did).execute()
+                    sb.table("departamentos").delete().eq(
+                        "tenant_id", tenant_id).eq(
+                        "id", did).execute()
                     ok += 1
                 except Exception as e:
                     st.error(f"Erro ao limpar departamento {did}: {e}")
@@ -288,7 +330,8 @@ def _render_limpeza_total_departamentos(sb, tenant_id: str):
 
 
 def render_admin_departamentos():
-    _ph("◩", "Departamentos", "Nível acima de grupos — organize seus grupos por departamento (ex.: Tratores, Caminhões, Colhedoras).")
+    _ph("◩", "Departamentos",
+        "Nível acima de grupos — organize seus grupos por departamento (ex.: Tratores, Caminhões, Colhedoras).")
     inject_enterprise_css()
 
     role = current_role()
@@ -301,14 +344,13 @@ def render_admin_departamentos():
 
     # Verifica se a tabela existe (evita quebrar o app antes da migração SQL)
     try:
-        _ = sb.table("departamentos").select("id").eq("tenant_id", tenant_id).limit(1).execute()
+        _ = sb.table("departamentos").select("id").eq(
+            "tenant_id", tenant_id).limit(1).execute()
     except Exception:
         st.warning(
             "A tabela **departamentos** ainda não existe no banco. "
-            "Rode o SQL `sql/etapa9_departamentos.sql` no Supabase e recarregue esta tela."
-        )
+            "Rode o SQL `sql/etapa9_departamentos.sql` no Supabase e recarregue esta tela.")
         return
-
 
     tab_manage, tab_clean = st.tabs(["📋 Gerenciar", "🧹 Limpeza"])
 
@@ -320,10 +362,13 @@ def render_admin_departamentos():
         _render_limpeza_total_departamentos(sb, tenant_id)
 
     with tab_manage:
-        admin_block("Criar departamento", "Cadastre departamentos com nomes padronizados.")
+        admin_block(
+            "Criar departamento",
+            "Cadastre departamentos com nomes padronizados.")
         with st.form("create_dep"):
             nome = st.text_input("Nome", placeholder="Ex.: Tratores")
-            submitted = st.form_submit_button("Criar", use_container_width=True)
+            submitted = st.form_submit_button(
+                "Criar", use_container_width=True)
 
         if submitted:
             nn = (nome or "").strip()
@@ -331,7 +376,8 @@ def render_admin_departamentos():
                 st.warning("Informe um nome.")
                 st.stop()
             try:
-                sb.table("departamentos").insert({"tenant_id": tenant_id, "nome": nn, "ativo": True}).execute()
+                sb.table("departamentos").insert(
+                    {"tenant_id": tenant_id, "nome": nn, "ativo": True}).execute()
                 st.success("Departamento criado.")
                 safe_rerun()
             except Exception as e:
@@ -342,27 +388,40 @@ def render_admin_departamentos():
         # ------------------------------
         # Lista (com busca + paginação)
         # ------------------------------
-        admin_block("Lista de departamentos", "Busque, filtre e edite os registros cadastrados.")
+        admin_block("Lista de departamentos",
+                    "Busque, filtre e edite os registros cadastrados.")
         f1, f2, f3, f4 = st.columns([0.46, 0.18, 0.18, 0.18], gap="small")
         with f1:
-            dep_search = st.text_input("Buscar", placeholder="Buscar por nome…", key="dep_search")
+            dep_search = st.text_input(
+                "Buscar",
+                placeholder="Buscar por nome…",
+                key="dep_search")
         with f2:
-            only_active = st.toggle("Só ativos", value=True, key="dep_only_active")
+            only_active = st.toggle(
+                "Só ativos", value=True, key="dep_only_active")
         with f3:
-            sort_mode = st.selectbox(
-                "Ordenar",
-                ["A–Z", "Z–A", "Ativos primeiro", "Inativos primeiro", "Mais recentes", "Mais antigos"],
-                index=0,
-                key="dep_sort_mode",
-            )
+            sort_mode = st.selectbox("Ordenar",
+                                     ["A–Z",
+                                      "Z–A",
+                                      "Ativos primeiro",
+                                      "Inativos primeiro",
+                                      "Mais recentes",
+                                      "Mais antigos"],
+                                     index=0,
+                                     key="dep_sort_mode",
+                                     )
         with f4:
-            page_size = st.selectbox("Por página", [10, 20, 50], index=0, key="dep_page_size")
+            page_size = st.selectbox(
+                "Por página", [
+                    10, 20, 50], index=0, key="dep_page_size")
 
-        q = sb.table("departamentos").select("id,nome,ativo,created_at").eq("tenant_id", tenant_id).order("nome")
+        q = sb.table("departamentos").select("id,nome,ativo,created_at").eq(
+            "tenant_id", tenant_id).order("nome")
         if only_active:
             q = q.eq("ativo", True)
         if dep_search:
-            # ilike é o melhor (faz case-insensitive) — se não existir no client, cai no filtro local.
+            # ilike é o melhor (faz case-insensitive) — se não existir no
+            # client, cai no filtro local.
             try:
                 q = q.ilike("nome", f"%{dep_search.strip()}%")
             except Exception:
@@ -381,13 +440,28 @@ def render_admin_departamentos():
         if sm == "A–Z":
             deps = sorted(deps, key=lambda x: (str(x.get("nome", "")).lower()))
         elif sm == "Z–A":
-            deps = sorted(deps, key=lambda x: (str(x.get("nome", "")).lower()), reverse=True)
+            deps = sorted(deps, key=lambda x: (
+                str(x.get("nome", "")).lower()), reverse=True)
         elif sm == "Ativos primeiro":
-            deps = sorted(deps, key=lambda x: (0 if x.get("ativo") else 1, str(x.get("nome", "")).lower()))
+            deps = sorted(
+                deps, key=lambda x: (
+                    0 if x.get("ativo") else 1, str(
+                        x.get(
+                            "nome", "")).lower()))
         elif sm == "Inativos primeiro":
-            deps = sorted(deps, key=lambda x: (0 if not x.get("ativo") else 1, str(x.get("nome", "")).lower()))
+            deps = sorted(
+                deps, key=lambda x: (
+                    0 if not x.get("ativo") else 1, str(
+                        x.get(
+                            "nome", "")).lower()))
         elif sm == "Mais recentes":
-            deps = sorted(deps, key=lambda x: str(x.get("created_at", "")), reverse=True)
+            deps = sorted(
+                deps,
+                key=lambda x: str(
+                    x.get(
+                        "created_at",
+                        "")),
+                reverse=True)
         elif sm == "Mais antigos":
             deps = sorted(deps, key=lambda x: str(x.get("created_at", "")))
 
@@ -422,7 +496,8 @@ def render_admin_departamentos():
                 .execute()
                 .data
             ) or []
-            grp_to_dep = {g["id"]: g.get("departamento_id") for g in grupos if g.get("id")}
+            grp_to_dep = {g["id"]: g.get("departamento_id")
+                          for g in grupos if g.get("id")}
             eq_rows = (
                 sb.table("equipamentos")
                 .select("id,grupo_id")
@@ -437,7 +512,6 @@ def render_admin_departamentos():
                     dept_equip_count[did] = dept_equip_count.get(did, 0) + 1
         except Exception:
             dept_equip_count = {}
-
 
         # KPIs rápidos
         try:
@@ -463,10 +537,12 @@ def render_admin_departamentos():
         for d in deps_page:
             did = d["id"]
             n_grupos = dept_group_count.get(did, 0)
-            n_equip = dept_equip_count.get(did, 0)        # Cabeçalho compacto (label) + card enterprise dentro do expander
+            # Cabeçalho compacto (label) + card enterprise dentro do expander
+            n_equip = dept_equip_count.get(did, 0)
             with st.expander(f"{d['nome']}", expanded=False):
                 status_txt = "ATIVO" if d.get("ativo") else "INATIVO"
-                status_cls = "badge-active" if d.get("ativo") else "badge-inactive"
+                status_cls = "badge-active" if d.get(
+                    "ativo") else "badge-inactive"
                 st.markdown(
                     f"""
     <div class='card-enterprise'>
@@ -493,41 +569,61 @@ def render_admin_departamentos():
                 with c1:
                     st.caption(f"Ativo: {'Sim' if d.get('ativo') else 'Não'}")
                 with c2:
-                    novo_nome = st.text_input("Renomear", value=d["nome"], key=f"dep_rename_{did}")
+                    novo_nome = st.text_input(
+                        "Renomear", value=d["nome"], key=f"dep_rename_{did}")
 
                 a1, a2, a3 = st.columns([1, 1, 1], gap="small")
                 with a1:
-                    if st.button("Salvar", icon=":material/save:", key=f"dep_save_{did}", use_container_width=True):
+                    if st.button(
+                        "Salvar",
+                        icon=":material/save:",
+                        key=f"dep_save_{did}",
+                            use_container_width=True):
                         nn = (novo_nome or "").strip()
                         if not nn:
                             st.warning("Nome inválido.")
                             st.stop()
                         try:
-                            sb.table("departamentos").update({"nome": nn}).eq("tenant_id", tenant_id).eq("id", did).execute()
-                            st.toast("✓ Atualizado", icon=":material/check_circle:")
+                            sb.table("departamentos").update({"nome": nn}).eq(
+                                "tenant_id", tenant_id).eq("id", did).execute()
+                            st.toast(
+                                "✓ Atualizado", icon=":material/check_circle:")
                             safe_rerun()
                         except Exception as e:
                             st.error(f"Erro ao salvar: {e}")
                 with a2:
                     label_btn = "Desativar" if d.get("ativo") else "Ativar"
-                    if st.button(label_btn, key=f"dep_toggle_{did}", use_container_width=True):
+                    if st.button(
+                            label_btn,
+                            key=f"dep_toggle_{did}",
+                            use_container_width=True):
                         try:
-                            sb.table("departamentos").update({"ativo": (not d.get("ativo"))}).eq("tenant_id", tenant_id).eq("id", did).execute()
+                            sb.table("departamentos").update({"ativo": (not d.get("ativo"))}).eq(
+                                "tenant_id", tenant_id).eq("id", did).execute()
                             st.toast("✓ Ok", icon=":material/check_circle:")
                             safe_rerun()
                         except Exception as e:
                             st.error(f"Erro: {e}")
                 with a3:
                     with st.popover("Excluir", icon=":material/delete:", help="Remover departamento permanentemente"):
-                        st.caption("Remove o departamento e **desvincula** os grupos associados (departamento_id vira NULL).")
-                        confirm = st.checkbox("Confirmo excluir", value=False, key=f"dep_del_ok_{did}")
-                        if st.button("Apagar agora", type="primary", use_container_width=True, disabled=not confirm, key=f"dep_del_{did}"):
+                        st.caption(
+                            "Remove o departamento e **desvincula** os grupos associados (departamento_id vira NULL).")
+                        confirm = st.checkbox(
+                            "Confirmo excluir", value=False, key=f"dep_del_ok_{did}")
+                        if st.button(
+                            "Apagar agora",
+                            type="primary",
+                            use_container_width=True,
+                            disabled=not confirm,
+                                key=f"dep_del_{did}"):
                             try:
-                                sb.table("equip_grupos").update({"departamento_id": None}).eq("tenant_id", tenant_id).eq("departamento_id", did).execute()
+                                sb.table("equip_grupos").update({"departamento_id": None}).eq(
+                                    "tenant_id", tenant_id).eq("departamento_id", did).execute()
                             except Exception:
                                 pass
                             try:
-                                sb.table("departamentos").delete().eq("tenant_id", tenant_id).eq("id", did).execute()
+                                sb.table("departamentos").delete().eq(
+                                    "tenant_id", tenant_id).eq("id", did).execute()
                                 st.success("Departamento excluído.")
                                 safe_rerun()
                             except Exception as e:
@@ -539,11 +635,16 @@ def render_admin_departamentos():
                 # Grupos do departamento (com busca + paginação)
                 # ------------------------------
                 st.markdown("#### Grupos deste departamento")
-                g1, g2, g3, g4 = st.columns([0.42, 0.18, 0.20, 0.20], gap="small")
+                g1, g2, g3, g4 = st.columns(
+                    [0.42, 0.18, 0.20, 0.20], gap="small")
                 with g1:
-                    g_search = st.text_input("Buscar grupos", placeholder="Buscar grupo…", key=f"dep_{did}__g_search")
+                    g_search = st.text_input(
+                        "Buscar grupos",
+                        placeholder="Buscar grupo…",
+                        key=f"dep_{did}__g_search")
                 with g2:
-                    g_only_active = st.toggle("Só ativos", value=True, key=f"dep_{did}__g_only_active")
+                    g_only_active = st.toggle(
+                        "Só ativos", value=True, key=f"dep_{did}__g_only_active")
                 with g3:
                     g_sort = st.selectbox(
                         "Ordenar",
@@ -552,7 +653,9 @@ def render_admin_departamentos():
                         key=f"dep_{did}__g_sort",
                     )
                 with g4:
-                    g_page_size = st.selectbox("Por página", [5, 10, 20], index=1, key=f"dep_{did}__g_page_size")
+                    g_page_size = st.selectbox(
+                        "Por página", [
+                            5, 10, 20], index=1, key=f"dep_{did}__g_page_size")
 
                 qg = (
                     sb.table("equip_grupos")
@@ -572,7 +675,11 @@ def render_admin_departamentos():
                 grupos = qg.execute().data or []
                 if g_search:
                     ss2 = g_search.strip().lower()
-                    grupos = [x for x in grupos if ss2 in str(x.get("nome", "")).lower()]
+                    grupos = [
+                        x for x in grupos if ss2 in str(
+                            x.get(
+                                "nome",
+                                "")).lower()]
 
                 # Ordenação local (A–Z, etc.)
                 try:
@@ -580,23 +687,42 @@ def render_admin_departamentos():
                 except Exception:
                     gsm = "A–Z"
                 if gsm == "A–Z":
-                    grupos = sorted(grupos, key=lambda x: str(x.get("nome", "")).lower())
+                    grupos = sorted(
+                        grupos, key=lambda x: str(
+                            x.get(
+                                "nome", "")).lower())
                 elif gsm == "Z–A":
-                    grupos = sorted(grupos, key=lambda x: str(x.get("nome", "")).lower(), reverse=True)
+                    grupos = sorted(
+                        grupos,
+                        key=lambda x: str(
+                            x.get(
+                                "nome",
+                                "")).lower(),
+                        reverse=True)
                 elif gsm == "Ativos primeiro":
-                    grupos = sorted(grupos, key=lambda x: (0 if x.get("ativo") else 1, str(x.get("nome", "")).lower()))
+                    grupos = sorted(
+                        grupos, key=lambda x: (
+                            0 if x.get("ativo") else 1, str(
+                                x.get(
+                                    "nome", "")).lower()))
                 elif gsm == "Inativos primeiro":
-                    grupos = sorted(grupos, key=lambda x: (0 if not x.get("ativo") else 1, str(x.get("nome", "")).lower()))
+                    grupos = sorted(
+                        grupos, key=lambda x: (
+                            0 if not x.get("ativo") else 1, str(
+                                x.get(
+                                    "nome", "")).lower()))
 
                 if not grupos:
                     st.info("Nenhum grupo encontrado para este departamento.")
                 else:
-                    g_page_idx, _ = pager(f"dep_{did}__grps", total=len(grupos), page_size=int(g_page_size))
+                    g_page_idx, _ = pager(
+                        f"dep_{did}__grps", total=len(grupos), page_size=int(g_page_size))
                     gs = g_page_idx * int(g_page_size)
                     ge = gs + int(g_page_size)
                     grupos_page = grupos[gs:ge]
 
-                    # Conta equipamentos por grupo (best-effort) — só para os itens da página
+                    # Conta equipamentos por grupo (best-effort) — só para os
+                    # itens da página
                     equip_counts: dict[str, int] = {}
                     for gg in grupos_page:
                         try:
@@ -614,8 +740,10 @@ def render_admin_departamentos():
 
                     # Lista em cards enterprise
                     for gg in grupos_page:
-                        g_status_txt = "ATIVO" if gg.get("ativo") else "INATIVO"
-                        g_status_cls = "badge-active" if gg.get("ativo") else "badge-inactive"
+                        g_status_txt = "ATIVO" if gg.get(
+                            "ativo") else "INATIVO"
+                        g_status_cls = "badge-active" if gg.get(
+                            "ativo") else "badge-inactive"
                         st.markdown(
                             f"""
     <div class='card-enterprise'>
@@ -633,4 +761,3 @@ def render_admin_departamentos():
     """,
                             unsafe_allow_html=True,
                         )
-

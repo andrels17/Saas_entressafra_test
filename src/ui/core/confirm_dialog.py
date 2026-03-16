@@ -48,7 +48,10 @@ def confirm_dialog(
             st.markdown("")
         col_cancel, col_confirm = st.columns(2)
         with col_cancel:
-            if st.button(cancel_label, use_container_width=True, key=f"{trigger_key}_cancel"):
+            if st.button(
+                    cancel_label,
+                    use_container_width=True,
+                    key=f"{trigger_key}_cancel"):
                 st.session_state.pop(trigger_key, None)
                 st.rerun()
         with col_confirm:

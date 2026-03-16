@@ -44,7 +44,11 @@ def get_sidebar_badges(tenant_id: str) -> dict[str, int]:
         .data
     ) or []
     if not rev:
-        return {"gestor_travados": 0, "equip_parados": 0, "apont_pendentes": 0, "auditoria_24h": 0}
+        return {
+            "gestor_travados": 0,
+            "equip_parados": 0,
+            "apont_pendentes": 0,
+            "auditoria_24h": 0}
     revisao_id = rev[0]["id"]
 
     # travados (Painel do Gestor)
@@ -70,16 +74,20 @@ def get_sidebar_badges(tenant_id: str) -> dict[str, int]:
             .data
         ) or []
         from src.utils.timezone import days_since_utc
-        ultimos: dict[str, tuple[str|None, str]] = {}
+        ultimos: dict[str, tuple[str | None, str]] = {}
         for row in rows:
             eid = row.get("equipamento_id")
             if not eid:
                 continue
-            mov = max([x for x in [row.get("dt_etapa_m"), row.get("dt_etapa_r"), row.get("dt_etapa_d"), row.get("updated_at")] if x] or [None])
+            mov = max([x for x in [row.get("dt_etapa_m"), row.get("dt_etapa_r"), row.get(
+                "dt_etapa_d"), row.get("updated_at")] if x] or [None])
             prev = ultimos.get(eid)
             if prev is None or ((mov or "") > (prev[0] or "")):
                 ultimos[eid] = (mov, row.get("status") or "pendente")
-        parados = sum(1 for mov, status in ultimos.values() if status != "concluido" and (days_since_utc(mov) or 0) >= 7)
+        parados = sum(
+            1 for mov,
+            status in ultimos.values() if status != "concluido" and (
+                days_since_utc(mov) or 0) >= 7)
     except Exception:
         parados = 0
 
@@ -121,4 +129,8 @@ def sidebar_badges() -> dict[str, int]:
     try:
         return get_sidebar_badges(current_tenant_id())
     except Exception:
-        return {"gestor_travados": 0, "equip_parados": 0, "apont_pendentes": 0, "auditoria_24h": 0}
+        return {
+            "gestor_travados": 0,
+            "equip_parados": 0,
+            "apont_pendentes": 0,
+            "auditoria_24h": 0}

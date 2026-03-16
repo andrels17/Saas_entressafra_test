@@ -1,3 +1,4 @@
+from src.ui.core.styles import page_header as _ph
 import math
 import streamlit as st
 from postgrest.exceptions import APIError
@@ -130,10 +131,15 @@ def _insert_tasks(sb, payload):
 
 def _update_tasks_status(sb, ids, status="nao_aplica"):
     for batch in _chunk(ids, 500):
-        sb.table("tarefas_servico").update({"status": status}).in_("id", batch).execute()
+        sb.table("tarefas_servico").update(
+            {"status": status}).in_("id", batch).execute()
 
 
-def _safe_count_rows(client, table_name: str, tenant_id: str, revisao_id: str) -> int:
+def _safe_count_rows(
+        client,
+        table_name: str,
+        tenant_id: str,
+        revisao_id: str) -> int:
     try:
         resp = (
             client.table(table_name)
@@ -163,21 +169,27 @@ def _delete_revisao_cascade(tenant_id: str, revisao_id: str) -> dict:
     svc = get_supabase_service()
     result = {"historico": 0, "tarefas": 0, "revisoes": 0}
 
-    result["historico"] = _safe_count_rows(svc, "historico_eventos", tenant_id, revisao_id)
-    result["tarefas"] = _safe_count_rows(svc, "tarefas_servico", tenant_id, revisao_id)
+    result["historico"] = _safe_count_rows(
+        svc, "historico_eventos", tenant_id, revisao_id)
+    result["tarefas"] = _safe_count_rows(
+        svc, "tarefas_servico", tenant_id, revisao_id)
 
     # Ordem importante: histórico -> tarefas -> revisão
     try:
-        svc.table("historico_eventos").delete().eq("tenant_id", tenant_id).eq("revisao_id", revisao_id).execute()
+        svc.table("historico_eventos").delete().eq(
+            "tenant_id", tenant_id).eq(
+            "revisao_id", revisao_id).execute()
     except Exception:
         pass
 
-    svc.table("tarefas_servico").delete().eq("tenant_id", tenant_id).eq("revisao_id", revisao_id).execute()
-    svc.table("revisoes").delete().eq("tenant_id", tenant_id).eq("id", revisao_id).execute()
+    svc.table("tarefas_servico").delete().eq(
+        "tenant_id", tenant_id).eq(
+        "revisao_id", revisao_id).execute()
+    svc.table("revisoes").delete().eq(
+        "tenant_id", tenant_id).eq(
+        "id", revisao_id).execute()
     result["revisoes"] = 1
     return result
-
-
 
 
 def _safe_distinct_task_summary(tenant_id: str, revisao_id: str) -> dict:
@@ -199,9 +211,14 @@ def _safe_distinct_task_summary(tenant_id: str, revisao_id: str) -> dict:
             .execute()
             .data
         ) or []
-        equipamentos = {r.get("equipamento_id") for r in rows if r.get("equipamento_id") is not None}
+        equipamentos = {r.get("equipamento_id")
+                        for r in rows if r.get("equipamento_id") is not None}
         concl = sum(1 for r in rows if r.get("status") == "concluido")
-        pend = sum(1 for r in rows if r.get("status") in ("pendente", "em_andamento", "travado"))
+        pend = sum(
+            1 for r in rows if r.get("status") in (
+                "pendente",
+                "em_andamento",
+                "travado"))
         out.update({
             "equipamentos": len(equipamentos),
             "tarefas_concluidas": concl,
@@ -211,9 +228,13 @@ def _safe_distinct_task_summary(tenant_id: str, revisao_id: str) -> dict:
     except Exception:
         pass
 
-    out["historico"] = _safe_count_rows(svc, "historico_eventos", tenant_id, revisao_id)
+    out["historico"] = _safe_count_rows(
+        svc, "historico_eventos", tenant_id, revisao_id)
     return out
-def _bulk_delete_test_revisions(tenant_id: str, revisoes: list[dict]) -> tuple[int, int, int]:
+
+
+def _bulk_delete_test_revisions(
+        tenant_id: str, revisoes: list[dict]) -> tuple[int, int, int]:
     total_rev = total_tarefas = total_hist = 0
     for r in revisoes:
         res = _delete_revisao_cascade(tenant_id, r["id"])
@@ -221,9 +242,6 @@ def _bulk_delete_test_revisions(tenant_id: str, revisoes: list[dict]) -> tuple[i
         total_tarefas += int(res.get("tarefas", 0) or 0)
         total_hist += int(res.get("historico", 0) or 0)
     return total_rev, total_tarefas, total_hist
-
-
-from src.ui.core.styles import page_header as _ph
 
 
 def render_admin_revisoes():
@@ -243,14 +261,18 @@ def render_admin_revisoes():
         st.markdown("### Criar revisão")
         st.info(
             "Se o seu banco tiver alguma política/trigger recursiva em `revisoes`, o insert pode estourar stack. "
-            "Para evitar travar o app, a criação aqui usa **Service Role** (bypassa RLS)."
-        )
+            "Para evitar travar o app, a criação aqui usa **Service Role** (bypassa RLS).")
 
-        titulo = st.text_input("Título", placeholder="Entressafra 2026", key="rev_titulo")
+        titulo = st.text_input(
+            "Título",
+            placeholder="Entressafra 2026",
+            key="rev_titulo")
 
         modo_calculo = st.radio(
             "Modo de cálculo",
-            options=["Por datas", "Por semanas"],
+            options=[
+                "Por datas",
+                "Por semanas"],
             horizontal=True,
             key="rev_modo_calculo",
             help="Escolha se a revisão será definida pelo período ou pela quantidade de semanas.",
@@ -275,13 +297,16 @@ def render_admin_revisoes():
         semanas_input = int(st.session_state.get("rev_semanas_input", 0) or 0)
         if modo_calculo == "Por datas":
             with c2:
-                dt_fim = st.date_input("Data fim", value=None, key="rev_dt_fim")
+                dt_fim = st.date_input(
+                    "Data fim", value=None, key="rev_dt_fim")
             semanas_total = _calc_weeks(dt_ini, dt_fim)
-            dias_total = (dt_fim - dt_ini).days + 1 if dt_ini and dt_fim and dt_fim >= dt_ini else 0
+            dias_total = (dt_fim - dt_ini).days + \
+                1 if dt_ini and dt_fim and dt_fim >= dt_ini else 0
             with c3:
                 st.text_input(
                     "Nº semanas",
-                    value=str(int(semanas_total)),
+                    value=str(
+                        int(semanas_total)),
                     disabled=True,
                     help="Calculado automaticamente a partir de Data início e Data fim.",
                 )
@@ -290,7 +315,9 @@ def render_admin_revisoes():
                 st.number_input(
                     "Nº semanas",
                     min_value=1,
-                    value=max(1, semanas_input) if semanas_input else 20,
+                    value=max(
+                        1,
+                        semanas_input) if semanas_input else 20,
                     step=1,
                     key="rev_semanas_input",
                     help="Aceita qualquer número de semanas. O sistema calculará a data fim automaticamente.",
@@ -308,7 +335,10 @@ def render_admin_revisoes():
                 if at4.button("24", key="wk24", use_container_width=True):
                     st.session_state["rev_semanas_input"] = 24
                     st.rerun()
-            semanas_total = int(st.session_state.get("rev_semanas_input", 20) or 20)
+            semanas_total = int(
+                st.session_state.get(
+                    "rev_semanas_input",
+                    20) or 20)
             dt_fim = _calc_end_date(dt_ini, semanas_total)
             dias_total = (dt_fim - dt_ini).days + 1 if dt_ini and dt_fim else 0
             with c3:
@@ -330,20 +360,34 @@ def render_admin_revisoes():
             st.caption("Prévia das semanas da revisão")
             semanas_preview = []
             for idx in range(semanas_total):
-                ini_sem = dt_ini + __import__("datetime").timedelta(days=idx * 7)
-                fim_sem = min(ini_sem + __import__("datetime").timedelta(days=6), dt_fim)
+                ini_sem = dt_ini + \
+                    __import__("datetime").timedelta(days=idx * 7)
+                fim_sem = min(
+                    ini_sem +
+                    __import__("datetime").timedelta(
+                        days=6),
+                    dt_fim)
                 dias_sem = (fim_sem - ini_sem).days + 1
                 semanas_preview.append(
-                    f"Sem.{idx + 1}: {ini_sem.strftime('%d/%m/%Y')} → {fim_sem.strftime('%d/%m/%Y')} ({dias_sem} dia(s))"
-                )
-            st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
-            for linha in [semanas_preview[i : i + 3] for i in range(0, len(semanas_preview), 3)]:
+                    f"Sem.{
+                        idx +
+                        1}: {
+                        ini_sem.strftime('%d/%m/%Y')} → {
+                        fim_sem.strftime('%d/%m/%Y')} ({dias_sem} dia(s))")
+            st.markdown(
+                "<div style='margin-top:6px'></div>",
+                unsafe_allow_html=True)
+            for linha in [semanas_preview[i: i + 3]
+                          for i in range(0, len(semanas_preview), 3)]:
                 cols = st.columns(len(linha))
                 for col, texto in zip(cols, linha):
                     with col:
                         st.caption(texto)
 
-        submitted = st.button("Criar revisão", use_container_width=True, key="rev_submit")
+        submitted = st.button(
+            "Criar revisão",
+            use_container_width=True,
+            key="rev_submit")
 
         if submitted:
             t = (titulo or "").strip()
@@ -381,17 +425,19 @@ def render_admin_revisoes():
 
         if revisoes:
             demo_candidates = [
-                r
-                for r in revisoes
-                if r.get("status") != "ativa"
-                and any(tok in (r.get("titulo") or "").lower() for tok in ("teste", "demo", "rascunho", "tmp"))
-            ]
+                r for r in revisoes if r.get("status") != "ativa" and any(
+                    tok in (
+                        r.get("titulo") or "").lower() for tok in (
+                        "teste",
+                        "demo",
+                        "rascunho",
+                        "tmp"))]
             with st.expander("Limpeza de demo/testes", expanded=False):
                 st.caption(
                     "Remove revisões de teste e todos os dados relacionados (tarefas e histórico). "
-                    "Use apenas quando quiser limpar o ambiente de demonstração."
-                )
-                st.markdown(f"Candidatas encontradas: **{len(demo_candidates)}**")
+                    "Use apenas quando quiser limpar o ambiente de demonstração.")
+                st.markdown(
+                    f"Candidatas encontradas: **{len(demo_candidates)}**")
                 if demo_candidates:
                     st.caption(
                         ", ".join(f"{r.get('titulo')} [{r.get('status')}]" for r in demo_candidates[:8])
@@ -409,14 +455,15 @@ def render_admin_revisoes():
                     key="bulk_delete_demo_btn",
                 ):
                     if confirm_demo.strip().upper() != "LIMPAR DEMO":
-                        st.error("Confirmação inválida. Digite exatamente LIMPAR DEMO.")
+                        st.error(
+                            "Confirmação inválida. Digite exatamente LIMPAR DEMO.")
                     else:
                         try:
                             with st.spinner("Limpando revisões de teste..."):
-                                n_rev, n_tarefas, n_hist = _bulk_delete_test_revisions(tenant_id, demo_candidates)
+                                n_rev, n_tarefas, n_hist = _bulk_delete_test_revisions(
+                                    tenant_id, demo_candidates)
                             st.success(
-                                f"Limpeza concluída: {n_rev} revisão(ões), {n_tarefas} tarefa(s) e {n_hist} evento(s) removidos."
-                            )
+                                f"Limpeza concluída: {n_rev} revisão(ões), {n_tarefas} tarefa(s) e {n_hist} evento(s) removidos.")
                             nav.rerun_keep_menu()
                         except Exception as e:
                             st.error(f"Erro ao limpar demo: {e}")
@@ -430,8 +477,10 @@ def render_admin_revisoes():
                     with rc1:
                         st.markdown(f"**{r['titulo']}**")
                         st.caption(
-                            f"Início: {r.get('data_inicio') or '—'} · Fim: {r.get('data_fim') or '—'} · Semanas: {r.get('semanas_total') or '—'}"
-                        )
+                            f"Início: {
+                                r.get('data_inicio') or '—'} · Fim: {
+                                r.get('data_fim') or '—'} · Semanas: {
+                                r.get('semanas_total') or '—'}")
                         from src.ui.core.styles import status_badge
                         status_badge(r.get("status"))
                     with rc2:
@@ -445,11 +494,12 @@ def render_admin_revisoes():
                                     type="secondary",
                                 ):
                                     try:
-                                        sb.table("revisoes").update({"status": "fechada"}).eq("tenant_id", tenant_id).eq(
-                                            "status", "ativa"
-                                        ).execute()
-                                        sb.table("revisoes").update({"status": "ativa"}).eq("id", r["id"]).execute()
-                                        st.toast("✓ Revisão ativada", icon=":material/check_circle:")
+                                        sb.table("revisoes").update({"status": "fechada"}).eq(
+                                            "tenant_id", tenant_id).eq("status", "ativa").execute()
+                                        sb.table("revisoes").update(
+                                            {"status": "ativa"}).eq("id", r["id"]).execute()
+                                        st.toast(
+                                            "✓ Revisão ativada", icon=":material/check_circle:")
                                         nav.rerun_keep_menu()
                                     except Exception as e:
                                         st.error(f"Erro: {e}")
@@ -463,33 +513,51 @@ def render_admin_revisoes():
                                 ):
                                     st.session_state[f"wiz_fechar_{r['id']}"] = True
                         with cc:
-                            if st.button("📦 Arquivar", key=f"rev_arch_{r['id']}", use_container_width=True):
+                            if st.button(
+                                "📦 Arquivar", key=f"rev_arch_{
+                                    r['id']}", use_container_width=True):
                                 try:
-                                    sb.table("revisoes").update({"status": "arquivada"}).eq("id", r["id"]).execute()
-                                    st.toast("✓ Arquivada", icon=":material/check_circle:")
+                                    sb.table("revisoes").update(
+                                        {"status": "arquivada"}).eq("id", r["id"]).execute()
+                                    st.toast(
+                                        "✓ Arquivada", icon=":material/check_circle:")
                                     nav.rerun_keep_menu()
                                 except Exception as e:
                                     st.error(f"Erro: {e}")
                         with cd:
-                            if st.button("🗑 Excluir", key=f"rev_delete_toggle_{r['id']}", use_container_width=True):
+                            if st.button(
+                                "🗑 Excluir", key=f"rev_delete_toggle_{
+                                    r['id']}", use_container_width=True):
                                 flag = f"wiz_delete_{r['id']}"
-                                st.session_state[flag] = not st.session_state.get(flag, False)
+                                st.session_state[flag] = not st.session_state.get(
+                                    flag, False)
 
                     delete_flag = f"wiz_delete_{r['id']}"
                     if st.session_state.get(delete_flag):
-                        resumo = _safe_distinct_task_summary(tenant_id, r["id"])
+                        resumo = _safe_distinct_task_summary(
+                            tenant_id, r["id"])
                         st.markdown("---")
                         st.error(
                             "Exclusão permanente. Esta ação apaga a revisão e todos os dados vinculados a ela."
                         )
                         st.caption("Impacto estimado da exclusão")
                         d1, d2, d3, d4 = st.columns(4)
-                        d1.metric("Equipamentos impactados", resumo.get("equipamentos", 0))
-                        d2.metric("Tarefas concluídas", resumo.get("tarefas_concluidas", 0))
-                        d3.metric("Tarefas pendentes", resumo.get("tarefas_pendentes", 0))
-                        d4.metric("Histórico gerado", resumo.get("historico", 0))
+                        d1.metric(
+                            "Equipamentos impactados", resumo.get(
+                                "equipamentos", 0))
+                        d2.metric(
+                            "Tarefas concluídas", resumo.get(
+                                "tarefas_concluidas", 0))
+                        d3.metric(
+                            "Tarefas pendentes", resumo.get(
+                                "tarefas_pendentes", 0))
+                        d4.metric(
+                            "Histórico gerado", resumo.get(
+                                "historico", 0))
                         x1, x2 = st.columns(2)
-                        x1.metric("Tarefas totais", resumo.get("tarefas_total", 0))
+                        x1.metric(
+                            "Tarefas totais", resumo.get(
+                                "tarefas_total", 0))
                         x2.metric("Revisão", 1)
                         st.caption(
                             f"Para confirmar a exclusão de **{r['titulo']}**, digite exatamente: EXCLUIR {r['titulo']}"
@@ -509,30 +577,43 @@ def render_admin_revisoes():
                             ):
                                 expected = f"EXCLUIR {r['titulo']}"
                                 if (confirm or "").strip() != expected:
-                                    st.error("Confirmação inválida. Copie o texto exatamente como mostrado.")
+                                    st.error(
+                                        "Confirmação inválida. Copie o texto exatamente como mostrado.")
                                 else:
                                     try:
                                         with st.spinner("Excluindo revisão e dados vinculados..."):
-                                            res = _delete_revisao_cascade(tenant_id, r["id"])
+                                            res = _delete_revisao_cascade(
+                                                tenant_id, r["id"])
                                         st.session_state.pop(delete_flag, None)
-                                        st.session_state.pop(f"delete_confirm_input_{r['id']}", None)
+                                        st.session_state.pop(
+                                            f"delete_confirm_input_{r['id']}", None)
                                         st.success(
-                                            f"Revisão excluída. Removidos: {res.get('tarefas', 0)} tarefa(s), {res.get('historico', 0)} evento(s) e 1 revisão."
-                                        )
+                                            f"Revisão excluída. Removidos: {
+                                                res.get(
+                                                    'tarefas',
+                                                    0)} tarefa(s), {
+                                                res.get(
+                                                    'historico',
+                                                    0)} evento(s) e 1 revisão.")
                                         nav.rerun_keep_menu()
                                     except Exception as e:
-                                        st.error(f"Erro ao excluir revisão: {e}")
+                                        st.error(
+                                            f"Erro ao excluir revisão: {e}")
                         with dx2:
-                            if st.button("Cancelar exclusão", key=f"delete_cancel_btn_{r['id']}", use_container_width=True):
+                            if st.button(
+                                "Cancelar exclusão", key=f"delete_cancel_btn_{
+                                    r['id']}", use_container_width=True):
                                 st.session_state.pop(delete_flag, None)
-                                st.session_state.pop(f"delete_confirm_input_{r['id']}", None)
+                                st.session_state.pop(
+                                    f"delete_confirm_input_{r['id']}", None)
                                 st.rerun()
 
                     # Wizard de fechamento
                     if st.session_state.get(f"wiz_fechar_{r['id']}"):
                         st.markdown("---")
                         st.markdown("#### 🔒 Checklist de fechamento")
-                        st.caption("Verifique os itens abaixo antes de encerrar a revisão.")
+                        st.caption(
+                            "Verifique os itens abaixo antes de encerrar a revisão.")
 
                         with st.spinner("Carregando diagnóstico…"):
                             try:
@@ -548,16 +629,29 @@ def render_admin_revisoes():
                                 tarefas_rev = []
 
                         total_t = len(tarefas_rev)
-                        concluidos = sum(1 for t in tarefas_rev if t.get("status") == "concluido")
-                        travados = sum(1 for t in tarefas_rev if t.get("status") == "travado")
-                        pendentes = sum(1 for t in tarefas_rev if t.get("status") in ("pendente", "em_andamento"))
+                        concluidos = sum(
+                            1 for t in tarefas_rev if t.get("status") == "concluido")
+                        travados = sum(
+                            1 for t in tarefas_rev if t.get("status") == "travado")
+                        pendentes = sum(
+                            1 for t in tarefas_rev if t.get("status") in (
+                                "pendente", "em_andamento"))
                         pct_geral = round((concluidos / max(total_t, 1)) * 100)
 
                         wc1, wc2, wc3, wc4 = st.columns(4)
                         wc1.metric("Total tarefas", total_t)
-                        wc2.metric("Concluídas", concluidos, delta=f"{pct_geral}%")
-                        wc3.metric("Pendentes/And.", pendentes, delta_color="inverse" if pendentes else "off")
-                        wc4.metric("Travadas", travados, delta_color="inverse" if travados else "off")
+                        wc2.metric(
+                            "Concluídas",
+                            concluidos,
+                            delta=f"{pct_geral}%")
+                        wc3.metric(
+                            "Pendentes/And.",
+                            pendentes,
+                            delta_color="inverse" if pendentes else "off")
+                        wc4.metric(
+                            "Travadas",
+                            travados,
+                            delta_color="inverse" if travados else "off")
 
                         chk1 = pct_geral >= 80
                         chk2 = travados == 0
@@ -576,26 +670,38 @@ def render_admin_revisoes():
                         if tem_bloqueio:
                             st.warning(
                                 "⚠️ Existem itens críticos em aberto. "
-                                "Recomendamos resolver antes de fechar, mas você pode forçar o fechamento se necessário."
-                            )
+                                "Recomendamos resolver antes de fechar, mas você pode forçar o fechamento se necessário.")
 
                         col_conf, _, col_cancel = st.columns([1, 1, 1])
                         with col_conf:
                             _lbl_conf = "✅ Confirmar fechamento" if not tem_bloqueio else "✅ Fechar mesmo assim"
-                            if st.button(_lbl_conf, key=f"wiz_conf_{r['id']}", type="primary", use_container_width=True):
+                            if st.button(
+                                    _lbl_conf,
+                                    key=f"wiz_conf_{
+                                        r['id']}",
+                                    type="primary",
+                                    use_container_width=True):
                                 try:
-                                    sb.table("revisoes").update({"status": "fechada"}).eq("id", r["id"]).execute()
-                                    st.session_state.pop(f"wiz_fechar_{r['id']}", None)
-                                    st.toast("🔒 Revisão encerrada.", icon=":material/lock:")
+                                    sb.table("revisoes").update(
+                                        {"status": "fechada"}).eq("id", r["id"]).execute()
+                                    st.session_state.pop(
+                                        f"wiz_fechar_{r['id']}", None)
+                                    st.toast(
+                                        "🔒 Revisão encerrada.", icon=":material/lock:")
                                     nav.rerun_keep_menu()
                                 except Exception as e:
                                     st.error(f"Erro ao fechar: {e}")
                         with col_cancel:
-                            if st.button("✖ Cancelar", key=f"wiz_cancel_{r['id']}", use_container_width=True):
-                                st.session_state.pop(f"wiz_fechar_{r['id']}", None)
+                            if st.button(
+                                "✖ Cancelar", key=f"wiz_cancel_{
+                                    r['id']}", use_container_width=True):
+                                st.session_state.pop(
+                                    f"wiz_fechar_{r['id']}", None)
                                 st.rerun()
 
-                    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+                    st.markdown(
+                        "<div style='height:4px'></div>",
+                        unsafe_allow_html=True)
 
     with tab2:
         st.markdown("### Selecionar revisão")
@@ -630,14 +736,17 @@ def render_admin_revisoes():
 
         st.markdown(f"- Equipamentos ativos: **{total_eq:,}**")
         st.markdown(f"- Com grupo: **{len(com_grupo):,}**")
-        st.markdown(f"- Sem grupo: **{len(sem_grupo):,}** (não entram na matriz)")
+        st.markdown(
+            f"- Sem grupo: **{len(sem_grupo):,}** (não entram na matriz)")
 
         grupos_ids = {e["grupo_id"] for e in com_grupo if e.get("grupo_id")}
         gs_map = _load_grupo_servicos(sb, tenant_id, grupos_ids)
 
-        grupos_sem_template = [gid for gid in grupos_ids if gid not in gs_map or not gs_map.get(gid)]
+        grupos_sem_template = [
+            gid for gid in grupos_ids if gid not in gs_map or not gs_map.get(gid)]
         if grupos_sem_template:
-            st.warning("Há grupos sem template de serviços. Eles gerarão 0 tarefas até você configurar o Template.")
+            st.warning(
+                "Há grupos sem template de serviços. Eles gerarão 0 tarefas até você configurar o Template.")
         else:
             st.toast("✓ Templates verificados", icon=":material/check_circle:")
 
@@ -647,13 +756,18 @@ def render_admin_revisoes():
         colA, colB = st.columns(2)
 
         with colA:
-            if st.button("Gerar Matriz (inserir faltantes)", icon=":material/grid_on:", type="primary", use_container_width=True):
+            if st.button(
+                "Gerar Matriz (inserir faltantes)",
+                icon=":material/grid_on:",
+                type="primary",
+                    use_container_width=True):
                 if len(com_grupo) == 0:
                     st.warning("Nenhum equipamento com grupo.")
                     st.stop()
 
                 equipamento_ids = [e["id"] for e in com_grupo]
-                existing = _load_existing_tasks(sb, tenant_id, revisao_id, equipamento_ids)
+                existing = _load_existing_tasks(
+                    sb, tenant_id, revisao_id, equipamento_ids)
 
                 payload = []
                 for e in com_grupo:
@@ -678,21 +792,27 @@ def render_admin_revisoes():
                     try:
                         with st.spinner("Inserindo tarefas..."):
                             _insert_tasks(sb, payload)
-                        st.toast("✓ Matriz gerada/atualizada", icon=":material/check_circle:")
+                        st.toast(
+                            "✓ Matriz gerada/atualizada",
+                            icon=":material/check_circle:")
                         nav.rerun_keep_menu()
                     except Exception as e:
                         st.error(f"Erro ao inserir tarefas: {e}")
                 else:
-                    st.info("Nada a inserir: matriz já estava completa para os templates atuais.")
+                    st.info(
+                        "Nada a inserir: matriz já estava completa para os templates atuais.")
 
         with colB:
-            if st.button("Sincronizar Matriz (add + marcar N/A)", use_container_width=True):
+            if st.button(
+                "Sincronizar Matriz (add + marcar N/A)",
+                    use_container_width=True):
                 if len(com_grupo) == 0:
                     st.warning("Nenhum equipamento com grupo.")
                     st.stop()
 
                 equipamento_ids = [e["id"] for e in com_grupo]
-                existing = _load_existing_tasks(sb, tenant_id, revisao_id, equipamento_ids)
+                existing = _load_existing_tasks(
+                    sb, tenant_id, revisao_id, equipamento_ids)
 
                 to_insert = []
                 to_na = []
@@ -725,8 +845,11 @@ def render_admin_revisoes():
                         if to_insert:
                             _insert_tasks(sb, to_insert)
                         if to_na:
-                            _update_tasks_status(sb, to_na, status="nao_aplica")
-                    st.toast("✓ Sincronização concluída", icon=":material/check_circle:")
+                            _update_tasks_status(
+                                sb, to_na, status="nao_aplica")
+                    st.toast(
+                        "✓ Sincronização concluída",
+                        icon=":material/check_circle:")
                     nav.rerun_keep_menu()
                 except Exception as e:
                     st.error(f"Erro na sincronização: {e}")

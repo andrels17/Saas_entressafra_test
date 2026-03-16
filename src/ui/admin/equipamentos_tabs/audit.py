@@ -3,39 +3,52 @@ import streamlit as st
 import pandas as pd
 from postgrest.exceptions import APIError
 
-from src.ui.admin_components.layout import admin_block, admin_divider
 from src.ui.admin.equipamentos_helpers import (
-    OPTIONAL_COLS,
-    _normalize_columns,
-    _coerce_types,
-    _rerun,
-    _read_csv_smart,
-    _detect_mapping,
     _chunked,
-    _safe_int,
-    _audit,
-    _load_grupos,
-    _load_departamentos,
-    _ensure_departamentos,
-    _ensure_grupos,
     _load_user_names,
 )
 
 
 def render_audit_tab(sb, tenant_id: str):
     st.markdown("### Histórico de mudanças (Audit)")
-    st.caption("Registra ações como importação, edição, mover, desativar, restaurar e apagar.")
+    st.caption(
+        "Registra ações como importação, edição, mover, desativar, restaurar e apagar.")
 
     # Filtros
     c1, c2, c3, c4 = st.columns([0.28, 0.24, 0.24, 0.24])
     with c1:
-        busca = st.text_input("Buscar (frota / modelo / usuário)", placeholder="2055, John Deere, André...", key="eq_audit_search")
+        busca = st.text_input(
+            "Buscar (frota / modelo / usuário)",
+            placeholder="2055, John Deere, André...",
+            key="eq_audit_search")
     with c2:
-        action = st.selectbox("Ação", options=["(todas)", "import", "update", "move", "soft_delete", "restore", "hard_delete"], key="eq_audit_action")
+        action = st.selectbox(
+            "Ação",
+            options=[
+                "(todas)",
+                "import",
+                "update",
+                "move",
+                "soft_delete",
+                "restore",
+                "hard_delete"],
+            key="eq_audit_action")
     with c3:
-        limit = st.selectbox("Quantidade", options=[50, 100, 200, 500, 1000], index=1, key="eq_audit_limit")
+        limit = st.selectbox(
+            "Quantidade",
+            options=[
+                50,
+                100,
+                200,
+                500,
+                1000],
+            index=1,
+            key="eq_audit_limit")
     with c4:
-        mostrar_json = st.toggle("Mostrar detalhes (JSON)", value=False, key="eq_audit_json")
+        mostrar_json = st.toggle(
+            "Mostrar detalhes (JSON)",
+            value=False,
+            key="eq_audit_json")
 
     st.caption("Dica: para período, use o filtro do Supabase ou eu posso adicionar filtro por data (início/fim) se você quiser).")
 
@@ -64,7 +77,8 @@ def render_audit_tab(sb, tenant_id: str):
         st.info("Nenhum evento encontrado.")
     else:
         # Carrega dados do equipamento para exibir frota/modelo
-        equip_ids = [e.get("equipamento_id") for e in events if e.get("equipamento_id")]
+        equip_ids = [e.get("equipamento_id")
+                     for e in events if e.get("equipamento_id")]
         equip_map = {}
         if equip_ids:
             try:
@@ -78,7 +92,8 @@ def render_audit_tab(sb, tenant_id: str):
                         .data
                     ) or []
                     for r in rows:
-                        equip_map[r["id"]] = {"frota": r.get("frota") or "", "modelo": r.get("modelo") or ""}
+                        equip_map[r["id"]] = {"frota": r.get(
+                            "frota") or "", "modelo": r.get("modelo") or ""}
             except Exception:
                 equip_map = {}
 
@@ -110,11 +125,12 @@ def render_audit_tab(sb, tenant_id: str):
         # filtro de busca (client-side)
         if busca.strip():
             b = busca.strip().lower()
+
             def _match(row):
-                return (str(row.get("frota","")).lower().find(b) >= 0) or \
-                       (str(row.get("modelo","")).lower().find(b) >= 0) or \
-                       (str(row.get("usuário","")).lower().find(b) >= 0) or \
-                       (str(row.get("ação","")).lower().find(b) >= 0)
+                return (str(row.get("frota", "")).lower().find(b) >= 0) or \
+                       (str(row.get("modelo", "")).lower().find(b) >= 0) or \
+                       (str(row.get("usuário", "")).lower().find(b) >= 0) or \
+                       (str(row.get("ação", "")).lower().find(b) >= 0)
             df = df[df.apply(_match, axis=1)]
 
         st.dataframe(df, use_container_width=True, hide_index=True)
@@ -133,14 +149,19 @@ def render_audit_tab(sb, tenant_id: str):
             if len(df) == 0:
                 st.info("Sem eventos para detalhar.")
             else:
-                pick = st.selectbox("Selecione um evento", options=df["evento_id"].tolist(), key="eq_audit_pick")
+                pick = st.selectbox(
+                    "Selecione um evento",
+                    options=df["evento_id"].tolist(),
+                    key="eq_audit_pick")
                 event = next((x for x in events if x.get("id") == pick), None)
                 if not event:
                     st.info("Evento não encontrado.")
                 else:
                     st.caption(f"**Ação:** {event.get('action', '—')}")
                     st.caption(f"**Quando:** {event.get('created_at', '—')}")
-                    st.caption(f"**Usuário:** {user_map.get(event.get('user_id'), event.get('user_id', '—'))}")
-                    st.caption(f"**Equipamento ID:** {event.get('equipamento_id', '—')}")
+                    st.caption(
+                        f"**Usuário:** {user_map.get(event.get('user_id'), event.get('user_id', '—'))}")
+                    st.caption(
+                        f"**Equipamento ID:** {event.get('equipamento_id', '—')}")
                     st.caption("**Payload:**")
                     st.json(event.get("payload") or {})

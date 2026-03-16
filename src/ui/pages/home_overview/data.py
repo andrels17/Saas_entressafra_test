@@ -8,7 +8,10 @@ from src.utils.supabase_helpers import sb_for_user
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def load_revision(tenant_id: str, ver: str = "0", rev_id: str | None = None) -> dict | None:
+def load_revision(
+        tenant_id: str,
+        ver: str = "0",
+        rev_id: str | None = None) -> dict | None:
     sb = sb_for_user()
     try:
         revs = (
@@ -25,7 +28,15 @@ def load_revision(tenant_id: str, ver: str = "0", rev_id: str | None = None) -> 
     if not revs:
         return None
     for r in revs:
-        if str(r.get("status", "")).lower() in ("ativa", "em_andamento", "andamento", "aberta", "open"):
+        if str(
+            r.get(
+                "status",
+                "")).lower() in (
+            "ativa",
+            "em_andamento",
+            "andamento",
+            "aberta",
+                "open"):
             return r
     return revs[0]
 
@@ -56,7 +67,10 @@ def load_depts(tenant_id: str, ver: str = "0") -> list[dict]:
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def load_snapshots(tenant_id: str, revisao_id: str, ver: str = "0") -> pd.DataFrame:
+def load_snapshots(
+        tenant_id: str,
+        revisao_id: str,
+        ver: str = "0") -> pd.DataFrame:
     sb = sb_for_user()
     try:
         rows = (
@@ -74,14 +88,22 @@ def load_snapshots(tenant_id: str, revisao_id: str, ver: str = "0") -> pd.DataFr
     if not rows:
         return pd.DataFrame()
     df = pd.DataFrame(rows)
-    for c in ["week_number", "pct", "done_steps", "expected_steps", "backlog_steps"]:
+    for c in [
+        "week_number",
+        "pct",
+        "done_steps",
+        "expected_steps",
+            "backlog_steps"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
     return df
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def load_group_sector_view(tenant_id: str, revisao_id: str, ver: str = "0") -> dict:
+def load_group_sector_view(
+        tenant_id: str,
+        revisao_id: str,
+        ver: str = "0") -> dict:
     sb = sb_for_user()
     try:
         rows = (
@@ -96,9 +118,9 @@ def load_group_sector_view(tenant_id: str, revisao_id: str, ver: str = "0") -> d
         rows = []
     return {
         str(r["grupo_id"]): {
-            "setores_total":      int(r.get("setores_total") or 0),
+            "setores_total": int(r.get("setores_total") or 0),
             "setores_concluidos": int(r.get("setores_concluidos") or 0),
-            "setores_pendentes":  int(r.get("setores_pendentes") or 0),
+            "setores_pendentes": int(r.get("setores_pendentes") or 0),
         }
         for r in rows if r.get("grupo_id")
     }
@@ -112,20 +134,21 @@ def snapshots_supported() -> bool:
         return False
 
 
-def insert_snapshot(tenant_id: str, revisao_id: str, week_number: int, df: pd.DataFrame) -> tuple[bool, str]:
+def insert_snapshot(tenant_id: str, revisao_id: str,
+                    week_number: int, df: pd.DataFrame) -> tuple[bool, str]:
     if df is None or df.empty:
         return False, "Sem dados"
     sb = sb_for_user()
     rows = [
         {
-            "tenant_id":      tenant_id,
-            "revisao_id":     revisao_id,
-            "week_number":    int(week_number),
-            "grupo_id":       r.get("grupo_id"),
-            "pct":            int(r.get("pct") or 0),
-            "done_steps":     int(r.get("done_steps") or 0),
+            "tenant_id": tenant_id,
+            "revisao_id": revisao_id,
+            "week_number": int(week_number),
+            "grupo_id": r.get("grupo_id"),
+            "pct": int(r.get("pct") or 0),
+            "done_steps": int(r.get("done_steps") or 0),
             "expected_steps": int(r.get("expected_steps") or 0),
-            "backlog_steps":  int(r.get("backlog_steps") or 0),
+            "backlog_steps": int(r.get("backlog_steps") or 0),
         }
         for r in df.to_dict("records")
     ]
