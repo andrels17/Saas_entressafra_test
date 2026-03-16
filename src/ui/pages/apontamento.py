@@ -405,6 +405,12 @@ def _fragment_editor(tenant_id: str, revisao_id: str, equipamento_id: str) -> No
                     show_supabase_error(e, f"Tarefa {tid}")
                     erros += 1
 
+        # Invalida cache de KPIs para refletir os novos apontamentos
+        try:
+            from src.utils.kpi_engine import invalidate_kpi_cache
+            invalidate_kpi_cache()
+        except Exception:
+            pass
         st.cache_data.clear()
         st.session_state["data_version"] = str(_time.time())
         if erros == 0:
