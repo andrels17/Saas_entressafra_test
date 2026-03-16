@@ -1,15 +1,3 @@
-# .github/workflows/ci.yml
-# Pipeline de CI — roda em todo push e PR para main/develop
-#
-# Jobs:
-#   1. test     — pytest com cobertura (sem rede/Supabase)
-#   2. lint     — ruff + mypy básico
-#   3. health   — health check com skip_db=True (verifica estrutura sem banco)
-#
-# Secrets necessários no repositório (Settings → Secrets):
-#   Nenhum para CI básico. Para health check completo com banco:
-#   SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
-
 name: CI
 
 on:
@@ -18,84 +6,19 @@ on:
   pull_request:
     branches: [main, develop]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   PYTHON_VERSION: "3.11"
+  PYTHONPATH: .
 
 jobs:
-  # ──────────────────────────────────────────────────────────────────────────
-  # Job 1: Testes unitários
-  # ──────────────────────────────────────────────────────────────────────────
-  test:
-    name: Testes unitários
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-
-      - name: Instalar dependências de teste
-        run: |
-          pip install pytest pytest-cov pandas
-
-      - name: Executar testes
-        run: |
-          python -m pytest tests/ \
-            --tb=short \
-            --cov=src \
-            --cov-report=term-missing \
-            --cov-report=xml:coverage.xml \
-            -v
-        env:
-          # Stub para módulos que tentam importar streamlit
-          PYTHONPATH: .
-
-      - name: Upload cobertura
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: coverage.xml
-          retention-days: 7
-
-  # ──────────────────────────────────────────────────────────────────────────
-  # Job 2: Lint e formatação
-  # ──────────────────────────────────────────────────────────────────────────
   lint:
-    name: Lint
+    name: Lint e formato
     runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-
-      - name: Instalar ruff
-        run: pip install ruff
-
-      - name: Verificar formatação e estilo (ruff)
-        run: |
-          ruff check src/ tests/ \
-            --select E,F,W,I \
-            --ignore E501,E402,F401 \
-            --output-format github
-
-  # ──────────────────────────────────────────────────────────────────────────
-  # Job 3: Verificação de estrutura (sem banco)
-  # ──────────────────────────────────────────────────────────────────────────
-  structure-check:
-    name: Verificação de estrutura
-    runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
@@ -108,39 +31,130 @@ jobs:
           cache: pip
 
       - name: Instalar dependências
-        run: pip install pandas
-
-      - name: Verificar imports dos módulos novos
         run: |
-          python -c "
-          import sys, types
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install ruff
 
-          # Stub streamlit
+      - name: Verificar imports, estilo e erros reais
+        run: |
+          ruff check src tests \
+            --select E,F,W,I \
+            --ignore E501,E402,F401 \
+            --output-format github
+
+      - name: Verificar formatação
+        run: |
+          ruff format --check src tests
+
+  test:
+    name: Testes unitários
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: lint
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest pytest-cov pandas
+
+      - name: Executar testes
+        run: |
+          python -m pytest tests \
+            --tb=short \
+            --cov=src \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            -v
+
+      - name: Upload cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 7
+
+  structure-check:
+    name: Verificação de estrutura
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: lint
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Instalar dependências mínimas
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas
+
+      - name: Verificar imports críticos
+        run: |
+          python - <<'PY'
+          import sys
+          import types
+
           class _CR:
-              def __call__(self, f=None, **kw): return f if f else (lambda fn: fn)
-          st = types.ModuleType('streamlit')
+              def __call__(self, f=None, **kw):
+                  return f if f else (lambda fn: fn)
+
+          st = types.ModuleType("streamlit")
           st.cache_resource = _CR()
           st.session_state = {}
-          sys.modules['streamlit'] = st
+          sys.modules["streamlit"] = st
 
-          # Stub supabase
-          sup = types.ModuleType('supabase')
+          sup = types.ModuleType("supabase")
           sup.Client = object
           sup.create_client = lambda *a, **kw: object()
-          sys.modules['supabase'] = sup
+          sys.modules["supabase"] = sup
 
-          sys.path.insert(0, '.')
+          sys.path.insert(0, ".")
 
-          # Verifica imports críticos
-          from src.auth.rate_limit import get_rate_limit_key, check_rate_limit, record_failure, record_success
-          from src.auth.audit import audit_log, audit_login_success, audit_login_failure
-          from src.utils.observability import log_error, capture, safe_query, get_recent_errors
-          from src.domain.kpi import calc_pct, calc_expected, build_group_kpi, calc_global_kpis
+          from src.auth.rate_limit import (
+              check_rate_limit,
+              get_rate_limit_key,
+              record_failure,
+              record_success,
+          )
+          from src.auth.audit import (
+              audit_log,
+              audit_login_failure,
+              audit_login_success,
+          )
+          from src.domain.kpi import (
+              build_group_kpi,
+              calc_expected,
+              calc_global_kpis,
+              calc_pct,
+          )
+          from src.utils.observability import (
+              capture,
+              get_recent_errors,
+              log_error,
+              safe_query,
+          )
 
-          print('✅ Todos os imports críticos OK')
-          "
-        env:
-          PYTHONPATH: .
+          print("✅ Todos os imports críticos OK")
+          PY
 
       - name: Verificar migration SQL existe
         run: |
@@ -150,6 +164,44 @@ jobs:
 
       - name: Verificar arquivos de teste existem
         run: |
-          for f in tests/test_kpi.py tests/test_rate_limit.py tests/test_audit.py tests/test_observability.py; do
+          for f in \
+            tests/test_kpi.py \
+            tests/test_rate_limit.py \
+            tests/test_audit.py \
+            tests/test_observability.py
+          do
             test -f "$f" && echo "✅ $f" || (echo "❌ $f não encontrado" && exit 1)
           done
+
+  security:
+    name: Segurança básica
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: lint
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Instalar ferramentas de segurança
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit pip-audit
+
+      - name: Bandit
+        run: |
+          bandit -r src -q -x tests || true
+
+      - name: Pip Audit
+        run: |
+          if [ -f requirements.txt ]; then
+            pip-audit -r requirements.txt || true
+          else
+            echo "requirements.txt não encontrado, pulando pip-audit"
+          fi
