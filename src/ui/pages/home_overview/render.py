@@ -342,6 +342,32 @@ def render_home_overview() -> None:
             + (f" • Início {rev_start.date()}" if rev_start else "")
         )
         status_badge(rev.get("status"))
+
+        # ── Badge de prazo ────────────────────────────────────────────────────
+        try:
+            from src.domain.kpi import calc_prazo
+            prazo = calc_prazo(
+                data_inicio=rev.get("data_inicio"),
+                data_fim=rev.get("data_fim"),
+            )
+            if prazo["status_prazo"] != "sem_prazo":
+                dr = prazo["dias_restantes"]
+                if dr < 0:
+                    prazo_label = f"⚠️ {abs(dr)} dias em atraso"
+                    prazo_color = "red"
+                elif dr == 0:
+                    prazo_label = "⚠️ Vence hoje"
+                    prazo_color = "orange"
+                elif dr <= 7:
+                    prazo_label = f"⏰ {dr} dias restantes"
+                    prazo_color = "orange"
+                else:
+                    prazo_label = f"📅 {dr} dias restantes"
+                    prazo_color = "green"
+                st.badge(prazo_label, color=prazo_color)
+        except Exception:
+            pass
+
     with h2_col:
         if st.button("Atualizar", icon=":material/refresh:", use_container_width=True, key="home_refresh_btn"):
             st.session_state["data_version"] = str(time.time())
