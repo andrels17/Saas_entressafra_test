@@ -16,6 +16,7 @@ from datetime import date
 
 from src.utils.timezone import now_brt as _now_brt
 
+from src.ui.components.filters import select_equipamento, select_grupo, select_revisao
 from src.ui.core.styles import page_header as _ph
 from src.ui.core.confirm_dialog import confirm_dialog
 from src.ui.core.empty_state import empty_state
@@ -176,17 +177,14 @@ def _fragment_seletores(
     # Revisão
     default_idx = next((i for i, r in enumerate(
         revisoes) if r["status"] == "ativa"), 0)
-    _STATUS_ICON = {"ativa": "🟢", "fechada": "⚪", "arquivada": "🗄️"}
-    rev_labels = [
-        f"{_STATUS_ICON.get(r.get('status', ''), '○')} {r['titulo']} [{r['status']}]"
-        for r in revisoes
-    ]
-    rev_sel = st.selectbox(
-        "Revisão",
-        rev_labels,
-        index=default_idx,
-        key="apt_revisao_sel")
-    revisao = revisoes[rev_labels.index(rev_sel)]
+    revisao = select_revisao(
+        revisoes,
+        key="apt_revisao_sel",
+        default_status="ativa",
+        show_status_icon=True,
+    )
+    if not revisao:
+        return None, None, None
     revisao_id = revisao["id"]
 
     data_inicio = None
@@ -214,17 +212,15 @@ def _fragment_seletores(
         )
         return None, None, None
 
-    grupo_map = {g["nome"]: g["id"] for g in grupos}
-    # Sincroniza com query param se disponível
     qp_grupo = st.query_params.get("grupo")
-    default_grupo = qp_grupo if qp_grupo in grupo_map.values() else None
-    grupo_names = list(grupo_map.keys())
-    default_name = next((n for n, gid in grupo_map.items()
-                        if gid == default_grupo), grupo_names[0])
-    grupo_nome = st.selectbox("Grupo", grupo_names,
-                              index=grupo_names.index(default_name),
-                              key="apt_grupo_sel")
-    grupo_id = grupo_map[grupo_nome]
+    default_grupo = qp_grupo if qp_grupo else None
+    grupo_nome, grupo_id = select_grupo(
+        grupos,
+        key="apt_grupo_sel",
+        default_id=default_grupo,
+    )
+    if not grupo_id:
+        return None, None, None
     st.query_params["grupo"] = grupo_id  # sincroniza URL
 
     # Equipamento
@@ -233,16 +229,14 @@ def _fragment_seletores(
         st.info("Nenhum equipamento neste grupo.")
         return None, None, None
 
-    eq_map = {
-        f"{e['frota']} — {e.get('modelo') or ''}".strip(): e["id"] for e in equips}
     qp_eq = st.query_params.get("eq")
-    eq_names = list(eq_map.keys())
-    default_eq = next((n for n, eid in eq_map.items()
-                      if eid == qp_eq), eq_names[0])
-    eq_label = st.selectbox("Equipamento", eq_names,
-                            index=eq_names.index(default_eq),
-                            key="apt_eq_sel")
-    equipamento_id = eq_map[eq_label]
+    eq_label, equipamento_id = select_equipamento(
+        equips,
+        key="apt_eq_sel",
+        default_id=qp_eq,
+    )
+    if not equipamento_id:
+        return None, None, None
     st.query_params["eq"] = equipamento_id
 
     st.session_state["_apt_semana_default"] = int(semana_default)

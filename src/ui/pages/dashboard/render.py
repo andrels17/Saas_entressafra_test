@@ -15,6 +15,7 @@ import streamlit as st
 from src.auth.scope import get_my_scope
 from src.domain.kpi import calc_global_kpis
 from src.ui.core.empty_state import empty_state
+from src.ui.components.filters import multiselect_departamentos, multiselect_grupos
 from src.ui.core.styles import page_header
 from src.utils.kpi_engine import get_group_kpis
 from src.utils.nav import set_current_revisao
@@ -647,36 +648,20 @@ def render_dashboard() -> None:
 
     st.markdown("### Filtros")
     c1, c2, c3 = st.columns([1.1, 1.4, 0.6])
-    dept_options = [(d["id"], d.get("nome", "—"))
-                    for d in departamentos if d.get("id")]
-    dept_options = [
-        o for o in dept_options if not dep_scope_ids or o[0] in dep_scope_ids]
-    dept_label_to_id = {name: did for did, name in dept_options}
-    dept_selected_names = c1.multiselect(
-        "Departamento",
-        options=[
-            name for _,
-            name in dept_options],
-        key="dash_filter_dept")
-    dept_selected_ids = [dept_label_to_id[name]
-                         for name in dept_selected_names]
+    with c1:
+        dept_selected_ids = multiselect_departamentos(
+            departamentos,
+            key="dash_filter_dept",
+            allowed_ids=dep_scope_ids,
+        )
 
-    group_options = [(g["id"], g.get("nome", "—"), g.get(
-        "departamento_id")) for g in grupos if g.get("id")]
-    if grp_scope_ids:
-        group_options = [o for o in group_options if o[0] in grp_scope_ids]
-    if dept_selected_ids:
-        group_options = [o for o in group_options if o[2] in dept_selected_ids]
-    group_label_to_id = {name: gid for gid, name, _ in group_options}
-    group_selected_names = c2.multiselect(
-        "Grupo",
-        options=[
-            name for _,
-            name,
-            _ in group_options],
-        key="dash_filter_group")
-    group_selected_ids = [group_label_to_id[name]
-                          for name in group_selected_names]
+    with c2:
+        group_selected_ids = multiselect_grupos(
+            grupos,
+            key="dash_filter_group",
+            allowed_group_ids=grp_scope_ids,
+            departamento_ids=dept_selected_ids,
+        )
     top_n = int(
         c3.selectbox(
             "Top",

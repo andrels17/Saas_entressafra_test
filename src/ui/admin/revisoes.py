@@ -1,29 +1,248 @@
+from src.ui.components.filters import select_revisao
 from src.ui.core.styles import page_header as _ph
 import math
 import streamlit as st
+from postgrest.exceptions import APIError
 
-from src.ui.admin.revisoes_actions import (
-    bulk_delete_test_revisions as _bulk_delete_test_revisions,
-    delete_revisao_cascade as _delete_revisao_cascade,
-    safe_count_rows as _safe_count_rows,
-    safe_distinct_task_summary as _safe_distinct_task_summary,
-)
-from src.ui.admin.revisoes_data import (
-    chunked as _chunk,
-    fetch_revisoes as _fetch_revisoes,
-    fetch_revisoes_min as _fetch_revisoes_min,
-    insert_tasks as _insert_tasks,
-    load_equipamentos as _load_equipamentos,
-    load_existing_tasks as _load_existing_tasks,
-    load_grupos as _load_grupos,
-    load_grupo_servicos as _load_grupo_servicos,
-    update_tasks_status as _update_tasks_status,
-)
 from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_role
+from src.db.supabase_client import get_supabase_service
 from src.utils import nav
 
 
 STATUSES = ["pendente", "em_andamento", "concluido", "travado", "nao_aplica"]
+
+
+def _fetch_revisoes(sb, tenant_id):
+    """Fetch revisoes; if RLS/policy blocks, fallback to service role."""
+    try:
+        return (
+            sb.table("revisoes")
+            .select("id,titulo,status,data_inicio,data_fim,semanas_total,created_at")
+            .eq("tenant_id", tenant_id)
+            .order("created_at", desc=True)
+            .execute()
+            .data
+        ) or []
+    except APIError:
+        try:
+            svc = get_supabase_service()
+            return (
+                svc.table("revisoes")
+                .select("id,titulo,status,data_inicio,data_fim,semanas_total,created_at")
+                .eq("tenant_id", tenant_id)
+                .order("created_at", desc=True)
+                .execute()
+                .data
+            ) or []
+        except Exception:
+            return []
+
+
+def _fetch_revisoes_min(sb, tenant_id):
+    try:
+        return (
+            sb.table("revisoes")
+            .select("id,titulo,status,semanas_total,created_at")
+            .eq("tenant_id", tenant_id)
+            .order("created_at", desc=True)
+            .execute()
+            .data
+        ) or []
+    except APIError:
+        try:
+            svc = get_supabase_service()
+            return (
+                svc.table("revisoes")
+                .select("id,titulo,status,semanas_total,created_at")
+                .eq("tenant_id", tenant_id)
+                .order("created_at", desc=True)
+                .execute()
+                .data
+            ) or []
+        except Exception:
+            return []
+
+
+def _chunk(lst, size):
+    for i in range(0, len(lst), size):
+        yield lst[i:i + size]
+
+
+def _load_grupos(sb, tenant_id):
+    return (
+        sb.table("equip_grupos")
+        .select("id,nome")
+        .eq("tenant_id", tenant_id)
+        .eq("ativo", True)
+        .order("nome")
+        .execute()
+        .data
+    ) or []
+
+
+def _load_equipamentos(sb, tenant_id):
+    return (
+        sb.table("equipamentos")
+        .select("id,grupo_id")
+        .eq("tenant_id", tenant_id)
+        .eq("ativo", True)
+        .execute()
+        .data
+    ) or []
+
+
+def _load_grupo_servicos(sb, tenant_id, grupo_ids):
+    if not grupo_ids:
+        return {}
+    rows = (
+        sb.table("grupo_servicos")
+        .select("grupo_id,servico_id")
+        .eq("tenant_id", tenant_id)
+        .in_("grupo_id", list(grupo_ids))
+        .execute()
+        .data
+    ) or []
+    gs = {}
+    for r in rows:
+        gs.setdefault(r["grupo_id"], set()).add(r["servico_id"])
+    return gs
+
+
+def _load_existing_tasks(sb, tenant_id, revisao_id, equipamento_ids):
+    existing = {}
+    for ids in _chunk(equipamento_ids, 200):
+        rows = (
+            sb.table("tarefas_servico")
+            .select("id,equipamento_id,servico_id,status")
+            .eq("tenant_id", tenant_id)
+            .eq("revisao_id", revisao_id)
+            .in_("equipamento_id", ids)
+            .execute()
+            .data
+        ) or []
+        for r in rows:
+            existing.setdefault(r["equipamento_id"], {})[r["servico_id"]] = r
+    return existing
+
+
+def _insert_tasks(sb, payload):
+    for batch in _chunk(payload, 500):
+        sb.table("tarefas_servico").insert(batch).execute()
+
+
+def _update_tasks_status(sb, ids, status="nao_aplica"):
+    for batch in _chunk(ids, 500):
+        sb.table("tarefas_servico").update(
+            {"status": status}).in_("id", batch).execute()
+
+
+def _safe_count_rows(
+        client,
+        table_name: str,
+        tenant_id: str,
+        revisao_id: str) -> int:
+    try:
+        resp = (
+            client.table(table_name)
+            .select("id", count="exact")
+            .eq("tenant_id", tenant_id)
+            .eq("revisao_id", revisao_id)
+            .execute()
+        )
+        return int(getattr(resp, "count", 0) or 0)
+    except Exception:
+        try:
+            rows = (
+                client.table(table_name)
+                .select("id")
+                .eq("tenant_id", tenant_id)
+                .eq("revisao_id", revisao_id)
+                .limit(10000)
+                .execute()
+                .data
+            ) or []
+            return len(rows)
+        except Exception:
+            return 0
+
+
+def _delete_revisao_cascade(tenant_id: str, revisao_id: str) -> dict:
+    svc = get_supabase_service()
+    result = {"historico": 0, "tarefas": 0, "revisoes": 0}
+
+    result["historico"] = _safe_count_rows(
+        svc, "historico_eventos", tenant_id, revisao_id)
+    result["tarefas"] = _safe_count_rows(
+        svc, "tarefas_servico", tenant_id, revisao_id)
+
+    # Ordem importante: histórico -> tarefas -> revisão
+    try:
+        svc.table("historico_eventos").delete().eq(
+            "tenant_id", tenant_id).eq(
+            "revisao_id", revisao_id).execute()
+    except Exception:
+        pass
+
+    svc.table("tarefas_servico").delete().eq(
+        "tenant_id", tenant_id).eq(
+        "revisao_id", revisao_id).execute()
+    svc.table("revisoes").delete().eq(
+        "tenant_id", tenant_id).eq(
+        "id", revisao_id).execute()
+    result["revisoes"] = 1
+    return result
+
+
+def _safe_distinct_task_summary(tenant_id: str, revisao_id: str) -> dict:
+    svc = get_supabase_service()
+    out = {
+        "equipamentos": 0,
+        "tarefas_concluidas": 0,
+        "tarefas_pendentes": 0,
+        "tarefas_total": 0,
+        "historico": 0,
+    }
+    try:
+        rows = (
+            svc.table("tarefas_servico")
+            .select("equipamento_id,status")
+            .eq("tenant_id", tenant_id)
+            .eq("revisao_id", revisao_id)
+            .limit(20000)
+            .execute()
+            .data
+        ) or []
+        equipamentos = {r.get("equipamento_id")
+                        for r in rows if r.get("equipamento_id") is not None}
+        concl = sum(1 for r in rows if r.get("status") == "concluido")
+        pend = sum(
+            1 for r in rows if r.get("status") in (
+                "pendente",
+                "em_andamento",
+                "travado"))
+        out.update({
+            "equipamentos": len(equipamentos),
+            "tarefas_concluidas": concl,
+            "tarefas_pendentes": pend,
+            "tarefas_total": len(rows),
+        })
+    except Exception:
+        pass
+
+    out["historico"] = _safe_count_rows(
+        svc, "historico_eventos", tenant_id, revisao_id)
+    return out
+
+
+def _bulk_delete_test_revisions(
+        tenant_id: str, revisoes: list[dict]) -> tuple[int, int, int]:
+    total_rev = total_tarefas = total_hist = 0
+    for r in revisoes:
+        res = _delete_revisao_cascade(tenant_id, r["id"])
+        total_rev += int(res.get("revisoes", 0) or 0)
+        total_tarefas += int(res.get("tarefas", 0) or 0)
+        total_hist += int(res.get("historico", 0) or 0)
+    return total_rev, total_tarefas, total_hist
 
 
 def render_admin_revisoes():
@@ -493,15 +712,14 @@ def render_admin_revisoes():
             st.info("Crie uma revisão primeiro.")
             return
 
-        default_idx = 0
-        for i, r in enumerate(revisoes):
-            if r["status"] == "ativa":
-                default_idx = i
-                break
-
-        rev_opt = [f"{r['titulo']} [{r['status']}]" for r in revisoes]
-        sel = st.selectbox("Revisão", rev_opt, index=default_idx)
-        revisao = revisoes[rev_opt.index(sel)]
+        revisao = select_revisao(
+            revisoes,
+            key="revisoes_select",
+            show_status_icon=False,
+        )
+        if not revisao:
+            st.info("Crie uma revisão primeiro.")
+            return
         revisao_id = revisao["id"]
 
         st.divider()
