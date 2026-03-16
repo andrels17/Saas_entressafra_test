@@ -212,3 +212,97 @@ def count_etapas(tarefa: dict) -> int:
         + int(bool(tarefa.get("etapa_r")))
         + int(bool(tarefa.get("etapa_m")))
     )
+
+
+# ── KPI de Prazo ──────────────────────────────────────────────────────────────
+
+class PrazoKPI(TypedDict):
+    dias_restantes:  int          # positivo = ainda no prazo, negativo = atrasado
+    dias_totais:     int          # duração total da revisão em dias
+    dias_decorridos: int          # dias desde o início
+    pct_tempo_gasto: int          # % do tempo total já consumido (0–100)
+    status_prazo:    str          # "no_prazo" | "atencao" | "atrasado" | "sem_prazo"
+    data_fim:        str | None   # ISO date da data_fim, ou None
+
+
+def calc_prazo(
+    data_inicio: str | None,
+    data_fim: str | None,
+    pct_concluido: int = 0,
+) -> PrazoKPI:
+    """Calcula KPIs de prazo de uma revisão.
+
+    Regras de status:
+      - sem_prazo:  data_fim ausente
+      - atrasado:   hoje > data_fim
+      - atencao:    dias_restantes <= 7 e pct_concluido < 80
+      - no_prazo:   demais casos
+
+    Args:
+        data_inicio:   Data de início no formato ISO (YYYY-MM-DD) ou None.
+        data_fim:      Data de término no formato ISO (YYYY-MM-DD) ou None.
+        pct_concluido: Percentual de conclusão atual (0–100).
+
+    Returns:
+        PrazoKPI com todos os campos preenchidos.
+    """
+    from datetime import date, datetime
+
+    _empty = PrazoKPI(
+        dias_restantes=0,
+        dias_totais=0,
+        dias_decorridos=0,
+        pct_tempo_gasto=0,
+        status_prazo="sem_prazo",
+        data_fim=None,
+    )
+
+    if not data_fim:
+        return _empty
+
+    def _parse(s: str) -> date | None:
+        # Tenta os formatos mais longos primeiro para não truncar acidentalmente
+        for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(s, fmt).date()
+            except ValueError:
+                continue
+        # Fallback: tenta apenas os primeiros 10 chars (data sem hora)
+        try:
+            return datetime.strptime(s[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
+    hoje      = date.today()
+    dt_fim    = _parse(data_fim)
+    dt_inicio = _parse(data_inicio) if data_inicio else None
+
+    if dt_fim is None:
+        return _empty
+
+    dias_restantes = (dt_fim - hoje).days
+
+    if dt_inicio:
+        dias_totais     = max((dt_fim - dt_inicio).days, 1)
+        dias_decorridos = max((hoje - dt_inicio).days, 0)
+        pct_tempo       = min(int(round(dias_decorridos / dias_totais * 100)), 100)
+    else:
+        dias_totais     = 0
+        dias_decorridos = 0
+        pct_tempo       = 0
+
+    if dias_restantes < 0:
+        status = "atrasado"
+    elif dias_restantes <= 7 and pct_concluido < 80:
+        status = "atencao"
+    else:
+        status = "no_prazo"
+
+    return PrazoKPI(
+        dias_restantes=dias_restantes,
+        dias_totais=dias_totais,
+        dias_decorridos=dias_decorridos,
+        pct_tempo_gasto=pct_tempo,
+        status_prazo=status,
+        data_fim=data_fim,
+    )

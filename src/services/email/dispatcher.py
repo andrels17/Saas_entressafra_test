@@ -550,7 +550,7 @@ def dispatch_relatorio_semanal(
     from src.db.supabase_client import get_supabase_service
     from src.services.email.recipients import get_recipient_groups, get_admin_recipients
     from src.services.email.smtp_sender import (
-        SmtpConfig, EmailMessage, send_email, build_html_body,
+        SmtpConfig, EmailMessage, send_email, send_email_with_retry, build_html_body,
         _load_config_from_secrets,
     )
     from src.services.reporting.pdf_relatorio_semanal import build_weekly_pdf
@@ -641,14 +641,15 @@ def dispatch_relatorio_semanal(
                         primary_color=payload.primary_color,
                         equipamentos=eq_list,
                     )
-                    send_email(EmailMessage(
+                    send_email_with_retry(EmailMessage(
                         to=[rec.email],
                         subject=(f"[{payload.revisao_titulo}] Relatório Semanal — "
                                  f"{grp.departamento_nome} · Semana {payload.semana_atual}"),
                         html_body=html,
                         pdf_bytes=pdf_bytes,
                         pdf_filename=pdf_name,
-                    ), cfg=smtp_cfg)
+                    ), cfg=smtp_cfg,
+                    on_retry=lambda attempt, exc: _log(f"    ↳ ⚠️ Retry {attempt}: {exc}"))
                     result.sent += 1
                     _log(f"    ↳ ✅ Enviado.")
                 except Exception as e:
@@ -795,7 +796,7 @@ def dispatch_relatorio_semanal(
                         result.sent += 1
                         continue
                     try:
-                        from src.services.email.smtp_sender import build_html_body, EmailMessage, send_email
+                        from src.services.email.smtp_sender import build_html_body, EmailMessage, send_email_with_retry
                         html_e = build_html_body(
                             destinatario_nome=rec.nome,
                             departamento_nome="Visão geral — todos os departamentos",
@@ -806,14 +807,15 @@ def dispatch_relatorio_semanal(
                             n_alertas=exec_payload.n_alertas_total,
                             primary_color=exec_payload.primary_color,
                         )
-                        send_email(EmailMessage(
+                        send_email_with_retry(EmailMessage(
                             to=[rec.email],
                             subject=(f"[{exec_payload.revisao_titulo}] Visão Executiva — "
                                      f"Semana {exec_payload.semana_atual}/{exec_payload.semanas_total}"),
                             html_body=html_e,
                             pdf_bytes=pdf_exec,
                             pdf_filename=pdf_name_e,
-                        ), cfg=smtp_cfg)
+                        ), cfg=smtp_cfg,
+                        on_retry=lambda attempt, exc: _log(f"    ↳ ⚠️ Retry {attempt}: {exc}"))
                         result.sent += 1
                         _log("    ↳ ✅ Executivo enviado.")
                     except Exception as e_send:

@@ -1,46 +1,79 @@
-"""Envio de e-mail via SMTP com anexo PDF.
+"""Envio de e-mail via SMTP com anexo PDF — com retry e backoff exponencial.
+
+Melhorias v2:
+  - send_email_with_retry(): 3 tentativas com backoff 1s → 2s → 4s
+  - Erros transitórios (timeout, conexão) são retentados
+  - Erros permanentes (auth, destinatário inválido) falham imediatamente
+  - Logging estruturado em cada tentativa
 
 Configuração via st.secrets (ou variáveis de ambiente):
-  SMTP_HOST      ex: smtp.office365.com  (Microsoft) ou smtp.gmail.com (Gmail)
-  SMTP_PORT      ex: 587
-  SMTP_USER      ex: relatorios@empresa.com
-  SMTP_PASSWORD  senha ou app-password
-  SMTP_FROM_NAME ex: Sistema AgroSafra  (opcional)
-  SMTP_USE_TLS   true/false  (opcional — padrão: true para porta 587)
-  SMTP_USE_SSL   true/false  (opcional — padrão: true para porta 465)
+  SMTP_HOST        ex: smtp.office365.com ou smtp.gmail.com
+  SMTP_PORT        ex: 587
+  SMTP_USER        ex: relatorios@empresa.com
+  SMTP_PASSWORD    senha ou app-password
+  SMTP_FROM_NAME   ex: Sistema AgroSafra  (opcional)
+  SMTP_USE_TLS     true/false  (opcional — padrão: true para porta 587)
+  SMTP_USE_SSL     true/false  (opcional — padrão: true para porta 465)
+  SMTP_MAX_RETRIES ex: 3  (opcional — padrão: 3)
+  SMTP_RETRY_BASE  ex: 1  (opcional — segundos base do backoff, padrão: 1)
 """
 from __future__ import annotations
 
+import logging
 import smtplib
 import ssl
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from src.utils.timezone import fmt_brt
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import List
 
+from src.utils.timezone import fmt_brt
+from src.utils.observability import log_error
+
+log = logging.getLogger("saas.smtp_sender")
+
+# Erros permanentes — não adianta retentar
+_PERMANENT_ERRORS = (
+    smtplib.SMTPAuthenticationError,
+    smtplib.SMTPRecipientsRefused,
+    smtplib.SMTPSenderRefused,
+)
+
+# Erros transitórios — vale retentar
+_TRANSIENT_ERRORS = (
+    smtplib.SMTPConnectError,
+    smtplib.SMTPServerDisconnected,
+    smtplib.SMTPHeloError,
+    TimeoutError,
+    ConnectionRefusedError,
+    OSError,
+)
+
 
 @dataclass
 class SmtpConfig:
-    host: str
-    port: int
-    user: str
-    password: str
-    from_name: str = "Sistema de Revisões"
-    use_tls: bool = True          # STARTTLS na porta 587 (Gmail, Outlook, Office365)
-    use_ssl: bool = False         # SSL direto na porta 465
+    host:        str
+    port:        int
+    user:        str
+    password:    str
+    from_name:   str  = "Sistema de Revisões"
+    use_tls:     bool = True   # STARTTLS na porta 587
+    use_ssl:     bool = False  # SSL direto na porta 465
+    max_retries: int  = 3      # tentativas totais (1 original + 2 retries)
+    retry_base:  float = 1.0   # segundos base do backoff exponencial
 
 
 @dataclass
 class EmailMessage:
-    to: List[str]                 # lista de destinatários
-    subject: str
-    html_body: str
-    pdf_bytes: bytes | None = None
-    pdf_filename: str = "relatorio.pdf"
-    cc: List[str] = field(default_factory=list)
+    to:           List[str]
+    subject:      str
+    html_body:    str
+    pdf_bytes:    bytes | None = None
+    pdf_filename: str          = "relatorio.pdf"
+    cc:           List[str]    = field(default_factory=list)
 
 
 def _load_config_from_secrets() -> SmtpConfig:
@@ -63,21 +96,12 @@ def _load_config_from_secrets() -> SmtpConfig:
         )
 
     port = int(secrets["SMTP_PORT"])
-
-    # Determina TLS/SSL: respeita override explícito, senão usa porta como padrão
     _true_vals = ("true", "1", "yes")
+
     use_tls_raw = secrets.get("SMTP_USE_TLS", "")
     use_ssl_raw = secrets.get("SMTP_USE_SSL", "")
-
-    if use_tls_raw != "":
-        use_tls = str(use_tls_raw).lower() in _true_vals
-    else:
-        use_tls = port == 587  # STARTTLS padrão para 587 (Gmail, Outlook, Office365)
-
-    if use_ssl_raw != "":
-        use_ssl = str(use_ssl_raw).lower() in _true_vals
-    else:
-        use_ssl = port == 465  # SSL direto padrão para 465
+    use_tls = str(use_tls_raw).lower() in _true_vals if use_tls_raw != "" else (port == 587)
+    use_ssl = str(use_ssl_raw).lower() in _true_vals if use_ssl_raw != "" else (port == 465)
 
     return SmtpConfig(
         host=secrets["SMTP_HOST"],
@@ -87,14 +111,13 @@ def _load_config_from_secrets() -> SmtpConfig:
         from_name=secrets.get("SMTP_FROM_NAME") or "Sistema de Revisões",
         use_tls=use_tls,
         use_ssl=use_ssl,
+        max_retries=int(secrets.get("SMTP_MAX_RETRIES") or 3),
+        retry_base=float(secrets.get("SMTP_RETRY_BASE") or 1.0),
     )
 
 
-def send_email(msg: EmailMessage, cfg: SmtpConfig | None = None) -> None:
-    """Envia o e-mail. Levanta smtplib.SMTPException em caso de falha."""
-    if cfg is None:
-        cfg = _load_config_from_secrets()
-
+def _build_mime(msg: EmailMessage, cfg: SmtpConfig) -> MIMEMultipart:
+    """Constrói o objeto MIME a partir de um EmailMessage."""
     mime = MIMEMultipart("mixed")
     mime["From"]    = f"{cfg.from_name} <{cfg.user}>"
     mime["To"]      = ", ".join(msg.to)
@@ -102,21 +125,24 @@ def send_email(msg: EmailMessage, cfg: SmtpConfig | None = None) -> None:
     if msg.cc:
         mime["Cc"] = ", ".join(msg.cc)
 
-    # Corpo HTML
     alt = MIMEMultipart("alternative")
     alt.attach(MIMEText(msg.html_body, "html", "utf-8"))
     mime.attach(alt)
 
-    # Anexo PDF
     if msg.pdf_bytes:
         part = MIMEApplication(msg.pdf_bytes, _subtype="pdf")
-        part.add_header("Content-Disposition", "attachment",
-                        filename=msg.pdf_filename)
+        part.add_header("Content-Disposition", "attachment", filename=msg.pdf_filename)
         mime.attach(part)
 
-    all_to = list(msg.to) + list(msg.cc)
+    return mime
 
-    ctx = ssl.create_default_context()
+
+def _send_once(msg: EmailMessage, cfg: SmtpConfig) -> None:
+    """Tenta enviar o e-mail uma única vez. Levanta smtplib.SMTPException em falha."""
+    mime    = _build_mime(msg, cfg)
+    all_to  = list(msg.to) + list(msg.cc)
+    ctx     = ssl.create_default_context()
+
     if cfg.use_ssl:
         with smtplib.SMTP_SSL(cfg.host, cfg.port, context=ctx) as server:
             server.login(cfg.user, cfg.password)
@@ -127,6 +153,98 @@ def send_email(msg: EmailMessage, cfg: SmtpConfig | None = None) -> None:
                 server.starttls(context=ctx)
             server.login(cfg.user, cfg.password)
             server.sendmail(cfg.user, all_to, mime.as_bytes())
+
+
+def send_email(msg: EmailMessage, cfg: SmtpConfig | None = None) -> None:
+    """Envia o e-mail sem retry (interface original — mantida para compatibilidade).
+
+    Para ambientes de produção prefira send_email_with_retry().
+    """
+    if cfg is None:
+        cfg = _load_config_from_secrets()
+    _send_once(msg, cfg)
+
+
+def send_email_with_retry(
+    msg: EmailMessage,
+    cfg: SmtpConfig | None = None,
+    *,
+    on_retry: "Callable[[int, Exception], None] | None" = None,
+) -> None:
+    """Envia o e-mail com retry e backoff exponencial.
+
+    Tentativas: max_retries (padrão 3), com espera de retry_base * 2^(tentativa-1).
+    Exemplo com retry_base=1: 1s → 2s → 4s entre as tentativas.
+
+    Args:
+        msg: Mensagem a enviar.
+        cfg: Configuração SMTP. Lida de st.secrets se None.
+        on_retry: Callback opcional chamado a cada retry com (tentativa, exc).
+
+    Raises:
+        smtplib.SMTPException: Se todas as tentativas falharem.
+        ValueError: Se a configuração SMTP estiver incompleta.
+    """
+    if cfg is None:
+        cfg = _load_config_from_secrets()
+
+    last_exc: Exception | None = None
+
+    for attempt in range(1, cfg.max_retries + 1):
+        try:
+            _send_once(msg, cfg)
+            if attempt > 1:
+                log.info("Email enviado na tentativa %d para %s", attempt, msg.to)
+            return  # sucesso
+
+        except _PERMANENT_ERRORS as exc:
+            # Erro permanente: não adianta retentar
+            log_error(
+                exc,
+                context="smtp_sender.send_email_with_retry",
+                extra={
+                    "attempt": attempt,
+                    "to": msg.to,
+                    "error_type": "permanent",
+                },
+            )
+            raise
+
+        except Exception as exc:
+            last_exc = exc
+            is_last = attempt == cfg.max_retries
+
+            log.warning(
+                "Falha SMTP (tentativa %d/%d) para %s: %s",
+                attempt, cfg.max_retries, msg.to, exc,
+            )
+
+            if on_retry:
+                try:
+                    on_retry(attempt, exc)
+                except Exception:
+                    pass
+
+            if is_last:
+                log_error(
+                    exc,
+                    context="smtp_sender.send_email_with_retry",
+                    extra={
+                        "attempt": attempt,
+                        "to": msg.to,
+                        "max_retries": cfg.max_retries,
+                        "error_type": "transient_exhausted",
+                    },
+                )
+                raise
+
+            wait = cfg.retry_base * (2 ** (attempt - 1))
+            log.info("Aguardando %.1fs antes da tentativa %d…", wait, attempt + 1)
+            time.sleep(wait)
+
+    # Não deve chegar aqui, mas por segurança:
+    if last_exc:
+        raise last_exc
 
 
 def build_html_body(
@@ -141,7 +259,7 @@ def build_html_body(
     primary_color: str = "#FFD100",
     equipamentos: list | None = None,
 ) -> str:
-    """Gera o corpo HTML do e-mail — objetivo, sem tabela de equipamentos (está no PDF)."""
+    """Gera o corpo HTML do e-mail."""
     if pct_geral >= 80:
         bar_color = "#12B76A"
     elif pct_geral >= 50:
