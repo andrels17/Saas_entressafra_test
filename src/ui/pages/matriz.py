@@ -35,6 +35,10 @@ from src.utils.supabase_helpers import (
     current_user_id,
     sb_for_user,
 )
+from src.ui.pages.matriz_selection import (
+    render_group_scope_actions,
+    render_selection_header,
+)
 from src.ui.pages.matriz_sector import (
     build_change_preview_lines,
     build_sector_frame,
