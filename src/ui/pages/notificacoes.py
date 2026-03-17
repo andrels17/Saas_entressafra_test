@@ -23,6 +23,7 @@ from src.ui.core.styles import page_header as _ph
 from src.ui.components.feedback import notice_card, selection_summary
 from src.ui.components.actions import download_action, refresh_button, primary_action_button
 from src.ui.components.tables import data_table, titled_table
+from src.ui.components.states import empty_message, loading_block
 from src.ui.core.cache import bump_data_version, clear_cached_functions
 from src.utils.supabase_helpers import (
     current_role, current_tenant_id, sb_for_user,
@@ -492,7 +493,7 @@ def _fragment_resumo(alertas: dict, revisao: dict) -> None:
         delta_color="inverse" if n_risc else "off")
 
     if n_trav == 0 and n_sem == 0 and n_upd == 0 and n_risc == 0:
-        st.success("✅ Nenhum alerta ativo com os thresholds configurados.")
+        empty_message("Nenhum alerta ativo com os thresholds configurados.", kind="success")
 
 
 @st.fragment

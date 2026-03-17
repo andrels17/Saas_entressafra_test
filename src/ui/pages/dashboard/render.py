@@ -19,6 +19,7 @@ from src.ui.components.filters import multiselect_departamentos, multiselect_gru
 from src.ui.components.feedback import notice_card, selection_summary
 from src.ui.components.actions import refresh_button
 from src.ui.components.tables import data_table
+from src.ui.components.states import empty_message, loading_block
 from src.ui.core.styles import page_header
 from src.ui.core.cache import bump_data_version
 from src.utils.kpi_engine import get_group_kpis
@@ -308,7 +309,7 @@ def _fragment_grupos(
 def _fragment_setores(base: pd.DataFrame, top_n: int = 10) -> None:
     sdf = sector_progress(base)
     if sdf.empty:
-        st.info("Sem dados de setores.")
+        empty_message("Sem dados de setores.")
         return
     display = sdf.rename(columns={"setor": "Setor", "pct_concluido": "% Concluído"}).sort_values(
         ["% Concluído", "Setor"], ascending=[False, True])
@@ -476,7 +477,7 @@ def _fragment_equipamentos(
 @st.fragment
 def _fragment_heatmap(heat: pd.DataFrame) -> None:
     if heat.empty:
-        st.info("Sem dados de heatmap para esta revisão.")
+        empty_message("Sem dados de heatmap para esta revisão.")
         return
     fig = px.density_heatmap(
         heat,
@@ -507,7 +508,7 @@ def _fragment_heatmap(heat: pd.DataFrame) -> None:
 @st.fragment
 def _fragment_criticidade(crit: pd.DataFrame) -> None:
     if crit.empty:
-        st.info("Sem equipamentos críticos para exibir.")
+        empty_message("Sem equipamentos críticos para exibir.")
         return
     cols = [
         "ranking_criticidade",
@@ -531,7 +532,7 @@ def _fragment_criticidade(crit: pd.DataFrame) -> None:
 @st.fragment
 def _fragment_timeline(tl: pd.DataFrame) -> None:
     if tl.empty:
-        st.info("Sem movimentações registradas nesta revisão.")
+        empty_message("Sem movimentações registradas nesta revisão.")
         return
     plot_df = tl.copy().sort_values("dia")
     plot_df["dia_label"] = pd.to_datetime(

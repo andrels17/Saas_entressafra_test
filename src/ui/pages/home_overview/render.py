@@ -22,6 +22,7 @@ from src.ui.core.styles import page_header
 from src.ui.components.feedback import selection_summary
 from src.ui.components.actions import refresh_button, primary_action_button
 from src.ui.components.tables import data_table
+from src.ui.components.states import empty_message, loading_block
 from src.ui.core.cache import bump_data_version
 from src.utils import nav
 from src.utils.kpi_engine import get_group_kpis
@@ -181,7 +182,7 @@ def _fragment_departamentos(
     scope: pd.DataFrame,
 ) -> None:
     if dsum is None or getattr(dsum, "empty", True) or dep_total == 0:
-        st.info("Sem dados por departamento.")
+        empty_message("Sem dados por departamento.")
         return
 
     dsum_v = dsum.copy()
@@ -196,7 +197,7 @@ def _fragment_departamentos(
     with c1:
         st.markdown("#### Pendentes")
         if pend.empty:
-            st.success("Nenhum departamento pendente.")
+            empty_message("Nenhum departamento pendente.", kind="success")
         else:
             data_table(
                 pend[["Departamento", "pct", "grupos"]].rename(columns={"pct": "%", "grupos": "Grupos"}),
@@ -205,7 +206,7 @@ def _fragment_departamentos(
     with c2:
         st.markdown("#### Concluídos")
         if done.empty:
-            st.caption("Ainda não há departamentos concluídos.")
+            empty_message("Ainda não há departamentos concluídos.")
         else:
             data_table(
                 done[["Departamento", "pct", "grupos"]].rename(columns={"pct": "%", "grupos": "Grupos"}),
@@ -240,8 +241,11 @@ def _fragment_tendencia(
     scope: pd.DataFrame,
 ) -> None:
     if not snapshots_supported():
-        st.info("Tabela **kpi_snapshots** não encontrada. "
-                "Rode o SQL de próximos passos para habilitar tendência semanal.")
+        empty_message(
+            "Tabela **kpi_snapshots** não encontrada.",
+            "Rode o SQL de próximos passos para habilitar tendência semanal.",
+            kind="warning",
+        )
         return
 
     if st.button("Salvar snapshot desta semana", icon=":material/save:",
@@ -255,7 +259,7 @@ def _fragment_tendencia(
 
     sdf = load_snapshots(tenant_id, revisao_id, ver)
     if sdf.empty:
-        st.caption("Ainda não há snapshots salvos para esta revisão.")
+        empty_message("Ainda não há snapshots salvos para esta revisão.")
         return
 
     g = build_trend_chart_data(sdf)
@@ -301,7 +305,7 @@ def _fragment_risco(
         dept_to_name: dict) -> None:
     ddf = calc_dept_kpis(kdf, gid_to_dept)
     if ddf.empty:
-        st.info("Sem dados por departamento.")
+        empty_message("Sem dados por departamento.")
         return
 
     ddf = ddf.copy()
