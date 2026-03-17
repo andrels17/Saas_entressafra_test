@@ -127,6 +127,30 @@ def _task_key(equipamento_id, servico_id):
     return (str(equipamento_id), str(servico_id))
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _filter_obs_map_for_sector(obs_items_json: str, eq_ids_json: str, svc_ids_json: str) -> dict[str, str]:
+    """Filtra observações por setor com cache, evitando varrer todas as tarefas a cada rerun."""
+    import json
+
+    obs_items = json.loads(obs_items_json or "[]")
+    eq_ids = set(json.loads(eq_ids_json or "[]"))
+    svc_ids = set(json.loads(svc_ids_json or "[]"))
+
+    return {
+        f"{eid}__{sid}": obs
+        for eid, sid, obs in obs_items
+        if str(eid) in eq_ids and str(sid) in svc_ids and obs
+    }
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _normalize_service_ids(servicos_json: str) -> list[str]:
+    """Normaliza ids de serviços para uso estável em filtros e colunas."""
+    import json
+    servicos = json.loads(servicos_json or "[]")
+    return [str(s.get("id")) for s in servicos if s.get("id")]
+
+
 def _pct_bar_html(pct: int, height: int = 6) -> str:
     color = _risk_color(pct)
     w = max(0, min(100, pct))
@@ -1067,7 +1091,14 @@ def render_matriz():
                     key="mtz_reload",
                         use_container_width=True):
                     bump_data_version()
-                    clear_cached_functions(_load_payload, _group_kpis, _all_dept_names)
+                    clear_cached_functions(
+                        _load_payload,
+                        _group_kpis,
+                        _all_dept_names,
+                        _build_task_maps,
+                        _filter_obs_map_for_sector,
+                        _normalize_service_ids,
+                    )
                     st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
