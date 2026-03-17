@@ -16,13 +16,15 @@ def data_table(
     use_container_width: bool = True,
 ) -> None:
     """Tabela padrão da aplicação com defaults consistentes."""
-    st.dataframe(
-        df,
-        use_container_width=use_container_width,
-        hide_index=hide_index,
-        height=height,
-        column_config=column_config or {},
-    )
+    kwargs: dict[str, Any] = {
+        "use_container_width": use_container_width,
+        "hide_index": hide_index,
+        "column_config": column_config or {},
+    }
+    if isinstance(height, int) and height > 0:
+        kwargs["height"] = height
+
+    st.dataframe(df, **kwargs)
 
 
 def titled_table(
