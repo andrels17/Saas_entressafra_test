@@ -37,9 +37,11 @@ from src.utils.supabase_helpers import (
 )
 from src.ui.pages.matriz_sector import (
     build_change_preview_lines,
+    build_mass_toggle_changes,
     build_sector_frame,
     sector_progress_label,
     sector_summary_metrics,
+    summarize_change_payload,
 )
 from src.ui.pages.matriz_runtime import (
     build_task_maps as _build_task_maps,
@@ -200,6 +202,28 @@ def _style_heatmap(df_: pd.DataFrame) -> pd.DataFrame:
         s.loc[df_[col] == "OK", col] = "background-color:rgba(46,204,113,.18);"
         s.loc[df_[col] == "!", col] = "background-color:rgba(231,76,60,.20);"
     return s
+
+
+def _stash_pending_sector_changes(*, state_key: str, preview_key: str, summary_key: str, changes: list[tuple], eq_label_short: dict[str, str], svc_names: dict[str, str], field_labels: dict[str, str], semana_lote: int | None) -> None:
+    if not changes:
+        st.session_state.pop(state_key, None)
+        st.session_state.pop(preview_key, None)
+        st.session_state.pop(summary_key, None)
+        return
+
+    st.session_state[state_key] = changes
+    st.session_state[preview_key] = build_change_preview_lines(
+        changes,
+        eq_label_short=eq_label_short,
+        svc_names=svc_names,
+        field_labels=field_labels,
+        limit=8,
+    )
+    st.session_state[summary_key] = summarize_change_payload(
+        changes,
+        field_labels=field_labels,
+        semana=semana_lote,
+    )
 
 
 def _reportlab_available() -> bool:
@@ -1720,6 +1744,28 @@ def render_matriz():
                                     col: st.column_config.CheckboxColumn(col) for col in svc_bool}}, disabled=[
                                 "Status", "Equipamento"])
 
+                    _pending_changes_key = f"pending_changes_{kb}"
+                    _pending_preview_key = f"pending_preview_{kb}"
+                    _pending_summary_key = f"pending_summary_{kb}"
+                    _field_lbl = {
+                        "etapa_d": "D",
+                        "etapa_r": "R",
+                        "etapa_m": "M"}
+
+                    action_base = edited if edited is not None else df_display
+                    with st.container(border=True):
+                        st.markdown("**Ações rápidas do setor**")
+                        aq1, aq2, aq3, aq4 = st.columns(4)
+                        with aq1:
+                            mass_d = st.button("Selecionar todos D", key=f"mass_d_{kb}", use_container_width=True)
+                        with aq2:
+                            mass_r = st.button("Selecionar todos R", key=f"mass_r_{kb}", use_container_width=True)
+                        with aq3:
+                            mass_m = st.button("Selecionar todos M", key=f"mass_m_{kb}", use_container_width=True)
+                        with aq4:
+                            clear_sector = st.button("Limpar setor", key=f"mass_clear_{kb}", use_container_width=True)
+                        st.caption("Use as ações rápidas para preencher o setor inteiro e depois confirme no preview abaixo.")
+
                     sv1, sv2, _ = st.columns([1.2, 1.8, 1])
                     with sv1:
                         save_now = form_submit_button(
@@ -1729,14 +1775,41 @@ def render_matriz():
                         )
                     with sv2:
                         st.caption(
-                            "Marque/desmarque etapas acima e clique em Salvar.")
+                            "Marque/desmarque etapas acima, use seleção em massa se precisar e clique em Salvar.")
 
-                    _pending_changes_key = f"pending_changes_{kb}"
-                    _pending_preview_key = f"pending_preview_{kb}"
-                    _field_lbl = {
-                        "etapa_d": "D",
-                        "etapa_r": "R",
-                        "etapa_m": "M"}
+                    if mass_d or mass_r or mass_m or clear_sector:
+                        target_field = None
+                        target_value = True
+                        if mass_d:
+                            target_field = "etapa_d"
+                        elif mass_r:
+                            target_field = "etapa_r"
+                        elif mass_m:
+                            target_field = "etapa_m"
+                        elif clear_sector:
+                            target_value = False
+
+                        mass_changes = build_mass_toggle_changes(
+                            action_base,
+                            svc_bool=svc_bool,
+                            col_meta=col_meta,
+                            target_field=target_field,
+                            target_value=target_value,
+                        )
+                        if not mass_changes:
+                            st.info("Nenhuma alteração adicional encontrada para essa ação em massa.")
+                        else:
+                            _stash_pending_sector_changes(
+                                state_key=_pending_changes_key,
+                                preview_key=_pending_preview_key,
+                                summary_key=_pending_summary_key,
+                                changes=mass_changes,
+                                eq_label_short=eq_label_short,
+                                svc_names=_svc_names,
+                                field_labels=_field_lbl,
+                                semana_lote=semana_lote,
+                            )
+                            st.rerun()
 
                     if save_now:
                         if edited is None:
@@ -1758,29 +1831,38 @@ def render_matriz():
                                     _pending_changes_key, None)
                                 st.session_state.pop(
                                     _pending_preview_key, None)
+                                st.session_state.pop(
+                                    _pending_summary_key, None)
                                 st.info(
                                     "Nenhuma alteração detectada — faça alguma marcação antes de salvar.")
                             else:
-                                _prev_lines = build_change_preview_lines(
-                                    changes,
+                                _stash_pending_sector_changes(
+                                    state_key=_pending_changes_key,
+                                    preview_key=_pending_preview_key,
+                                    summary_key=_pending_summary_key,
+                                    changes=changes,
                                     eq_label_short=eq_label_short,
                                     svc_names=_svc_names,
                                     field_labels=_field_lbl,
-                                    limit=8,
+                                    semana_lote=semana_lote,
                                 )
-                                st.session_state[_pending_changes_key] = changes
-                                st.session_state[_pending_preview_key] = _prev_lines
                                 st.rerun()
 
                     pending_changes = st.session_state.get(
                         _pending_changes_key) or []
                     pending_preview = st.session_state.get(
                         _pending_preview_key) or []
+                    pending_summary = st.session_state.get(
+                        _pending_summary_key) or []
                     if pending_changes:
                         with st.container(border=True):
                             st.markdown(
-                                f"**{len(pending_changes)} alteração(ões) a salvar:**")
-                            st.markdown("\n".join(pending_preview))
+                                f"**Preview do batch — {len(pending_changes)} alteração(ões)**")
+                            for line in pending_summary:
+                                st.markdown(line)
+                            if pending_preview:
+                                st.markdown("**Amostra das alterações:**")
+                                st.markdown("\n".join(pending_preview))
                             c_yes, c_no, _ = st.columns([1, 1, 2])
                             with c_yes:
                                 confirm_now = st.button(
@@ -1792,6 +1874,7 @@ def render_matriz():
                         if cancel_now:
                             st.session_state.pop(_pending_changes_key, None)
                             st.session_state.pop(_pending_preview_key, None)
+                            st.session_state.pop(_pending_summary_key, None)
                             st.rerun()
 
                         if confirm_now:
@@ -1829,6 +1912,7 @@ def render_matriz():
 
                             st.session_state.pop(_pending_changes_key, None)
                             st.session_state.pop(_pending_preview_key, None)
+                            st.session_state.pop(_pending_summary_key, None)
                             pb.success(
                                 f"✅ {ok} etapas salvas"
                                 + (f"  ·  {failed} falharam" if failed else "")

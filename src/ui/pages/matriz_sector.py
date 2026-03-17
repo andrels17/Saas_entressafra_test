@@ -102,3 +102,66 @@ def build_change_preview_lines(
     if len(changes) > limit:
         preview.append(f"- _...e mais {len(changes) - limit} alterações_")
     return preview
+
+
+
+def build_mass_toggle_changes(
+    frame: pd.DataFrame,
+    *,
+    svc_bool: list[str],
+    col_meta: dict[str, tuple[str, str]],
+    target_field: str | None = None,
+    target_value: bool = True,
+) -> list[tuple]:
+    """Gera alterações em massa a partir do estado atual da grade."""
+    changes: list[tuple] = []
+    if frame is None or frame.empty:
+        return changes
+
+    allowed_fields = {target_field} if target_field else {"etapa_d", "etapa_r", "etapa_m"}
+    for equip_id, row in frame.iterrows():
+        for col in svc_bool:
+            meta = col_meta.get(col)
+            if not meta:
+                continue
+            sid, field = meta
+            if field not in allowed_fields:
+                continue
+            current = bool(row.get(col, False))
+            if current != bool(target_value):
+                changes.append((equip_id, sid, field, bool(target_value)))
+    return changes
+
+
+def summarize_change_payload(
+    changes: list[tuple],
+    *,
+    field_labels: dict[str, str],
+    semana: int | None = None,
+) -> list[str]:
+    if not changes:
+        return []
+
+    total = len(changes)
+    checked = sum(1 for _, _, _, nv in changes if bool(nv))
+    unchecked = total - checked
+    per_field: dict[str, int] = {}
+    for _, _, field, _ in changes:
+        per_field[field] = per_field.get(field, 0) + 1
+
+    parts = [f"**{total} alteração(ões)**"]
+    if checked:
+        parts.append(f"{checked} marcação(ões)")
+    if unchecked:
+        parts.append(f"{unchecked} desmarcação(ões)")
+    lines = [" · ".join(parts)]
+
+    detail = " · ".join(
+        f"{field_labels.get(field, field)}: {qty}"
+        for field, qty in sorted(per_field.items(), key=lambda item: field_labels.get(item[0], item[0]))
+    )
+    if detail:
+        lines.append(detail)
+    if semana is not None:
+        lines.append(f"Semana aplicada em tarefas sem semana definida: **{int(semana)}**")
+    return lines
