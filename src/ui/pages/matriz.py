@@ -1550,11 +1550,30 @@ def render_matriz():
                     setor_nome=setor_nome,
                 )
 
-                # FIX #10: auto-expandir setores críticos (0%) ou alvo de
-                # clique no chip
+                # Lazy load real por setor: só renderiza o conteúdo quando aberto
                 _auto_expand = (_pct_s == 0) or (setor_nome == _chip_target)
+                if _auto_expand and not _sector_is_open(revisao_id, grupo_id, setor_nome):
+                    _sector_set_open(revisao_id, grupo_id, setor_nome, True)
 
-                with st.expander(_lbl_exp, expanded=_auto_expand):
+                _sector_open = _sector_is_open(revisao_id, grupo_id, setor_nome)
+
+                with st.container(border=True):
+                    _head_l, _head_r = st.columns([0.78, 0.22])
+                    with _head_l:
+                        st.markdown(f"#### {_lbl_exp}")
+                    with _head_r:
+                        _toggle_label = "Ocultar setor" if _sector_open else "Abrir setor"
+                        if st.button(
+                            _toggle_label,
+                            key=f"mtz_toggle_sector_{revisao_id}_{grupo_id}_{setor_nome}".replace(" ", "_"),
+                            use_container_width=True,
+                        ):
+                            _sector_set_open(revisao_id, grupo_id, setor_nome, not _sector_open)
+                            st.rerun()
+
+                    if not _sector_open:
+                        st.caption("Clique em **Abrir setor** para carregar a grade e editar apenas este setor.")
+                        continue
                     df, col_meta, obs_map = build_sector_frame(
                         equipamentos=eqs,
                         svc_ids=svc_ids_v,
