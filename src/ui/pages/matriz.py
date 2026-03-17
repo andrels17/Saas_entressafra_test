@@ -1064,7 +1064,6 @@ def render_matriz():
                     value=int(st.session_state["matriz_limit_eq"]),
                     step=20,
                     key="mtz_lim_pick",
-                    use_container_width=True,
                 )
                 tcol, bcol = st.columns([0.8, 1.2], gap="small")
                 with tcol:
