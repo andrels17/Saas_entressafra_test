@@ -82,6 +82,51 @@ def _risk_score(pct: int) -> int:
     return int(score)
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _build_task_maps(_tarefas_json: str):
+    """Pré-computa mapas O(1) a partir das tarefas serializadas."""
+    import json
+
+    tarefas = json.loads(_tarefas_json or "[]")
+    task_map = {}
+    obs_map = {}
+    status_map = {}
+    week_map = {}
+
+    for t in tarefas:
+        eid = t.get("equipamento_id")
+        sid = t.get("servico_id")
+        if not eid or not sid:
+            continue
+        key = (eid, sid)
+        task_map[key] = t
+        obs = t.get("observacao")
+        if obs:
+            obs_map[key] = obs
+        status_map[key] = t.get("status") or "pendente"
+        week_map[key] = t.get("semana")
+
+    return task_map, obs_map, status_map, week_map
+
+
+def _svc_name_map(servicos: list[dict]) -> dict[str, str]:
+    return {str(s.get("id")): s.get("nome", "") for s in servicos if s.get("id")}
+
+
+def _eq_label_map(equipamentos: list[dict]) -> dict[str, str]:
+    out = {}
+    for e in equipamentos:
+        eid = str(e.get("id") or "")
+        if not eid:
+            continue
+        out[eid] = str(e.get("frota") or e.get("codigo") or eid)
+    return out
+
+
+def _task_key(equipamento_id, servico_id):
+    return (str(equipamento_id), str(servico_id))
+
+
 def _pct_bar_html(pct: int, height: int = 6) -> str:
     color = _risk_color(pct)
     w = max(0, min(100, pct))
@@ -1639,11 +1684,12 @@ def render_matriz():
                             for key, obs_txt in obs_map.items():
                                 eid_k, sid_k = key.split("__")
                                 eq_n = eq_label_short.get(eid_k, eid_k)
-                                svc_n = next(
-                                    (s.get("nome") for s in svs if s.get("id") == sid_k), sid_k)
+                                _svc_names = _svc_name_map(svs)
+                                svc_n = _svc_names.get(str(sid_k), sid_k)
                                 st.markdown(
                                     f"**Frota {eq_n}** · {svc_n}: _{obs_txt}_")
 
+                    _svc_names = _svc_name_map(svs)
                     kb = f"mat_ed_{revisao_id}_{grupo_id}_{setor_nome}".replace(
                         " ", "_")
                     mode = st.radio(
@@ -1713,8 +1759,7 @@ def render_matriz():
                                     nv = bool(row[col])
                                     if ov != nv:
                                         sid, field = col_meta[col]
-                                        changes.append(
-                                            (equip_id, sid, field, nv))
+                                        changes.append((equip_id, sid, field, nv))
                             if not changes:
                                 st.session_state.pop(
                                     _pending_changes_key, None)
@@ -1726,8 +1771,8 @@ def render_matriz():
                                 _prev_lines = []
                                 for eid, sid, field, nv in changes[:8]:
                                     _eq_n = eq_label_short.get(eid, str(eid))
-                                    _sv_n = next(
-                                        (s.get("nome", "") for s in svs if s.get("id") == sid), sid)
+                                    _svc_names = _svc_name_map(svs)
+                                    _sv_n = _svc_names.get(str(sid), sid)
                                     _icon = "✅" if nv else "☐"
                                     _prev_lines.append(
                                         f"- Frota **{_eq_n}** · {_sv_n} · **{_field_lbl.get(field, field)}** → {_icon}")
