@@ -57,7 +57,8 @@ from src.ui.pages.matriz_runtime import (
 
 
 
-def ____render_selection_context(
+
+def _render_selection_context(
     *,
     is_group_view: bool,
     grupos: list[dict],
@@ -66,10 +67,12 @@ def ____render_selection_context(
     is_admin: bool,
     dept_name_fn,
 ) -> tuple[bool, bool]:
-    """Renderiza chips/contexto da seleção e retorna ações do usuário."""
-    col_chip, col_actions = st.columns([1.6, 1.2])
+    clear_dept = False
+    show_all = False
 
-    with col_chip:
+    col1, col2, col3 = st.columns([2, 1, 1])
+
+    with col1:
         if is_group_view:
             gn = next((g.get("nome") for g in grupos if g.get("id") == grupo_id), "—")
             st.markdown(
@@ -83,16 +86,22 @@ def ____render_selection_context(
                 unsafe_allow_html=True,
             )
 
-    with col_actions:
-        if not is_group_view and is_admin:
-            c1, c2 = st.columns(2)
-            with c1:
-                clear_dept = st.button("Limpar depto", key="mtz_clear_dept", use_container_width=True)
-            with c2:
-                show_all = st.button("Ver todos", key="mtz_show_all", use_container_width=True)
-            return clear_dept, show_all
+    if not is_group_view and is_admin:
+        with col2:
+            clear_dept = st.button(
+                "Limpar depto",
+                key="mtz_clear_dept",
+                use_container_width=True,
+            )
+        with col3:
+            show_all = st.button(
+                "Ver todos",
+                key="mtz_show_all",
+                use_container_width=True,
+            )
 
-    return False, False
+    return clear_dept, show_all
+
 
 
 
