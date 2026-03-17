@@ -142,6 +142,14 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
   color:rgba(255,255,255,.88);font-size:.78rem}
 .mtz-preview-box{padding:10px 12px;border-radius:14px;
   border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03)}
+.mtz-toolbar{position:sticky;top:68px;z-index:50;margin:8px 0 14px 0;padding:12px;border-radius:16px;
+  border:1px solid rgba(255,255,255,.10);background:rgba(18,18,18,.92);backdrop-filter:blur(10px);
+  box-shadow:0 10px 24px rgba(0,0,0,.22)}
+.mtz-toolbar-summary{font-size:.82rem;color:rgba(255,255,255,.72);margin-top:6px}
+.mtz-toolbar-summary b{color:rgba(255,255,255,.95)}
+.mtz-sector-pending{display:inline-flex;align-items:center;justify-content:center;min-width:72px;padding:4px 10px;
+  border-radius:999px;border:1px solid rgba(245,158,11,.30);background:rgba(245,158,11,.12);
+  color:rgba(255,255,255,.90);font-size:.78rem;font-weight:600;white-space:nowrap}
 </style>""", unsafe_allow_html=True)
 
 
@@ -233,6 +241,42 @@ def _stash_pending_sector_changes(*, state_key: str, preview_key: str, summary_k
         field_labels=field_labels,
         semana=semana_lote,
     )
+
+
+def _pending_state_keys(kb: str) -> tuple[str, str, str]:
+    return (
+        f"pending_changes_{kb}",
+        f"pending_preview_{kb}",
+        f"pending_summary_{kb}",
+    )
+
+
+def _clear_pending_state(*keys: str) -> None:
+    for key in keys:
+        st.session_state.pop(key, None)
+
+
+def _clear_group_pending_changes(*, revisao_id, grupo_id, setor_nomes: list[str]) -> int:
+    cleared = 0
+    for setor_nome in setor_nomes:
+        kb = f"mat_ed_{revisao_id}_{grupo_id}_{setor_nome}".replace(" ", "_")
+        changes_key, preview_key, summary_key = _pending_state_keys(kb)
+        if st.session_state.get(changes_key):
+            cleared += len(st.session_state.get(changes_key) or [])
+        _clear_pending_state(changes_key, preview_key, summary_key)
+    return cleared
+
+
+def _pending_counts_by_sector(*, revisao_id, grupo_id, setor_nomes: list[str]) -> tuple[dict[str, int], int]:
+    counts: dict[str, int] = {}
+    total = 0
+    for setor_nome in setor_nomes:
+        kb = f"mat_ed_{revisao_id}_{grupo_id}_{setor_nome}".replace(" ", "_")
+        changes_key, _, _ = _pending_state_keys(kb)
+        qty = len(st.session_state.get(changes_key) or [])
+        counts[setor_nome] = qty
+        total += qty
+    return counts, total
 
 
 def _reportlab_available() -> bool:
@@ -1556,41 +1600,80 @@ def render_matriz():
             st.markdown("### Drill-down por setor")
             st.caption(
                 "Marque as etapas (D/R/M) direto na tabela. Setores 🔴 são prioridade — expanda para editar.")
-            fc1, fc2, fc3 = st.columns([1, 1.5, 1.5])
-            with fc1:
-                atraso_dias = st.number_input(
-                    "Atraso (dias)",
-                    min_value=1,
-                    max_value=90,
-                    value=int(
-                        st.session_state.get(
-                            "matriz_atraso_dias",
-                            7)),
-                    step=1,
-                    key="mtz_atraso_in",
-                    help="Marca coluna M como atraso quando passou mais de X dias.")
-                st.session_state["matriz_atraso_dias"] = int(atraso_dias)
-            with fc2:
-                # Melhoria 4: filtro de semana
-                sem_opts = ["Todas as semanas"] + \
-                    [f"Semana {s}" for s in semanas_disp]
-                sem_pick = st.selectbox(
-                    "Filtrar por semana",
-                    sem_opts,
-                    index=0,
-                    key="mtz_sem_pick")
-                semana_filtro = None if sem_pick == "Todas as semanas" else int(
-                    sem_pick.split()[-1])
-            with fc3:
-                semana_lote = st.number_input(
-                    "📅 Semana do apontamento",
-                    min_value=0, max_value=99,
-                    value=int(_semana_sugerida),
-                    step=1, key="mtz_semana_lote",
-                    help=f"Semana sugerida automaticamente ({_semana_sugerida}) com base na data de início da revisão. "
-                    "Altere se estiver registrando uma etapa de outra semana. "
-                    "Aplicada apenas em tarefas que ainda não têm semana definida."
+
+            setor_names_sorted = sorted(setor_to_services.keys(), key=lambda x: x.lower())
+            pending_counts_map, pending_total_all = _pending_counts_by_sector(
+                revisao_id=revisao_id,
+                grupo_id=grupo_id,
+                setor_nomes=setor_names_sorted,
+            )
+            pending_sector_total = sum(1 for qty in pending_counts_map.values() if qty > 0)
+
+            with st.container():
+                st.markdown('<div class="mtz-toolbar">', unsafe_allow_html=True)
+                fc1, fc2, fc3, fc4 = st.columns([0.95, 1.35, 1.2, 1.1])
+                with fc1:
+                    atraso_dias = st.number_input(
+                        "Atraso (dias)",
+                        min_value=1,
+                        max_value=90,
+                        value=int(st.session_state.get("matriz_atraso_dias", 7)),
+                        step=1,
+                        key="mtz_atraso_in",
+                        help="Marca coluna M como atraso quando passou mais de X dias.",
+                    )
+                    st.session_state["matriz_atraso_dias"] = int(atraso_dias)
+                with fc2:
+                    sem_opts = ["Todas as semanas"] + [f"Semana {s}" for s in semanas_disp]
+                    sem_pick = st.selectbox(
+                        "Filtrar por semana",
+                        sem_opts,
+                        index=0,
+                        key="mtz_sem_pick",
+                    )
+                    semana_filtro = None if sem_pick == "Todas as semanas" else int(sem_pick.split()[-1])
+                with fc3:
+                    semana_lote = st.number_input(
+                        "📅 Semana do apontamento",
+                        min_value=0,
+                        max_value=99,
+                        value=int(_semana_sugerida),
+                        step=1,
+                        key="mtz_semana_lote",
+                        help=f"Semana sugerida automaticamente ({_semana_sugerida}) com base na data de início da revisão. "
+                        "Altere se estiver registrando uma etapa de outra semana. "
+                        "Aplicada apenas em tarefas que ainda não têm semana definida.",
+                    )
+                with fc4:
+                    st.markdown("**Ações rápidas**")
+                    clear_all_pending = st.button(
+                        "Limpar seleções pendentes",
+                        key=f"mtz_clear_pending_all_{revisao_id}_{grupo_id}",
+                        use_container_width=True,
+                        disabled=(pending_total_all == 0),
+                    )
+                    st.caption("Remove apenas previews e pendências ainda não confirmadas.")
+
+                st.markdown(
+                    f'<div class="mtz-toolbar-summary">'
+                    f'Setores: <b>{len(setor_names_sorted)}</b> &nbsp;·&nbsp; '
+                    f'Com pendências: <b>{pending_sector_total}</b> &nbsp;·&nbsp; '
+                    f'Alterações aguardando confirmação: <b>{pending_total_all}</b> &nbsp;·&nbsp; '
+                    f'Semana do lote: <b>{int(semana_lote)}</b>'
+                    f'</div>',
+                    unsafe_allow_html=True,
                 )
+                st.markdown('</div>', unsafe_allow_html=True)
+
+            if clear_all_pending:
+                cleared = _clear_group_pending_changes(
+                    revisao_id=revisao_id,
+                    grupo_id=grupo_id,
+                    setor_nomes=setor_names_sorted,
+                )
+                if cleared:
+                    st.toast(f"🧹 {cleared} alteração(ões) pendente(s) removida(s).")
+                st.rerun()
 
             rev_start = pd.to_datetime((rev_row or {}).get("data_inicio") or (
                 rev_row or {}).get("created_at"), errors="coerce", utc=True)
@@ -1601,9 +1684,7 @@ def render_matriz():
             # direto para aquele setor
             _chip_target = st.session_state.pop("mtz_chip_jump", None)
 
-            for setor_nome in sorted(
-                    setor_to_services.keys(),
-                    key=lambda x: x.lower()):
+            for setor_nome in setor_names_sorted:
                 svs = sorted(
                     setor_to_services[setor_nome],
                     key=lambda x: (
@@ -1642,9 +1723,16 @@ def render_matriz():
                 _sector_open = _sector_is_open(revisao_id, grupo_id, setor_nome)
 
                 with st.container(border=True):
-                    _head_l, _head_r = st.columns([0.78, 0.22])
+                    _pending_count = int(pending_counts_map.get(setor_nome, 0))
+                    _head_l, _head_m, _head_r = st.columns([0.66, 0.14, 0.20])
                     with _head_l:
                         st.markdown(f"#### {_lbl_exp}")
+                    with _head_m:
+                        if _pending_count:
+                            st.markdown(
+                                f'<div class="mtz-sector-pending">{_pending_count} pend.</div>',
+                                unsafe_allow_html=True,
+                            )
                     with _head_r:
                         _toggle_label = "Ocultar setor" if _sector_open else "Abrir setor"
                         if st.button(
@@ -1753,9 +1841,7 @@ def render_matriz():
                                     col: st.column_config.CheckboxColumn(col) for col in svc_bool}}, disabled=[
                                 "Status", "Equipamento"])
 
-                    _pending_changes_key = f"pending_changes_{kb}"
-                    _pending_preview_key = f"pending_preview_{kb}"
-                    _pending_summary_key = f"pending_summary_{kb}"
+                    _pending_changes_key, _pending_preview_key, _pending_summary_key = _pending_state_keys(kb)
                     _field_lbl = {
                         "etapa_d": "D",
                         "etapa_r": "R",
