@@ -133,6 +133,15 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
   transition:transform .08s ease,border-color .12s ease,background .12s ease;}
 .mtz-card-grid [data-testid="stButton"] button:hover{
   transform:translateY(-1px);border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.06);}
+.mtz-inline-summary{margin:10px 0 12px 0;padding:10px 12px;border-radius:14px;
+  border:1px solid rgba(18,183,106,.28);background:rgba(18,183,106,.08)}
+.mtz-inline-summary strong{color:rgba(255,255,255,.95)}
+.mtz-change-chip-wrap{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.mtz-change-chip{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;
+  border:1px solid rgba(18,183,106,.24);background:rgba(18,183,106,.10);
+  color:rgba(255,255,255,.88);font-size:.78rem}
+.mtz-preview-box{padding:10px 12px;border-radius:14px;
+  border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03)}
 </style>""", unsafe_allow_html=True)
 
 
@@ -1752,6 +1761,45 @@ def render_matriz():
                         "etapa_r": "R",
                         "etapa_m": "M"}
 
+                    live_changes = []
+                    live_changed_eq = []
+                    live_field_counts = {"etapa_d": 0, "etapa_r": 0, "etapa_m": 0}
+                    if edited is not None:
+                        for equip_id, row in edited.iterrows():
+                            if equip_id not in df_display.index:
+                                continue
+                            row_changed = False
+                            for col in svc_bool:
+                                ov = bool(df_display.loc[equip_id, col])
+                                nv = bool(row[col])
+                                if ov != nv:
+                                    sid, field = col_meta[col]
+                                    live_changes.append((equip_id, sid, field, nv))
+                                    live_field_counts[field] = live_field_counts.get(field, 0) + 1
+                                    row_changed = True
+                            if row_changed:
+                                live_changed_eq.append(eq_label_short.get(equip_id, str(equip_id)))
+
+                    if live_changes:
+                        _live_fields = " · ".join(
+                            f"{_field_lbl.get(field, field)}: {qty}"
+                            for field, qty in live_field_counts.items() if qty
+                        )
+                        st.markdown(
+                            '<div class="mtz-inline-summary">'
+                            f'<strong>{len(live_changes)} alteração(ões) pendentes</strong>'
+                            f' &nbsp;·&nbsp; {len(live_changed_eq)} frota(s) afetada(s)'
+                            + (f' &nbsp;·&nbsp; {_live_fields}' if _live_fields else '')
+                            + '<div class="mtz-change-chip-wrap">'
+                            + "".join(
+                                f'<span class="mtz-change-chip">{eq_name}</span>'
+                                for eq_name in live_changed_eq[:10]
+                            )
+                            + (f'<span class="mtz-change-chip">+{len(live_changed_eq) - 10} outras</span>' if len(live_changed_eq) > 10 else '')
+                            + '</div></div>',
+                            unsafe_allow_html=True,
+                        )
+
                     action_base = edited if edited is not None else df_display
                     with st.container(border=True):
                         st.markdown("**Ações rápidas do setor**")
@@ -1856,6 +1904,7 @@ def render_matriz():
                         _pending_summary_key) or []
                     if pending_changes:
                         with st.container(border=True):
+                            st.markdown('<div class="mtz-preview-box">', unsafe_allow_html=True)
                             st.markdown(
                                 f"**Preview do batch — {len(pending_changes)} alteração(ões)**")
                             for line in pending_summary:
@@ -1870,6 +1919,7 @@ def render_matriz():
                             with c_no:
                                 cancel_now = st.button(
                                     "✖ Cancelar", key=f"no_{kb}", use_container_width=True)
+                            st.markdown('</div>', unsafe_allow_html=True)
 
                         if cancel_now:
                             st.session_state.pop(_pending_changes_key, None)
