@@ -18,6 +18,8 @@ from src.utils.timezone import now_brt as _now_brt
 
 from src.ui.components.filters import select_equipamento, select_grupo, select_revisao
 from src.ui.components.feedback import notice_card, selection_summary
+from src.ui.components.actions import download_action, primary_action_button
+from src.ui.components.forms import validation_summary
 from src.ui.core.styles import page_header as _ph
 from src.ui.core.cache import bump_data_version
 from src.ui.core.confirm_dialog import confirm_dialog
@@ -412,9 +414,12 @@ def _fragment_editor(
                  "travado" and not (c.get("observacao") or "").strip()]
     if invalidos:
         n = len(invalidos)
-        st.error(
-            f"{'Um item' if n == 1 else f'{n} itens'} "
-            "marcado(s) como Travado sem observacao. Preencha o campo antes de salvar."
+        validation_summary(
+            [
+                f"{'Um item foi marcado' if n == 1 else f'{n} itens foram marcados'} como Travado sem observação.",
+                "Preencha o campo Observação antes de salvar.",
+            ],
+            title="Existem validações pendentes no apontamento",
         )
         st.stop()
 
@@ -429,28 +434,19 @@ def _fragment_editor(
     _col_save, _col_xlsx = st.columns([0.75, 0.25])
     with _col_xlsx:
         try:
-            st.download_button(
+            download_action(
                 "Exportar XLSX",
-                icon=":material/download:",
-                data=df_to_xlsx(
-                    _exp_df,
-                    sheet_name="Apontamento"),
+                data=df_to_xlsx(_exp_df, sheet_name="Apontamento"),
                 file_name="apontamento.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
                 key="apt_xlsx_btn",
+                help="Baixa a visão filtrada atual em Excel.",
             )
         except Exception:
             pass  # openpyxl nao disponivel
 
     with _col_save:
-        if st.button(
-            "Salvar alteracoes",
-            icon=":material/save:",
-            type="primary",
-            use_container_width=True,
-            key="apt_save_btn",
-        ):
+        if primary_action_button("Salvar alteracoes", key="apt_save_btn", help="Aplica as alterações pendentes nas tarefas exibidas."):
             st.session_state["_apt_confirm_save"] = True
 
     # Dialogo de confirmacao

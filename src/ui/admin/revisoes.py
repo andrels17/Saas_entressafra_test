@@ -1,4 +1,11 @@
 from src.ui.components.filters import select_revisao
+from src.ui.components.forms import (
+    form_section,
+    form_submit_button,
+    validate_required,
+    validate_date_range,
+    validation_summary,
+)
 from src.ui.core.styles import page_header as _ph
 import math
 import streamlit as st
@@ -259,10 +266,10 @@ def render_admin_revisoes():
     tab1, tab2 = st.tabs(["Revisões", "Gerar / Sincronizar Matriz"])
 
     with tab1:
-        st.markdown("### Criar revisão")
-        st.info(
-            "Se o seu banco tiver alguma política/trigger recursiva em `revisoes`, o insert pode estourar stack. "
-            "Para evitar travar o app, a criação aqui usa **Service Role** (bypassa RLS).")
+        form_section(
+            "Criar revisão",
+            "Se o seu banco tiver alguma política/trigger recursiva em `revisoes`, o insert pode estourar stack. Para evitar travar o app, a criação aqui usa Service Role (bypassa RLS).",
+        )
 
         titulo = st.text_input(
             "Título",
@@ -385,28 +392,22 @@ def render_admin_revisoes():
                     with col:
                         st.caption(texto)
 
-        submitted = st.button(
+        submitted = form_submit_button(
             "Criar revisão",
-            use_container_width=True,
-            key="rev_submit")
+            key="rev_submit",
+            help="Valida os campos e cria a revisão com as semanas calculadas.",
+        )
 
         if submitted:
             t = (titulo or "").strip()
-            if not t:
-                st.warning("Informe um título.")
+            errors = []
+            errors.extend(validate_required({"o título": t}))
+            errors.extend(validate_date_range(dt_ini, dt_fim))
+            if errors:
+                validation_summary(errors, title="Revise os campos da nova revisão")
                 st.stop()
 
             payload = {"tenant_id": tenant_id, "titulo": t, "status": "ativa"}
-            if not dt_ini:
-                st.warning("Informe a data de início.")
-                st.stop()
-            if not dt_fim:
-                st.warning("Informe a data final da revisão.")
-                st.stop()
-            if dt_fim < dt_ini:
-                st.warning("A data fim não pode ser menor que a data início.")
-                st.stop()
-
             payload["data_inicio"] = str(dt_ini)
             payload["data_fim"] = str(dt_fim)
             if semanas_total > 0:
