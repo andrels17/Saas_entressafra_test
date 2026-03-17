@@ -41,7 +41,6 @@ from src.ui.pages.matriz_sector import (
     sector_progress_label,
     sector_summary_metrics,
 )
-from src.ui.pages.matriz_selection import render_selection_context as _render_selection_context
 from src.ui.pages.matriz_runtime import (
     build_task_maps as _build_task_maps,
     bulk_update_tasks as _bulk_update_tasks,
@@ -56,6 +55,55 @@ from src.ui.pages.matriz_runtime import (
     task_key as _task_key,
 )
 
+
+
+
+
+
+def _render_selection_context(
+    *,
+    is_group_view: bool,
+    grupos: list[dict],
+    grupo_id,
+    departamento_id,
+    is_admin: bool,
+    dept_name_fn,
+) -> tuple[bool, bool]:
+    """Renderiza o contexto da seleção sem quebrar a toolbar em telas estreitas."""
+    clear_dept = False
+    show_all = False
+
+    if is_group_view:
+        gn = next((g.get("nome") for g in grupos if g.get("id") == grupo_id), "—")
+        st.markdown(
+            f'<div class="enterprise-chip"><strong>Grupo:</strong> {gn}</div>',
+            unsafe_allow_html=True,
+        )
+        return False, False
+
+    if departamento_id and is_admin:
+        dn = dept_name_fn(departamento_id) or "(departamento)"
+        st.markdown(
+            f'<div class="enterprise-chip"><strong>Depto:</strong> {dn}</div>',
+            unsafe_allow_html=True,
+        )
+
+    if is_admin:
+        a1, a2 = st.columns(2, gap="small")
+        with a1:
+            clear_dept = st.button(
+                "Limpar depto",
+                key="mtz_clear_dept",
+                use_container_width=True,
+            )
+        with a2:
+            show_all = st.button(
+                "Ver todos",
+                key="mtz_show_all",
+                use_container_width=True,
+            )
+
+    return clear_dept, show_all
 
 
 def _inject_css():
@@ -958,7 +1006,7 @@ def render_matriz():
                 '<div class="enterprise-sticky">',
                 unsafe_allow_html=True)
             c1, c2, c3, c4 = st.columns(
-                [2.7, 1.1, 1.7, 1.5], vertical_alignment="bottom")
+                [2.2, 1.8, 1.55, 1.65], vertical_alignment="bottom")
             with c1:
                 st.markdown(
                     '<div class="enterprise-title">Matriz Operacional</div>',
@@ -1010,24 +1058,37 @@ def render_matriz():
                     st.session_state["matriz_revisao_id"] = rmap[pick]
             with c4:
                 st.session_state["matriz_limit_eq"] = st.number_input(
-                    "Limite eq.", min_value=20, max_value=500, value=int(
-                        st.session_state["matriz_limit_eq"]), step=20, key="mtz_lim_pick")
-                st.session_state["matriz_show_legend"] = st.toggle(
-                    "Legenda", value=bool(st.session_state["matriz_show_legend"]), key="mtz_leg")
-                if st.button(
-                    "Recarregar",
-                    key="mtz_reload",
-                        use_container_width=True):
-                    bump_data_version()
-                    clear_cached_functions(
-                        _load_payload,
-                        _group_kpis,
-                        _all_dept_names,
-                        _build_task_maps,
-                        _filter_obs_map_for_sector,
-                        _normalize_service_ids,
+                    "Limite eq.",
+                    min_value=20,
+                    max_value=500,
+                    value=int(st.session_state["matriz_limit_eq"]),
+                    step=20,
+                    key="mtz_lim_pick",
+                    use_container_width=True,
+                )
+                tcol, bcol = st.columns([0.8, 1.2], gap="small")
+                with tcol:
+                    st.session_state["matriz_show_legend"] = st.toggle(
+                        "Legenda",
+                        value=bool(st.session_state["matriz_show_legend"]),
+                        key="mtz_leg",
                     )
-                    st.rerun()
+                with bcol:
+                    if st.button(
+                        "Recarregar",
+                        key="mtz_reload",
+                        use_container_width=True,
+                    ):
+                        bump_data_version()
+                        clear_cached_functions(
+                            _load_payload,
+                            _group_kpis,
+                            _all_dept_names,
+                            _build_task_maps,
+                            _filter_obs_map_for_sector,
+                            _normalize_service_ids,
+                        )
+                        st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
         # Tela de selecao — cards com barra de progresso (Melhoria 3)
