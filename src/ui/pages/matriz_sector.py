@@ -165,3 +165,117 @@ def summarize_change_payload(
     if semana is not None:
         lines.append(f"Semana aplicada em tarefas sem semana definida: **{int(semana)}**")
     return lines
+
+
+
+def build_sector_intelligence(
+    *,
+    equipamentos: list[dict],
+    svc_ids: list[str],
+    task_map: dict,
+    setor_nome: str,
+    atraso_dias: int = 7,
+    days_since_start: int = 0,
+) -> dict[str, Any]:
+    eq_total = len(equipamentos)
+    total_steps = max(len(svc_ids) * 3, 1)
+    pct_values: list[int] = []
+    eq_critical = 0
+    eq_not_started = 0
+    eq_done_full = 0
+    atraso_m = 0
+    done_steps = 0
+
+    for e in equipamentos:
+        done_eq = 0
+        missing_mount_eq = 0
+        for sid in svc_ids:
+            t = task_map.get((e["id"], sid)) or {}
+            d = bool(t.get("etapa_d"))
+            r = bool(t.get("etapa_r"))
+            m = bool(t.get("etapa_m"))
+            done_eq += int(d) + int(r) + int(m)
+            if not m:
+                missing_mount_eq += 1
+        pct_eq = round((done_eq / total_steps) * 100)
+        pct_values.append(pct_eq)
+        done_steps += done_eq
+        eq_critical += int(pct_eq < 50)
+        eq_not_started += int(pct_eq == 0)
+        eq_done_full += int(pct_eq >= 100)
+        if days_since_start > atraso_dias and missing_mount_eq > 0:
+            atraso_m += 1
+
+    pct_setor = round((done_steps / max(eq_total * len(svc_ids) * 3, 1)) * 100)
+    avg_pct = round(sum(pct_values) / max(len(pct_values), 1)) if pct_values else 0
+    risk_score = (eq_critical * 3) + (eq_not_started * 2) + atraso_m + max(0, 70 - pct_setor) // 10
+    if pct_setor >= 85 and eq_critical == 0:
+        risk_level = "baixo"
+        risk_icon = "🟢"
+    elif pct_setor >= 60 and eq_critical <= max(1, eq_total // 4):
+        risk_level = "moderado"
+        risk_icon = "🟡"
+    else:
+        risk_level = "alto"
+        risk_icon = "🔴"
+
+    recommendation = "Manter ritmo atual."
+    if atraso_m:
+        recommendation = "Priorize montagens pendentes deste setor."
+    elif eq_not_started >= max(2, eq_total // 3 if eq_total else 2):
+        recommendation = "Há muitas frotas sem início; vale redistribuir carga."
+    elif eq_critical:
+        recommendation = "Revisar frotas críticas antes do próximo lote."
+
+    return {
+        "setor": setor_nome,
+        "pct": pct_setor,
+        "pct_medio": avg_pct,
+        "eq_total": eq_total,
+        "eq_critical": eq_critical,
+        "eq_not_started": eq_not_started,
+        "eq_done_full": eq_done_full,
+        "atraso_m": atraso_m,
+        "risk_score": int(risk_score),
+        "risk_level": risk_level,
+        "risk_icon": risk_icon,
+        "recommendation": recommendation,
+    }
+
+
+def build_global_intelligence_summary(sector_infos: list[dict[str, Any]]) -> dict[str, Any]:
+    if not sector_infos:
+        return {
+            "critical_sectors": 0,
+            "critical_equipment": 0,
+            "delayed_sectors": 0,
+            "top_risks": [],
+            "alerts": [],
+        }
+
+    ordered = sorted(
+        sector_infos,
+        key=lambda item: (item.get("risk_score", 0), item.get("eq_critical", 0), -item.get("pct", 0)),
+        reverse=True,
+    )
+    critical_sectors = sum(1 for item in sector_infos if item.get("risk_level") == "alto")
+    critical_equipment = sum(int(item.get("eq_critical") or 0) for item in sector_infos)
+    delayed_sectors = sum(1 for item in sector_infos if int(item.get("atraso_m") or 0) > 0)
+
+    alerts: list[str] = []
+    if critical_sectors:
+        alerts.append(f"{critical_sectors} setor(es) em risco alto neste grupo.")
+    if critical_equipment:
+        alerts.append(f"{critical_equipment} frota(s) crítica(s) abaixo de 50%.")
+    if delayed_sectors:
+        alerts.append(f"{delayed_sectors} setor(es) com montagem pendente além do limite de atraso.")
+    if not alerts:
+        alerts.append("Nenhum alerta crítico no momento.")
+
+    return {
+        "critical_sectors": critical_sectors,
+        "critical_equipment": critical_equipment,
+        "delayed_sectors": delayed_sectors,
+        "top_risks": ordered[:3],
+        "alerts": alerts,
+    }

@@ -39,6 +39,8 @@ from src.ui.pages.matriz_sector import (
     build_change_preview_lines,
     build_mass_toggle_changes,
     build_sector_frame,
+    build_sector_intelligence,
+    build_global_intelligence_summary,
     sector_progress_label,
     sector_summary_metrics,
     summarize_change_payload,
@@ -155,7 +157,15 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
   color:rgba(255,255,255,.92);font-weight:600}
 .mtz-warn-box{padding:10px 12px;border-radius:14px;margin:8px 0 10px 0;
   border:1px solid rgba(245,158,11,.30);background:rgba(245,158,11,.10)}
-.mtz-op-note{font-size:.78rem;color:rgba(255,255,255,.70);margin-top:4px}
+.mtz-intel-panel{margin:6px 0 14px 0;padding:12px 14px;border-radius:16px;border:1px solid rgba(56,189,248,.18);background:linear-gradient(180deg, rgba(56,189,248,.08), rgba(255,255,255,.03));}
+.mtz-intel-alert{padding:8px 10px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);font-size:.82rem;margin-top:6px}
+.mtz-intel-risk{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);height:100%}
+.mtz-intel-risk small{display:block;color:rgba(255,255,255,.62);margin-top:4px}
+.mtz-sector-chip{display:inline-flex;align-items:center;justify-content:center;padding:4px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);font-size:.76rem;font-weight:600;white-space:nowrap}
+.mtz-sector-chip.bad{border-color:rgba(239,68,68,.28);background:rgba(239,68,68,.10)}
+.mtz-sector-chip.warn{border-color:rgba(245,158,11,.28);background:rgba(245,158,11,.10)}
+.mtz-sector-chip.ok{border-color:rgba(34,197,94,.28);background:rgba(34,197,94,.10)}
+.mtz-sector-reco{font-size:.8rem;color:rgba(255,255,255,.72);margin-top:6px}
 </style>""", unsafe_allow_html=True)
 
 
@@ -1637,12 +1647,34 @@ def render_matriz():
                 "Marque as etapas (D/R/M) direto na tabela. Setores 🔴 são prioridade — expanda para editar.")
 
             setor_names_sorted = sorted(setor_to_services.keys(), key=lambda x: x.lower())
+            rev_start = pd.to_datetime((rev_row or {}).get("data_inicio") or (
+                rev_row or {}).get("created_at"), errors="coerce", utc=True)
+            if pd.isna(rev_start):
+                rev_start = pd.Timestamp(_now_utc()).normalize()
             pending_counts_map, pending_total_all = _pending_counts_by_sector(
                 revisao_id=revisao_id,
                 grupo_id=grupo_id,
                 setor_nomes=setor_names_sorted,
             )
             pending_sector_total = sum(1 for qty in pending_counts_map.values() if qty > 0)
+            _days_since_start = int((pd.Timestamp(_now_utc()) - rev_start).days) if isinstance(rev_start, pd.Timestamp) else 0
+            sector_intel_rows = []
+            for _setor_nome in setor_names_sorted:
+                _svs_intel = sorted(setor_to_services[_setor_nome], key=lambda x: (x.get("nome") or "").lower())
+                _svc_ids_intel = [s["id"] for s in _svs_intel if s.get("id")]
+                if not _svc_ids_intel:
+                    continue
+                sector_intel_rows.append(
+                    build_sector_intelligence(
+                        equipamentos=eqs,
+                        svc_ids=_svc_ids_intel,
+                        task_map=task_map,
+                        setor_nome=_setor_nome,
+                        atraso_dias=int(atraso_dias),
+                        days_since_start=_days_since_start,
+                    )
+                )
+            intel_summary = build_global_intelligence_summary(sector_intel_rows)
 
             with st.container():
                 st.markdown('<div class="mtz-toolbar">', unsafe_allow_html=True)
@@ -1698,6 +1730,28 @@ def render_matriz():
                     f'</div>',
                     unsafe_allow_html=True,
                 )
+                st.markdown('</div>', unsafe_allow_html=True)
+
+            if sector_intel_rows:
+                st.markdown('<div class="mtz-intel-panel">', unsafe_allow_html=True)
+                ia, ib, ic = st.columns(3)
+                ia.metric("Setores em risco alto", int(intel_summary.get("critical_sectors", 0)))
+                ib.metric("Frotas críticas", int(intel_summary.get("critical_equipment", 0)))
+                ic.metric("Setores com atraso", int(intel_summary.get("delayed_sectors", 0)))
+                for _alert in intel_summary.get("alerts", []):
+                    st.markdown(f'<div class="mtz-intel-alert">⚠️ {_alert}</div>', unsafe_allow_html=True)
+                _top_risks = intel_summary.get("top_risks") or []
+                if _top_risks:
+                    st.markdown("**Top 3 setores para priorizar agora**")
+                    _risk_cols = st.columns(min(len(_top_risks), 3))
+                    for _idx, _risk in enumerate(_top_risks):
+                        with _risk_cols[_idx]:
+                            st.markdown(
+                                f'<div class="mtz-intel-risk"><strong>{_risk.get("risk_icon", "🔎")} {_risk.get("setor", "-")}</strong>'
+                                f'<br>{int(_risk.get("pct", 0))}% concluído · {int(_risk.get("eq_critical", 0))} crítica(s)'
+                                f'<small>{_risk.get("recommendation", "")}</small></div>',
+                                unsafe_allow_html=True,
+                            )
                 st.markdown('</div>', unsafe_allow_html=True)
 
             if clear_all_pending:
@@ -1759,7 +1813,8 @@ def render_matriz():
 
                 with st.container(border=True):
                     _pending_count = int(pending_counts_map.get(setor_nome, 0))
-                    _head_l, _head_m, _head_r = st.columns([0.66, 0.14, 0.20])
+                    _intel = next((row for row in sector_intel_rows if row.get("setor") == setor_nome), {})
+                    _head_l, _head_m, _head_r = st.columns([0.56, 0.20, 0.24])
                     with _head_l:
                         st.markdown(f"#### {_lbl_exp}")
                     with _head_m:
@@ -1777,6 +1832,34 @@ def render_matriz():
                         ):
                             _sector_set_open(revisao_id, grupo_id, setor_nome, not _sector_open)
                             st.rerun()
+
+                    _chip1, _chip2, _chip3, _chip4 = st.columns(4)
+                    with _chip1:
+                        _risk_cls = "bad" if _intel.get("risk_level") == "alto" else ("warn" if _intel.get("risk_level") == "moderado" else "ok")
+                        st.markdown(
+                            f'<div class="mtz-sector-chip {_risk_cls}">{_intel.get("risk_icon", "🔎")} risco {str(_intel.get("risk_level", "-")).title()}</div>',
+                            unsafe_allow_html=True,
+                        )
+                    with _chip2:
+                        st.markdown(
+                            f'<div class="mtz-sector-chip">Críticas: {int(_intel.get("eq_critical", 0))}</div>',
+                            unsafe_allow_html=True,
+                        )
+                    with _chip3:
+                        st.markdown(
+                            f'<div class="mtz-sector-chip">Sem início: {int(_intel.get("eq_not_started", 0))}</div>',
+                            unsafe_allow_html=True,
+                        )
+                    with _chip4:
+                        st.markdown(
+                            f'<div class="mtz-sector-chip">Atraso M: {int(_intel.get("atraso_m", 0))}</div>',
+                            unsafe_allow_html=True,
+                        )
+                    if _intel.get("recommendation"):
+                        st.markdown(
+                            f'<div class="mtz-sector-reco">💡 {_intel.get("recommendation")}</div>',
+                            unsafe_allow_html=True,
+                        )
 
                     if not _sector_open:
                         st.caption("Clique em **Abrir setor** para carregar a grade e editar apenas este setor.")
