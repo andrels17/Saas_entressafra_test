@@ -58,6 +58,8 @@ from src.ui.pages.matriz_runtime import (
 
 
 
+
+
 def _render_selection_context(
     *,
     is_group_view: bool,
@@ -70,30 +72,28 @@ def _render_selection_context(
     clear_dept = False
     show_all = False
 
-    col1, col2, col3 = st.columns([2, 1, 1])
+    if is_group_view:
+        gn = next((g.get("nome") for g in grupos if g.get("id") == grupo_id), "—")
+        st.markdown(
+            f'<div class="enterprise-chip"><strong>Grupo:</strong> {gn}</div>',
+            unsafe_allow_html=True,
+        )
+        return False, False
 
-    with col1:
-        if is_group_view:
-            gn = next((g.get("nome") for g in grupos if g.get("id") == grupo_id), "—")
-            st.markdown(
-                f'<div class="enterprise-chip"><strong>Grupo:</strong> {gn}</div>',
-                unsafe_allow_html=True,
-            )
-        elif departamento_id and is_admin:
-            dn = dept_name_fn(departamento_id) or "(departamento)"
-            st.markdown(
-                f'<div class="enterprise-chip"><strong>Depto:</strong> {dn}</div>',
-                unsafe_allow_html=True,
-            )
+    if departamento_id and is_admin:
+        dn = dept_name_fn(departamento_id) or "(departamento)"
+        st.markdown(
+            f'<div class="enterprise-chip"><strong>Depto:</strong> {dn}</div>',
+            unsafe_allow_html=True,
+        )
 
-    if not is_group_view and is_admin:
-        with col2:
+    if is_admin:
+        with st.popover("Ações", use_container_width=True):
             clear_dept = st.button(
                 "Limpar depto",
                 key="mtz_clear_dept",
                 use_container_width=True,
             )
-        with col3:
             show_all = st.button(
                 "Ver todos",
                 key="mtz_show_all",
@@ -107,7 +107,8 @@ def _render_selection_context(
 
 
 
-def ___render_selection_context(
+
+def _render_selection_context(
     *,
     is_group_view: bool,
     grupos: list[dict],
@@ -208,9 +209,9 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 .enterprise-divider{height:1px;background:rgba(255,255,255,.08);margin:10px 0}
 .mtz-card-grid{margin-top:6px}
 .mtz-card-grid [data-testid="stButton"] button{
-  width:100%;text-align:left;padding:14px;border-radius:18px;
+  width:100%;text-align:left;padding:10px 12px;border-radius:14px;
   border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04);
-  color:rgba(255,255,255,.92);box-shadow:0 8px 22px rgba(0,0,0,.25);
+  color:rgba(255,255,255,.92);box-shadow:0 6px 16px rgba(0,0,0,.20);
   transition:transform .08s ease,border-color .12s ease,background .12s ease;}
 .mtz-card-grid [data-testid="stButton"] button:hover{
   transform:translateY(-1px);border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.06);}
@@ -1089,7 +1090,7 @@ def render_matriz():
                 '<div class="enterprise-sticky">',
                 unsafe_allow_html=True)
             c1, c2, c3, c4 = st.columns(
-                [2.2, 2.1, 2.0, 1.7], vertical_alignment="center")
+                [2.7, 1.1, 1.7, 1.5], vertical_alignment="bottom")
             with c1:
                 st.markdown(
                     '<div class="enterprise-title">Matriz Operacional</div>',
@@ -1098,7 +1099,7 @@ def render_matriz():
                     '<div class="enterprise-sub">Etapas D/R/M · Setores · Evolucao semanal · Tempos</div>',
                     unsafe_allow_html=True)
             with c2:
-                _clear_dept, _show_all = ___render_selection_context(
+                _clear_dept, _show_all = _render_selection_context(
                     is_group_view=st.session_state.get("matriz_view") == "group",
                     grupos=grupos,
                     grupo_id=st.session_state.get("matriz_grupo_id"),
@@ -1169,18 +1170,18 @@ def render_matriz():
                     "data_version", "0")) if revisao_id else {}
 
             # FIX #9: busca por nome OU departamento, com filtro de status
-            sc1, sc2, sc3 = st.columns([2, 1.5, 1.5])
+            sc1, sc2, sc3 = st.columns([2.2, 1.15, 1.15], vertical_alignment="bottom")
             with sc1:
                 st.session_state.setdefault("matriz_grp_search", "")
                 search = st.text_input(
-                    "🔍 Buscar grupo ou departamento",
+                    "🔎 Buscar",
                     value=st.session_state["matriz_grp_search"],
-                    placeholder="Nome do grupo, departamento…",
+                    placeholder="Grupo ou departamento…",
                     key="mtz_search_in")
                 st.session_state["matriz_grp_search"] = search
             with sc2:
                 _status_filter = st.selectbox(
-                    "Filtrar por status",
+                    "Status",
                     [
                         "Todos",
                         "🔴 Crítico (<50%)",
@@ -1190,7 +1191,7 @@ def render_matriz():
                     index=0,
                     key="mtz_status_filter")
             with sc3:
-                _sort_by = st.selectbox("Ordenar por",
+                _sort_by = st.selectbox("Ordenar",
                                         ["Nome",
                                          "% ↑ (mais atrasados)",
                                          "% ↓ (mais avançados)"],
