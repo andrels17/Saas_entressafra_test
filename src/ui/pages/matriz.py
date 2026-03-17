@@ -1053,15 +1053,11 @@ def render_matriz():
                 )
                 if _clear_dept:
                     st.session_state["matriz_departamento_id"] = None
-                    st.session_state["mtz_last_batch"] = payload if 'payload' in locals() else None
-st.toast("Alterações aplicadas com sucesso")
-st.rerun()
+                    st.rerun()
                 if _show_all:
                     st.session_state["matriz_grp_search"] = ""
                     st.session_state["matriz_departamento_id"] = None
-                    st.session_state["mtz_last_batch"] = payload if 'payload' in locals() else None
-st.toast("Alterações aplicadas com sucesso")
-st.rerun()
+                    st.rerun()
             with c3:
                 rev_opts = [
                     (r.get("titulo") or f"Revisao {
@@ -1101,12 +1097,6 @@ st.rerun()
                         key="mtz_leg",
                     )
                 with bcol:
-                    if st.session_state.get("mtz_last_batch"):
-                        if st.button("Desfazer última ação", use_container_width=True):
-                            st.toast("Última ação desfeita")
-                            st.session_state["mtz_last_batch"] = None
-                            st.rerun()
-
                     if st.button(
                         "Recarregar",
                         key="mtz_reload",
@@ -1121,9 +1111,7 @@ st.rerun()
                             _filter_obs_map_for_sector,
                             _normalize_service_ids,
                         )
-                        st.session_state["mtz_last_batch"] = payload if 'payload' in locals() else None
-st.toast("Alterações aplicadas com sucesso")
-st.rerun()
+                        st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
         # Tela de selecao — cards com barra de progresso (Melhoria 3)
@@ -1240,9 +1228,7 @@ st.rerun()
                             help=f"Clique para abrir o grupo {nome}"):
                         st.session_state["matriz_grupo_id"] = gid
                         st.session_state["matriz_view"] = "group"
-                        st.session_state["mtz_last_batch"] = payload if 'payload' in locals() else None
-st.toast("Alterações aplicadas com sucesso")
-st.rerun()
+                        st.rerun()
                     st.markdown(_pct_bar_html(pct), unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
             return
@@ -1273,9 +1259,7 @@ st.rerun()
             st.warning("Voce nao tem acesso a este grupo.")
             if st.button("Voltar", key="mtz_back_noaccess"):
                 st.session_state["matriz_view"] = "select"
-                st.session_state["mtz_last_batch"] = payload if 'payload' in locals() else None
-st.toast("Alterações aplicadas com sucesso")
-st.rerun()
+                st.rerun()
             return
 
         rev_row = next(
@@ -1314,9 +1298,7 @@ st.rerun()
             st.info("Nenhum equipamento no grupo.")
             if st.button("Voltar", key="mtz_back_noeq"):
                 st.session_state["matriz_view"] = "select"
-                st.session_state["mtz_last_batch"] = payload if 'payload' in locals() else None
-st.toast("Alterações aplicadas com sucesso")
-st.rerun()
+                st.rerun()
             return
 
         eq_ids = [e["id"] for e in eqs]
@@ -1345,18 +1327,14 @@ st.rerun()
                         "Grupo sem Template configurado (Admin > Templates).")
                     if st.button("Voltar", key="mtz_back_notpl"):
                         st.session_state["matriz_view"] = "select"
-                        st.session_state["mtz_last_batch"] = payload if 'payload' in locals() else None
-st.toast("Alterações aplicadas com sucesso")
-st.rerun()
+                        st.rerun()
                     return
             except Exception:
                 st.warning(
                     "Grupo sem Template configurado (Admin > Templates).")
                 if st.button("Voltar", key="mtz_back_notpl2"):
                     st.session_state["matriz_view"] = "select"
-                    st.session_state["mtz_last_batch"] = payload if 'payload' in locals() else None
-st.toast("Alterações aplicadas com sucesso")
-st.rerun()
+                    st.rerun()
                 return
 
         tarefas = payload.get("tarefas") or []
@@ -1427,9 +1405,7 @@ st.rerun()
                     key="mtz_back_hdr",
                         use_container_width=True):
                     st.session_state["matriz_view"] = "select"
-                    st.session_state["mtz_last_batch"] = payload if 'payload' in locals() else None
-st.toast("Alterações aplicadas com sucesso")
-st.rerun()
+                    st.rerun()
             # FIX #6: chips clicáveis — cada um é um botão que pula para o
             # setor na aba Matriz
             if setor_rows:
@@ -1450,9 +1426,7 @@ st.rerun()
                             lbl, key=f"chip_setor_{ci}_{r['setor']}".replace(" ", "_"), use_container_width=True, help=f"{r['setor']}: {r['pct_med']}% médio · {r['ok_eq']}/{r['total_eq']} equip. 100%"):
                             st.session_state["mtz_chip_jump"] = r["setor"]
                             _sector_set_open(revisao_id, grupo_id, r["setor"], True)
-                            st.session_state["mtz_last_batch"] = payload if 'payload' in locals() else None
-st.toast("Alterações aplicadas com sucesso")
-st.rerun()
+                            st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1670,9 +1644,7 @@ st.rerun()
                             use_container_width=True,
                         ):
                             _sector_set_open(revisao_id, grupo_id, setor_nome, not _sector_open)
-                            st.session_state["mtz_last_batch"] = payload if 'payload' in locals() else None
-st.toast("Alterações aplicadas com sucesso")
-st.rerun()
+                            st.rerun()
 
                     if not _sector_open:
                         st.caption("Clique em **Abrir setor** para carregar a grade e editar apenas este setor.")
@@ -1837,9 +1809,7 @@ st.rerun()
                                 field_labels=_field_lbl,
                                 semana_lote=semana_lote,
                             )
-                            st.session_state["mtz_last_batch"] = payload if 'payload' in locals() else None
-st.toast("Alterações aplicadas com sucesso")
-st.rerun()
+                            st.rerun()
 
                     if save_now:
                         if edited is None:
@@ -1876,9 +1846,7 @@ st.rerun()
                                     field_labels=_field_lbl,
                                     semana_lote=semana_lote,
                                 )
-                                st.session_state["mtz_last_batch"] = payload if 'payload' in locals() else None
-st.toast("Alterações aplicadas com sucesso")
-st.rerun()
+                                st.rerun()
 
                     pending_changes = st.session_state.get(
                         _pending_changes_key) or []
@@ -1907,9 +1875,7 @@ st.rerun()
                             st.session_state.pop(_pending_changes_key, None)
                             st.session_state.pop(_pending_preview_key, None)
                             st.session_state.pop(_pending_summary_key, None)
-                            st.session_state["mtz_last_batch"] = payload if 'payload' in locals() else None
-st.toast("Alterações aplicadas com sucesso")
-st.rerun()
+                            st.rerun()
 
                         if confirm_now:
                             now_iso = datetime.now(timezone.utc).isoformat()
@@ -1965,9 +1931,7 @@ st.rerun()
                             try:
                                 nav.rerun_keep_menu()
                             except Exception:
-                                st.session_state["mtz_last_batch"] = payload if 'payload' in locals() else None
-st.toast("Alterações aplicadas com sucesso")
-st.rerun()
+                                st.rerun()
 
                     exp_df = df_display.reset_index(drop=True).copy()
                     for c in [
@@ -2478,9 +2442,7 @@ st.rerun()
                                 try:
                                     nav.rerun_keep_menu()
                                 except Exception:
-                                    st.session_state["mtz_last_batch"] = payload if 'payload' in locals() else None
-st.toast("Alterações aplicadas com sucesso")
-st.rerun()
+                                    st.rerun()
                             except Exception as e:
                                 st.error(f"Erro: {e}")
                 with sv_b:
@@ -2491,9 +2453,7 @@ st.rerun()
                             use_container_width=True,
                                 key="mat_clear_obs"):
                             st.session_state["confirm_clear_obs_matriz"] = True
-                            st.session_state["mtz_last_batch"] = payload if 'payload' in locals() else None
-st.toast("Alterações aplicadas com sucesso")
-st.rerun()
+                            st.rerun()
 
                         if confirmation_panel(
                             state_key="confirm_clear_obs_matriz",
@@ -2509,9 +2469,7 @@ st.rerun()
                                 try:
                                     nav.rerun_keep_menu()
                                 except Exception:
-                                    st.session_state["mtz_last_batch"] = payload if 'payload' in locals() else None
-st.toast("Alterações aplicadas com sucesso")
-st.rerun()
+                                    st.rerun()
                             except Exception as e:
                                 st.error(f"Erro: {e}")
 
