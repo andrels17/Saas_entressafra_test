@@ -209,49 +209,37 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 .enterprise-chip.bad{border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.10)}
 .enterprise-divider{height:1px;background:rgba(255,255,255,.08);margin:10px 0}
 
-/* Grid premium dos cards */
-.mtz-card-grid{margin-top:10px}
-.mtz-card-grid [data-testid="stHorizontalBlock"]{align-items:stretch}
-.mtz-card-grid [data-testid="column"]{display:flex;flex-direction:column}
-.mtz-card-grid [data-testid="stButton"]{width:100%}
+/* Cards de grupos — versão estável */
+.mtz-card-grid{margin-top:8px}
+.mtz-card-grid [data-testid="stButton"]{margin-bottom:8px}
 .mtz-card-grid [data-testid="stButton"] button{
   width:100%;
-  min-height:104px;
-  text-align:center;
-  justify-content:center;
-  padding:14px 16px;
-  border-radius:16px;
-  border:1px solid rgba(84,255,165,.16);
-  background:linear-gradient(180deg, rgba(12,78,53,.55), rgba(8,44,31,.92));
+  min-height:88px;
+  padding:12px 14px;
+  border-radius:14px;
+  border:1px solid rgba(84,255,165,.14);
+  background:linear-gradient(180deg, rgba(10,72,48,.52), rgba(7,40,28,.88));
   color:rgba(255,255,255,.96);
-  box-shadow:0 8px 18px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.04);
-  transition:transform .14s ease, border-color .16s ease, box-shadow .16s ease, background .16s ease;
+  box-shadow:0 6px 14px rgba(0,0,0,.18);
+  transition:transform .12s ease, border-color .14s ease, box-shadow .14s ease;
   white-space:normal;
-  line-height:1.45;
+  line-height:1.42;
   font-weight:600;
+  text-align:center;
 }
 .mtz-card-grid [data-testid="stButton"] button:hover{
-  transform:translateY(-2px);
-  border-color:rgba(110,255,180,.34);
-  background:linear-gradient(180deg, rgba(15,96,64,.62), rgba(10,52,36,.96));
-  box-shadow:0 14px 28px rgba(0,0,0,.28), 0 0 0 1px rgba(110,255,180,.10);
-}
-.mtz-card-grid [data-testid="stButton"] button:focus{
-  box-shadow:0 0 0 2px rgba(110,255,180,.20), 0 14px 28px rgba(0,0,0,.28);
-}
-.mtz-card-grid [data-testid="stMarkdownContainer"] p{
-  margin-bottom:0;
+  transform:translateY(-1px);
+  border-color:rgba(110,255,180,.24);
+  box-shadow:0 10px 20px rgba(0,0,0,.22);
 }
 .mtz-card-grid .mtz-pct-outer{
-  margin-top:8px;
+  margin:0 8px 16px 8px;
   border-radius:999px;
   background:rgba(255,255,255,.08);
   overflow:hidden;
-  box-shadow:inset 0 1px 2px rgba(0,0,0,.22);
 }
 .mtz-card-grid .mtz-pct-inner{
   border-radius:999px;
-  box-shadow:0 0 12px rgba(255,255,255,.08);
 }
 .mtz-card-grid .mtz-pct-caption{
   margin-top:4px;
@@ -282,7 +270,7 @@ def _pct_bar_html(pct: int, height: int = 6) -> str:
     w = max(0, min(100, pct))
     return (
         f'<div class="mtz-pct-outer" style="height:{height}px">'
-        f'<div class="mtz-pct-inner" style="width:{w}%;background:{color};height:{height}px;transition:width .35s ease"></div>'
+        f'<div class="mtz-pct-inner" style="width:{w}%;background:{color};height:{height}px;transition:width .25s ease"></div>'
         f'</div>'
     )
 
