@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import streamlit as st
@@ -31,7 +30,7 @@ def render_selection_context(
             )
 
     with col_actions:
-        if not is_group_view and is_adminmin:
+        if not is_group_view and is_admin:
             c1, c2 = st.columns(2)
             with c1:
                 clear_dept = st.button("Limpar depto", key="mtz_clear_dept", use_container_width=True)
