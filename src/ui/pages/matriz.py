@@ -35,6 +35,12 @@ from src.utils.supabase_helpers import (
     current_user_id,
     sb_for_user,
 )
+from src.ui.pages.matriz_sector import (
+    build_change_preview_lines,
+    build_sector_frame,
+    sector_progress_label,
+    sector_summary_metrics,
+)
 from src.ui.pages.matriz_runtime import (
     build_task_maps as _build_task_maps,
     eq_label_map as _eq_label_map,
@@ -1533,53 +1539,25 @@ def render_matriz():
                     svc_names_v = svc_names
 
                 # Pré-calcular progresso para label e auto-expand
-                _done_s = _tot_s = 0
-                for e in eqs:
-                    for sid in svc_ids_v:
-                        t = task_map.get((e["id"], sid)) or {}
-                        _done_s += int(bool(t.get("etapa_d"))) + \
-                            int(bool(t.get("etapa_r"))) + int(bool(t.get("etapa_m")))
-                        _tot_s += 3
-                _pct_s = round((_done_s / max(_tot_s, 1)) * 100)
-                _clr_s = "🟢" if _pct_s >= 80 else (
-                    "🟡" if _pct_s >= 50 else "🔴")
-                _lbl_exp = f"{_clr_s} {setor_nome}  —  {_pct_s}%  ({_done_s}/{_tot_s})"
+                _done_s, _tot_s, _pct_s, _lbl_exp = sector_progress_label(
+                    equipamentos=eqs,
+                    svc_ids=svc_ids_v,
+                    task_map=task_map,
+                    setor_nome=setor_nome,
+                )
 
                 # FIX #10: auto-expandir setores críticos (0%) ou alvo de
                 # clique no chip
                 _auto_expand = (_pct_s == 0) or (setor_nome == _chip_target)
 
                 with st.expander(_lbl_exp, expanded=_auto_expand):
-                    rows = []
-                    col_meta = {}
-                    obs_map = {}
-                    for e in eqs:
-                        total = max(len(svc_ids_v) * 3, 1)
-                        row = {"_equip_id": e["id"], "%": 0,
-                               "Equipamento": eq_label_short[e["id"]]}
-                        done_c = 0
-                        for sid, sname in zip(svc_ids_v, svc_names_v):
-                            t = task_map.get((e["id"], sid)) or {}
-                            d = bool(t.get("etapa_d"))
-                            r = bool(t.get("etapa_r"))
-                            m = bool(t.get("etapa_m"))
-                            cd = f"{sname} D"
-                            cr = f"{sname} R"
-                            cm = f"{sname} M"
-                            row[cd] = d
-                            row[cr] = r
-                            row[cm] = m
-                            col_meta.setdefault(cd, (sid, "etapa_d"))
-                            col_meta.setdefault(cr, (sid, "etapa_r"))
-                            col_meta.setdefault(cm, (sid, "etapa_m"))
-                            obs = (t.get("observacao") or "").strip()
-                            if obs:
-                                obs_map[f"{e['id']}__{sid}"] = obs
-                            done_c += int(d) + int(r) + int(m)
-                        row["%"] = round((done_c / total) * 100)
-                        rows.append(row)
-
-                    df = pd.DataFrame(rows)
+                    df, col_meta, obs_map = build_sector_frame(
+                        equipamentos=eqs,
+                        svc_ids=svc_ids_v,
+                        svc_names=svc_names_v,
+                        task_map=task_map,
+                        eq_label_short=eq_label_short,
+                    )
                     if df.empty:
                         st.info("Sem dados para este setor.")
                         continue
@@ -1587,23 +1565,11 @@ def render_matriz():
                     svc_bool = [
                         c for c in df_display.columns if c not in (
                             "%", "Equipamento")]
-                    tok_s = int(
-                        df_display[svc_bool].sum(
-                            numeric_only=True).sum())
-                    tc_s = int(len(df_display) * max(len(svc_bool), 1))
-                    pg = round((tok_s / max(tc_s, 1)) * 100)
-                    pm = int(round(df_display.apply(lambda rw: (
-                        int(rw[svc_bool].sum()) / max(len(svc_bool), 1)) * 100, axis=1).mean()))
+                    tok_s, tc_s, pg, pm, eq_100s = sector_summary_metrics(df_display, svc_bool)
                     c1s, c2s, c3s = st.columns([1, 1, 2])
                     c1s.metric("Geral (ponderado)", f"{pg}%")
                     c2s.metric("Médio (frotas)", f"{pm}%")
                     with c3s:
-                        eq_100s = sum(
-                            1 for _,
-                            rw in df_display.iterrows() if int(
-                                rw.get(
-                                    "%",
-                                    0)) >= 100)
                         _eq100_html = (
                             f' &nbsp;·&nbsp; <b style="color:#12B76A">{eq_100s}</b> 100%' if eq_100s > 0 else "")
                         st.markdown(
@@ -1721,17 +1687,13 @@ def render_matriz():
                                 st.info(
                                     "Nenhuma alteração detectada — faça alguma marcação antes de salvar.")
                             else:
-                                _prev_lines = []
-                                for eid, sid, field, nv in changes[:8]:
-                                    _eq_n = eq_label_short.get(eid, str(eid))
-                                    _svc_names = _svc_name_map(svs)
-                                    _sv_n = _svc_names.get(str(sid), sid)
-                                    _icon = "✅" if nv else "☐"
-                                    _prev_lines.append(
-                                        f"- Frota **{_eq_n}** · {_sv_n} · **{_field_lbl.get(field, field)}** → {_icon}")
-                                if len(changes) > 8:
-                                    _prev_lines.append(
-                                        f"- _...e mais {len(changes) - 8} alterações_")
+                                _prev_lines = build_change_preview_lines(
+                                    changes,
+                                    eq_label_short=eq_label_short,
+                                    svc_names=_svc_names,
+                                    field_labels=_field_lbl,
+                                    limit=8,
+                                )
                                 st.session_state[_pending_changes_key] = changes
                                 st.session_state[_pending_preview_key] = _prev_lines
                                 st.rerun()
