@@ -127,6 +127,18 @@ def _task_key(equipamento_id, servico_id):
     return (str(equipamento_id), str(servico_id))
 
 
+def _sector_lazy_key(revisao_id, grupo_id, setor_nome: str) -> str:
+    return f"mtz_sector_open::{revisao_id}::{grupo_id}::{setor_nome}"
+
+
+def _sector_is_open(revisao_id, grupo_id, setor_nome: str) -> bool:
+    return bool(st.session_state.get(_sector_lazy_key(revisao_id, grupo_id, setor_nome), False))
+
+
+def _sector_set_open(revisao_id, grupo_id, setor_nome: str, value: bool = True) -> None:
+    st.session_state[_sector_lazy_key(revisao_id, grupo_id, setor_nome)] = bool(value)
+
+
 @st.cache_data(ttl=60, show_spinner=False)
 def _filter_obs_map_for_sector(obs_items_json: str, eq_ids_json: str, svc_ids_json: str) -> dict[str, str]:
     """Filtra observações por setor com cache, evitando varrer todas as tarefas a cada rerun."""
@@ -1411,14 +1423,9 @@ def render_matriz():
                     lbl = f"{icon} {r['setor']} {r['ok_eq']}/{r['total_eq']}"
                     with chip_cols[ci % len(chip_cols)]:
                         if st.button(
-                            lbl, key=f"chip_setor_{ci}_{
-                                r['setor']}".replace(
-                                " ", "_"), use_container_width=True, help=f"{
-                                r['setor']}: {
-                                r['pct_med']}% médio · {
-                                r['ok_eq']}/{
-                                r['total_eq']} equip. 100%"):
+                            lbl, key=f"chip_setor_{ci}_{r['setor']}".replace(" ", "_"), use_container_width=True, help=f"{r['setor']}: {r['pct_med']}% médio · {r['ok_eq']}/{r['total_eq']} equip. 100%"):
                             st.session_state["mtz_chip_jump"] = r["setor"]
+                            _sector_set_open(revisao_id, grupo_id, r["setor"], True)
                             st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
