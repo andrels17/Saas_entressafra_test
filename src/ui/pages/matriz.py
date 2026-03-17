@@ -194,9 +194,9 @@ def __render_selection_context(
 def _inject_css():
     st.markdown("""<style>
 .enterprise-sticky{position:sticky;top:0;z-index:999;padding:12px 12px 10px 12px;
-margin:0 0 12px 0;border-radius:16px;background:rgba(18,18,18,.86);
-backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.08);
-box-shadow:0 8px 24px rgba(0,0,0,.35);}
+margin:0 0 12px 0;border-radius:18px;background:linear-gradient(180deg, rgba(18,18,18,.92), rgba(10,18,14,.88));
+backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.08);
+box-shadow:0 10px 28px rgba(0,0,0,.35);}
 .enterprise-title{font-size:1.1rem;font-weight:700;letter-spacing:.2px;margin:0}
 .enterprise-sub{color:rgba(255,255,255,.68);font-size:.85rem;margin-top:2px}
 .enterprise-chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
@@ -208,27 +208,71 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 .enterprise-chip.warn{border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.10)}
 .enterprise-chip.bad{border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.10)}
 .enterprise-divider{height:1px;background:rgba(255,255,255,.08);margin:10px 0}
-.mtz-card-grid{margin-top:6px}
-.mtz-card-grid [data-testid="stButton"] button{
-  width:100%;text-align:left;padding:10px 12px;border-radius:14px;
-  border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04);
-  color:rgba(255,255,255,.92);box-shadow:0 6px 16px rgba(0,0,0,.20);
-  transition:transform .08s ease,border-color .12s ease,background .12s ease;}
-.mtz-card-grid [data-testid="stButton"] button:hover{
-  transform:translateY(-1px);border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.06);}
 
+/* Grid premium dos cards */
+.mtz-card-grid{margin-top:10px}
+.mtz-card-grid [data-testid="stHorizontalBlock"]{align-items:stretch}
+.mtz-card-grid [data-testid="column"]{display:flex;flex-direction:column}
+.mtz-card-grid [data-testid="stButton"]{width:100%}
+.mtz-card-grid [data-testid="stButton"] button{
+  width:100%;
+  min-height:104px;
+  text-align:center;
+  justify-content:center;
+  padding:14px 16px;
+  border-radius:16px;
+  border:1px solid rgba(84,255,165,.16);
+  background:linear-gradient(180deg, rgba(12,78,53,.55), rgba(8,44,31,.92));
+  color:rgba(255,255,255,.96);
+  box-shadow:0 8px 18px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.04);
+  transition:transform .14s ease, border-color .16s ease, box-shadow .16s ease, background .16s ease;
+  white-space:normal;
+  line-height:1.45;
+  font-weight:600;
+}
+.mtz-card-grid [data-testid="stButton"] button:hover{
+  transform:translateY(-2px);
+  border-color:rgba(110,255,180,.34);
+  background:linear-gradient(180deg, rgba(15,96,64,.62), rgba(10,52,36,.96));
+  box-shadow:0 14px 28px rgba(0,0,0,.28), 0 0 0 1px rgba(110,255,180,.10);
+}
+.mtz-card-grid [data-testid="stButton"] button:focus{
+  box-shadow:0 0 0 2px rgba(110,255,180,.20), 0 14px 28px rgba(0,0,0,.28);
+}
+.mtz-card-grid [data-testid="stMarkdownContainer"] p{
+  margin-bottom:0;
+}
+.mtz-card-grid .mtz-pct-outer{
+  margin-top:8px;
+  border-radius:999px;
+  background:rgba(255,255,255,.08);
+  overflow:hidden;
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.22);
+}
+.mtz-card-grid .mtz-pct-inner{
+  border-radius:999px;
+  box-shadow:0 0 12px rgba(255,255,255,.08);
+}
+.mtz-card-grid .mtz-pct-caption{
+  margin-top:4px;
+  font-size:.76rem;
+  opacity:.72;
+  text-align:center;
+}
+
+/* Painéis e inteligência */
 .mtz-risk-badges{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 8px 0}
 .mtz-risk-badge{display:inline-flex;align-items:center;padding:4px 9px;border-radius:999px;font-size:.78rem;font-weight:600;border:1px solid rgba(255,255,255,.08)}
 .mtz-risk-badge.high{background:rgba(239,68,68,.14);border-color:rgba(239,68,68,.34);color:#fecaca}
 .mtz-risk-badge.medium{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.32);color:#fde68a}
 .mtz-risk-badge.low{background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.30);color:#bbf7d0}
-.mtz-sector-box{border-radius:16px;padding:10px 12px;margin:10px 0 14px 0;border:1px solid rgba(255,255,255,.08)}
+.mtz-sector-box{border-radius:18px;padding:12px 14px;margin:10px 0 14px 0;border:1px solid rgba(255,255,255,.08);box-shadow:0 8px 20px rgba(0,0,0,.18)}
 .mtz-sector-box.high{background:linear-gradient(180deg, rgba(127,29,29,.24), rgba(0,0,0,0));border-color:rgba(239,68,68,.30)}
 .mtz-sector-box.medium{background:linear-gradient(180deg, rgba(120,53,15,.18), rgba(0,0,0,0));border-color:rgba(245,158,11,.28)}
 .mtz-sector-box.low{background:linear-gradient(180deg, rgba(20,83,45,.16), rgba(0,0,0,0));border-color:rgba(34,197,94,.24)}
-.mtz-priority-panel{padding:12px 14px;border-radius:16px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);margin:6px 0 14px 0}
+.mtz-priority-panel{padding:12px 14px;border-radius:18px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);margin:6px 0 14px 0;box-shadow:0 8px 20px rgba(0,0,0,.16)}
 .mtz-priority-item{padding:8px 10px;border-radius:12px;margin:6px 0;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}
-
+.mtz-kpi-panel{border-radius:16px;padding:10px 12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03)}
 </style>""", unsafe_allow_html=True)
 
 
@@ -237,8 +281,8 @@ def _pct_bar_html(pct: int, height: int = 6) -> str:
     color = _risk_color(pct)
     w = max(0, min(100, pct))
     return (
-        f'<div style="background:rgba(255,255,255,.08);border-radius:4px;height:{height}px;margin-top:6px">'
-        f'<div style="width:{w}%;background:{color};height:{height}px;border-radius:4px;transition:width .3s"></div>'
+        f'<div class="mtz-pct-outer" style="height:{height}px">'
+        f'<div class="mtz-pct-inner" style="width:{w}%;background:{color};height:{height}px;transition:width .35s ease"></div>'
         f'</div>'
     )
 
@@ -1281,7 +1325,8 @@ def render_matriz():
                 if st.button(
                     "Recarregar",
                     key="mtz_reload",
-                        use_container_width=True):
+                    use_container_width=True,
+                ):
                     bump_data_version()
                     clear_cached_functions(
                         _load_payload,
@@ -1404,8 +1449,9 @@ def render_matriz():
                 with cols[idx % 3]:
                     if st.button(
                             f"{_icon} {nome}\n\n{_sub}{pct}%  ·  {eqc} equip.  ·  {svc} serviços",
-                            key=f"mtz_card_{gid}",
-                            help=f"Clique para abrir o grupo {nome}"):
+                        key=f"mtz_card_{gid}",
+                        help=f"Clique para abrir o grupo {nome}",
+                    ):
                         st.session_state["matriz_grupo_id"] = gid
                         st.session_state["matriz_view"] = "group"
                         st.rerun()
@@ -1583,7 +1629,8 @@ def render_matriz():
                 if st.button(
                     "← Voltar",
                     key="mtz_back_hdr",
-                        use_container_width=True):
+                    use_container_width=True,
+                ):
                     st.session_state["matriz_view"] = "select"
                     st.rerun()
             # FIX #6: chips clicáveis — cada um é um botão que pula para o
@@ -1603,7 +1650,7 @@ def render_matriz():
                     lbl = f"{icon} {r['setor']} {r['ok_eq']}/{r['total_eq']}"
                     with chip_cols[ci % len(chip_cols)]:
                         if st.button(
-                            lbl, key=f"chip_setor_{ci}_{r['setor']}".replace(" ", "_"), use_container_width=True, help=f"{r['setor']}: {r['pct_med']}% médio · {r['ok_eq']}/{r['total_eq']} equip. 100%"):
+                                lbl, key=f"chip_setor_{ci}_{r['setor']}".replace(" ", "_"), use_container_width=True, help=f"{r['setor']}: {r['pct_med']}% médio · {r['ok_eq']}/{r['total_eq']} equip. 100%"):
                             st.session_state["mtz_chip_jump"] = r["setor"]
                             _sector_set_open(revisao_id, grupo_id, r["setor"], True)
                             st.rerun()
@@ -1919,7 +1966,7 @@ def render_matriz():
                     with _head_r:
                         _toggle_label = "Ocultar setor" if _sector_open else "Abrir setor"
                         if st.button(
-                            _toggle_label,
+                                _toggle_label,
                             key=f"mtz_toggle_sector_{revisao_id}_{grupo_id}_{setor_nome}".replace(" ", "_"),
                             use_container_width=True,
                         ):
@@ -2372,41 +2419,8 @@ def render_matriz():
                             _sector_set_open(revisao_id, grupo_id, str(item.get("setor_nome")), False)
                             closed += 1
                     if closed:
-                        st.toast(f"{closed} setor(es) de baixo risco foram recolhidos.")
-                    else:
-                        st.toast("Nenhum setor de baixo risco para recolher.")
+                        st.toast(f"{closed} setor(es) sob controle fechados.")
                     st.rerun()
-
-            if analytics_sector_intelligence:
-                sector_df = pd.DataFrame(
-                    [
-                        {
-                            "Setor": item.get("setor_nome"),
-                            "% Concluído": int(item.get("pct", 0) or 0),
-                            "Críticos": int(item.get("criticos", 0) or 0),
-                            "Sem início": int(item.get("sem_inicio", 0) or 0),
-                            "Atraso M": int(item.get("atrasadas_m", 0) or 0),
-                        }
-                        for item in analytics_priority_sorted
-                    ]
-                )
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.markdown("#### Prioridade por setor")
-                    st.bar_chart(sector_df.set_index("Setor")["% Concluído"])
-                with c2:
-                    st.markdown("#### Risco operacional por setor")
-                    st.bar_chart(sector_df.set_index("Setor")[["Críticos", "Sem início", "Atraso M"]])
-
-                st.markdown("#### Ranking executivo")
-                st.dataframe(
-                    sector_df,
-                    use_container_width=True,
-                    hide_index=True,
-                )
-            else:
-                st.info("Sem dados setoriais suficientes para analytics.")
-
             st.markdown("#### Equipamentos que exigem atenção")
             if resumo_df.empty:
                 st.info("Sem dados de equipamentos para análise.")
@@ -2797,7 +2811,8 @@ def render_matriz():
                         if st.button(
                             "🗑️ Limpar obs.",
                             use_container_width=True,
-                                key="mat_clear_obs"):
+                            key="mat_clear_obs",
+                        ):
                             st.session_state["confirm_clear_obs_matriz"] = True
                             st.rerun()
 
