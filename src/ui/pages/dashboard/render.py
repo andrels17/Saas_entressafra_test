@@ -17,6 +17,8 @@ from src.domain.kpi import calc_global_kpis
 from src.ui.core.empty_state import empty_state
 from src.ui.components.filters import multiselect_departamentos, multiselect_grupos
 from src.ui.components.feedback import notice_card, selection_summary
+from src.ui.components.actions import refresh_button
+from src.ui.components.tables import data_table
 from src.ui.core.styles import page_header
 from src.ui.core.cache import bump_data_version
 from src.utils.kpi_engine import get_group_kpis
@@ -270,10 +272,8 @@ def _fragment_grupos(
         "% Concluído",
         f"Top {top_n} grupos por % de conclusão",
         top_n=top_n)
-    st.dataframe(
+    data_table(
         display.head(top_n),
-        use_container_width=True,
-        hide_index=True,
         column_config={
             "% Concluído": st.column_config.ProgressColumn(
                 "% Concluído",
@@ -318,13 +318,8 @@ def _fragment_setores(base: pd.DataFrame, top_n: int = 10) -> None:
         "% Concluído",
         f"Top {top_n} setores por % de conclusão",
         top_n=top_n)
-    st.dataframe(
-        display.head(top_n)[
-            [
-                "Setor",
-                "% Concluído"]],
-        use_container_width=True,
-        hide_index=True,
+    data_table(
+        display.head(top_n)[["Setor", "% Concluído"]],
         column_config={
             "% Concluído": st.column_config.ProgressColumn(
                 "% Concluído",
@@ -445,10 +440,8 @@ def _fragment_equipamentos(
         "Travados",
         "Não aplica",
         "Concluídos"]
-    st.dataframe(
+    data_table(
         rank_df[cols],
-        use_container_width=True,
-        hide_index=True,
         column_config={
             "% Concluído": st.column_config.ProgressColumn(
                 "% Concluído",
@@ -525,12 +518,14 @@ def _fragment_criticidade(crit: pd.DataFrame) -> None:
         "pendentes",
         "pct_concluido"]
     present = [c for c in cols if c in crit.columns]
-    st.dataframe(
-        crit[present].head(20), use_container_width=True, hide_index=True, column_config={
-            "ranking_criticidade": st.column_config.NumberColumn(
-                "#", width="small"), "criticidade_score": st.column_config.NumberColumn(
-                "Score", format="%.2f"), "pct_concluido": st.column_config.ProgressColumn(
-                    "% Concluído", min_value=0, max_value=100), }, )
+    data_table(
+        crit[present].head(20),
+        column_config={
+            "ranking_criticidade": st.column_config.NumberColumn("#", width="small"),
+            "criticidade_score": st.column_config.NumberColumn("Score", format="%.2f"),
+            "pct_concluido": st.column_config.ProgressColumn("% Concluído", min_value=0, max_value=100),
+        },
+    )
 
 
 @st.fragment
@@ -561,10 +556,8 @@ def _fragment_timeline(tl: pd.DataFrame) -> None:
     st.plotly_chart(
         fig, use_container_width=True, config={
             "displayModeBar": False})
-    st.dataframe(
+    data_table(
         tl.sort_values("dia", ascending=False),
-        use_container_width=True,
-        hide_index=True,
         column_config={
             "dia": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
             "movimentacoes": st.column_config.NumberColumn("Movimentações"),
@@ -600,11 +593,7 @@ def render_dashboard() -> None:
         st.markdown(f"## {rev.get('titulo', 'Revisão')}")
         status_badge(rev.get("status"))
     with h2:
-        if st.button(
-            "Atualizar",
-            icon=":material/refresh:",
-            use_container_width=True,
-                key="dash_refresh_btn"):
+        if refresh_button("dash_refresh_btn", help="Recarrega os dados consolidados desta revisão."):
             bump_data_version()
             st.toast("Atualizado", icon=":material/refresh:")
             st.rerun()

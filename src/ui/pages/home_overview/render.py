@@ -20,6 +20,8 @@ from src.auth.scope import get_my_scope
 from src.domain.kpi import calc_global_kpis, calc_dept_kpis
 from src.ui.core.styles import page_header
 from src.ui.components.feedback import selection_summary
+from src.ui.components.actions import refresh_button, primary_action_button
+from src.ui.components.tables import data_table
 from src.ui.core.cache import bump_data_version
 from src.utils import nav
 from src.utils.kpi_engine import get_group_kpis
@@ -196,9 +198,8 @@ def _fragment_departamentos(
         if pend.empty:
             st.success("Nenhum departamento pendente.")
         else:
-            st.dataframe(
+            data_table(
                 pend[["Departamento", "pct", "grupos"]].rename(columns={"pct": "%", "grupos": "Grupos"}),
-                use_container_width=True, hide_index=True,
                 column_config={"%": st.column_config.ProgressColumn("%", min_value=0, max_value=100)},
             )
     with c2:
@@ -206,9 +207,8 @@ def _fragment_departamentos(
         if done.empty:
             st.caption("Ainda não há departamentos concluídos.")
         else:
-            st.dataframe(
+            data_table(
                 done[["Departamento", "pct", "grupos"]].rename(columns={"pct": "%", "grupos": "Grupos"}),
-                use_container_width=True, hide_index=True,
                 column_config={"%": st.column_config.ProgressColumn("%", min_value=0, max_value=100)},
             )
 
@@ -216,11 +216,10 @@ def _fragment_departamentos(
         if not scope.empty:
             top_backlog = scope.sort_values(
                 ["backlog_steps", "pct"], ascending=[False, True]).head(10)
-            st.dataframe(
+            data_table(
                 top_backlog[["Grupo", "pct", "done_steps", "expected_steps", "eq_count", "svc_count", "backlog_steps"]]
                 .rename(columns={"pct": "%", "done_steps": "Feitas", "expected_steps": "Esperadas",
                                  "eq_count": "Equip", "svc_count": "Serviços", "backlog_steps": "Etapas pend."}),
-                use_container_width=True, hide_index=True,
                 column_config={
                     "%": st.column_config.ProgressColumn("%", min_value=0, max_value=100),
                     "Feitas": st.column_config.NumberColumn("Feitas", format="%,d"),
@@ -280,22 +279,15 @@ def _fragment_tendencia(
     # Tabela dos snapshots com DatetimeColumn nativa
     if "created_at" in sdf.columns:
         with st.expander("Ver snapshots salvos", expanded=False):
-            st.dataframe(
-                sdf.sort_values(
-                    "week_number",
-                    ascending=False).head(50),
-                use_container_width=True,
-                hide_index=True,
+            data_table(
+                sdf.sort_values("week_number", ascending=False).head(50),
                 column_config={
                     "created_at": st.column_config.DatetimeColumn(
                         "Salvo em",
                         format="DD/MM/YYYY HH:mm",
                         timezone="America/Sao_Paulo",
                     ),
-                    "pct": st.column_config.ProgressColumn(
-                        "% KPI",
-                        min_value=0,
-                        max_value=100),
+                    "pct": st.column_config.ProgressColumn("% KPI", min_value=0, max_value=100),
                 },
             )
 
@@ -319,11 +311,10 @@ def _fragment_risco(
                     ddf["grupos"].clip(lower=1))).round().astype(int)
     ddf = ddf.sort_values("Risco", ascending=False)
 
-    st.dataframe(
+    data_table(
         ddf[["Departamento", "pct", "backlog_steps", "grupos", "Risco"]].rename(
             columns={"pct": "%", "backlog_steps": "Etapas pendentes", "grupos": "Grupos"}
         ),
-        use_container_width=True, hide_index=True,
         column_config={
             "%": st.column_config.ProgressColumn("%", min_value=0, max_value=100),
             "Risco": st.column_config.NumberColumn("Risco", help="Fórmula: (100-%) × 2 + backlog/grupos"),
@@ -402,11 +393,7 @@ def render_home_overview() -> None:
             pass
 
     with h2_col:
-        if st.button(
-            "Atualizar",
-            icon=":material/refresh:",
-            use_container_width=True,
-                key="home_refresh_btn"):
+        if refresh_button("home_refresh_btn", help="Atualiza KPIs, rankings e snapshots visíveis."):
             bump_data_version()
             st.session_state["home_pulse"] = True
             st.toast("Atualizado", icon=":material/refresh:")

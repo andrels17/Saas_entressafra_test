@@ -21,6 +21,8 @@ from src.auth.roles import Role
 from src.auth.scope import get_my_scope
 from src.ui.core.styles import page_header as _ph
 from src.ui.components.feedback import notice_card, selection_summary
+from src.ui.components.actions import download_action, refresh_button, primary_action_button
+from src.ui.components.tables import data_table, titled_table
 from src.ui.core.cache import bump_data_version, clear_cached_functions
 from src.utils.supabase_helpers import (
     current_role, current_tenant_id, sb_for_user,
@@ -495,11 +497,6 @@ def _fragment_resumo(alertas: dict, revisao: dict) -> None:
 
 @st.fragment
 def _fragment_travados(df: pd.DataFrame) -> None:
-    st.markdown("### 🚫 Travados sem resolução")
-    if df.empty:
-        st.success("Nenhum item travado no período configurado.")
-        return
-    st.caption(f"{len(df)} tarefa(s) travada(s) sem resolução.")
     cols_show = [
         c for c in [
             "Frota",
@@ -509,27 +506,23 @@ def _fragment_travados(df: pd.DataFrame) -> None:
             "Serviço",
             "Dias travado",
             "Obs."] if c in df.columns]
-    st.dataframe(
-        df[cols_show].sort_values(
-            "Dias travado",
-            ascending=False) if "Dias travado" in df.columns else df[cols_show],
-        use_container_width=True,
-        hide_index=True,
+    df_show = df[cols_show].sort_values("Dias travado", ascending=False) if "Dias travado" in df.columns else df[cols_show]
+    titled_table(
+        "🚫 Travados sem resolução",
+        df_show,
+        caption=f"{len(df)} tarefa(s) travada(s) sem resolução." if not df.empty else None,
+        empty_message="Nenhum item travado no período configurado.",
         column_config={
             "Dias travado": st.column_config.NumberColumn(
                 "Dias travado",
                 help="Dias desde última atualização"),
-        })
+        },
+    )
     _df_download(df, "Exportar CSV", "alertas_travados.csv")
 
 
 @st.fragment
 def _fragment_sem_inicio(df: pd.DataFrame) -> None:
-    st.markdown("### ⬜ Sem nenhum apontamento")
-    if df.empty:
-        st.success("Todos os itens tiveram pelo menos um apontamento.")
-        return
-    st.caption(f"{len(df)} tarefa(s) sem nenhuma etapa marcada.")
     cols_show = [
         c for c in [
             "Frota",
@@ -538,17 +531,17 @@ def _fragment_sem_inicio(df: pd.DataFrame) -> None:
             "Setor",
             "Serviço",
             "Dias sem update"] if c in df.columns]
-    st.dataframe(df[cols_show], use_container_width=True, hide_index=True)
+    titled_table(
+        "⬜ Sem nenhum apontamento",
+        df[cols_show],
+        caption=f"{len(df)} tarefa(s) sem nenhuma etapa marcada." if not df.empty else None,
+        empty_message="Todos os itens tiveram pelo menos um apontamento.",
+    )
     _df_download(df, "Exportar CSV", "alertas_sem_inicio.csv")
 
 
 @st.fragment
 def _fragment_parados(df: pd.DataFrame) -> None:
-    st.markdown("### ⏸ Parados (sem atualização)")
-    if df.empty:
-        st.success("Nenhum item parado no período configurado.")
-        return
-    st.caption(f"{len(df)} tarefa(s) sem atualização no período.")
     cols_show = [
         c for c in [
             "Frota",
@@ -558,27 +551,22 @@ def _fragment_parados(df: pd.DataFrame) -> None:
             "Serviço",
             "Status",
             "Dias parado"] if c in df.columns]
-    st.dataframe(
-        df[cols_show].sort_values(
-            "Dias parado",
-            ascending=False) if "Dias parado" in df.columns else df[cols_show],
-        use_container_width=True,
-        hide_index=True,
+    df_show = df[cols_show].sort_values("Dias parado", ascending=False) if "Dias parado" in df.columns else df[cols_show]
+    titled_table(
+        "⏸ Parados (sem atualização)",
+        df_show,
+        caption=f"{len(df)} tarefa(s) sem atualização no período." if not df.empty else None,
+        empty_message="Nenhum item parado no período configurado.",
         column_config={
             "Dias parado": st.column_config.NumberColumn("Dias parado"),
             "Status": st.column_config.TextColumn("Status"),
-        })
+        },
+    )
     _df_download(df, "Exportar CSV", "alertas_parados.csv")
 
 
 @st.fragment
 def _fragment_risco_prazo(df: pd.DataFrame) -> None:
-    st.markdown("### ⚠️ Risco de não concluir no prazo")
-    if df.empty:
-        st.success("Todos os equipamentos estão dentro da meta linear.")
-        return
-    st.caption(
-        f"{len(df)} equipamento(s) com atraso acima de 15 p.p. em relação à meta.")
     cols_show = [
         c for c in [
             "Frota",
@@ -589,26 +577,20 @@ def _fragment_risco_prazo(df: pd.DataFrame) -> None:
             "Atraso (p.p.)",
             "Etapas feitas",
             "Etapas total"] if c in df.columns]
-    df_show = df[cols_show].sort_values(
-        "Atraso (p.p.)",
-        ascending=False) if "Atraso (p.p.)" in df.columns else df[cols_show]
-    st.dataframe(
+    df_show = df[cols_show].sort_values("Atraso (p.p.)", ascending=False) if "Atraso (p.p.)" in df.columns else df[cols_show]
+    titled_table(
+        "⚠️ Risco de não concluir no prazo",
         df_show,
-        use_container_width=True,
-        hide_index=True,
+        caption=f"{len(df)} equipamento(s) com atraso acima de 15 p.p. em relação à meta." if not df.empty else None,
+        empty_message="Todos os equipamentos estão dentro da meta linear.",
         column_config={
-            "% Atual": st.column_config.ProgressColumn(
-                "% Atual",
-                min_value=0,
-                max_value=100),
-            "% Esperado": st.column_config.ProgressColumn(
-                "% Esperado",
-                min_value=0,
-                max_value=100),
+            "% Atual": st.column_config.ProgressColumn("% Atual", min_value=0, max_value=100),
+            "% Esperado": st.column_config.ProgressColumn("% Esperado", min_value=0, max_value=100),
             "Atraso (p.p.)": st.column_config.NumberColumn(
                 "Atraso (p.p.)",
                 help="Diferença entre esperado e atual"),
-        })
+        },
+    )
     _df_download(df, "Exportar CSV", "alertas_risco_prazo.csv")
 
 
@@ -1200,14 +1182,14 @@ def render_notificacoes() -> None:
                 titulo_rev = (
                     revisao.get("titulo") or "revisao").replace(
                     "/", "-")
-                st.download_button(
+                download_action(
                     "⬇️ Baixar PDF completo",
                     data=pdf_bytes,
                     file_name=f"alertas_{titulo_rev}.pdf",
                     mime="application/pdf",
-                    use_container_width=True,
-                    type="primary",
                     key="ntf_pdf_dl",
+                    type="primary",
+                    help="Baixa um PDF consolidado com todas as categorias de alerta.",
                 )
             except ImportError:
                 st.info(
@@ -1224,7 +1206,7 @@ def render_notificacoes() -> None:
         _fragment_configurar_agendamento(tenant_id, is_admin)
 
     # ── Botão de atualizar ──────────────────────────────────────────────────
-    if st.button("🔄 Atualizar alertas", key="ntf_refresh"):
+    if refresh_button("ntf_refresh", label="Atualizar alertas", help="Reprocessa os alertas com base nos filtros atuais."):
         bump_data_version()
         clear_cached_functions(_load_data)
         st.rerun()
