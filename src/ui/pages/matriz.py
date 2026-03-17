@@ -263,6 +263,124 @@ def _fmt_duration_from_hours(hours) -> str:
     return f"{mins} min"
 
 
+def _sector_priority_sort_key(item: dict) -> tuple:
+    risk_order = {"alto": 0, "medio": 1, "baixo": 2}
+    return (
+        risk_order.get(str(item.get("risk")), 3),
+        -int(item.get("criticos", 0) or 0),
+        -int(item.get("atrasadas_m", 0) or 0),
+        int(item.get("pct", 0) or 0),
+        str(item.get("setor_nome") or ""),
+    )
+
+
+def _build_group_sector_intelligence(
+    *,
+    equipamentos: list[dict],
+    setor_to_services: dict,
+    task_map: dict,
+    atraso_dias: int,
+    rev_start,
+) -> list[dict]:
+    intelligence: list[dict] = []
+    for setor_nome in sorted(setor_to_services.keys(), key=lambda x: x.lower()):
+        svs = sorted(
+            setor_to_services[setor_nome],
+            key=lambda x: (x.get("nome") or "").lower(),
+        )
+        svc_ids = [s.get("id") for s in svs if s.get("id")]
+        if not svc_ids:
+            continue
+        intel = summarize_sector_intelligence(
+            equipamentos=equipamentos,
+            svc_ids=svc_ids,
+            task_map=task_map,
+            atraso_dias=int(atraso_dias),
+            rev_start=rev_start,
+        )
+        intel["setor_nome"] = setor_nome
+        intelligence.append(intel)
+    return intelligence
+
+
+def _build_automation_insights(
+    *,
+    sector_intelligence: list[dict],
+    progresso_atual: float,
+    meta_atual: float,
+    critical_eq_count: int,
+    no_start_eq_count: int,
+) -> list[dict]:
+    insights: list[dict] = []
+    delta = round(float(progresso_atual) - float(meta_atual), 1)
+
+    if delta <= -10:
+        insights.append(
+            {
+                "nivel": "error",
+                "titulo": "Ritmo abaixo da meta",
+                "texto": f"O grupo está {abs(delta):.1f}% abaixo da meta linear da revisão.",
+            }
+        )
+    elif delta < 0:
+        insights.append(
+            {
+                "nivel": "warning",
+                "titulo": "Leve atraso no ritmo",
+                "texto": f"O grupo está {abs(delta):.1f}% abaixo da meta esperada.",
+            }
+        )
+    else:
+        insights.append(
+            {
+                "nivel": "success",
+                "titulo": "Ritmo dentro da meta",
+                "texto": f"O grupo está {delta:.1f}% acima da meta esperada.",
+            }
+        )
+
+    delayed_mount = sum(int(item.get("atrasadas_m", 0) or 0) for item in sector_intelligence)
+    if delayed_mount > 0:
+        insights.append(
+            {
+                "nivel": "warning",
+                "titulo": "Montagens atrasadas detectadas",
+                "texto": f"Há {delayed_mount} montagem(ns) pendente(s) além do limite configurado.",
+            }
+        )
+
+    high_risk = [item for item in sector_intelligence if item.get("risk") == "alto"]
+    if high_risk:
+        nomes = ", ".join(str(item.get("setor_nome")) for item in high_risk[:3])
+        insights.append(
+            {
+                "nivel": "error",
+                "titulo": f"{len(high_risk)} setor(es) em risco alto",
+                "texto": f"Priorize: {nomes}" + ("..." if len(high_risk) > 3 else ""),
+            }
+        )
+
+    if no_start_eq_count > 0:
+        insights.append(
+            {
+                "nivel": "info",
+                "titulo": "Frotas sem início",
+                "texto": f"{no_start_eq_count} frota(s) ainda estão em 0% nesta revisão.",
+            }
+        )
+
+    if critical_eq_count > 0:
+        insights.append(
+            {
+                "nivel": "warning",
+                "titulo": "Equipamentos críticos",
+                "texto": f"{critical_eq_count} frota(s) estão abaixo de 50% de conclusão.",
+            }
+        )
+
+    return insights
+
+
 def _df_to_csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
@@ -1492,8 +1610,55 @@ def render_matriz():
                 st.markdown('</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
-        tab_resumo, tab_matriz, tab_evolucao, tab_tempos, tab_editor, tab_exportar = st.tabs([
-            "📊 Resumo", "⚙️ Matriz", "📈 Evolução", "⏱️ Tempos", "✏️ Editar célula", "⬇️ Exportar"])
+
+        group_atraso_dias = int(st.session_state.get("matriz_atraso_dias", 7) or 7)
+        group_rev_start = pd.to_datetime(
+            (rev_row or {}).get("data_inicio") or (rev_row or {}).get("created_at"),
+            errors="coerce",
+            utc=True,
+        )
+        if pd.isna(group_rev_start):
+            group_rev_start = pd.Timestamp(_now_utc()).normalize()
+
+        analytics_sector_intelligence = _build_group_sector_intelligence(
+            equipamentos=eqs,
+            setor_to_services=setor_to_services,
+            task_map=task_map,
+            atraso_dias=group_atraso_dias,
+            rev_start=group_rev_start,
+        )
+        analytics_priority_sorted = sorted(
+            analytics_sector_intelligence,
+            key=_sector_priority_sort_key,
+        )
+
+        elapsed_days = 0
+        try:
+            elapsed_days = max(
+                0,
+                int((pd.Timestamp(_now_utc()).tz_convert("UTC") - group_rev_start).days),
+            )
+        except Exception:
+            elapsed_days = 0
+        current_week_no = int(elapsed_days // 7 + 1)
+        total_weeks_plan = int((rev_row or {}).get("semanas_total") or current_week_no or 1)
+        expected_pct_now = round(min(100.0, (current_week_no / max(total_weeks_plan, 1)) * 100), 1)
+        progresso_atual_pct = float(pct_geral)
+        delta_vs_expected_now = round(progresso_atual_pct - expected_pct_now, 1)
+
+        critical_eq_count = int((resumo_df["%"] < 50).sum()) if not resumo_df.empty else 0
+        no_start_eq_count = int((resumo_df["%"] == 0).sum()) if not resumo_df.empty else 0
+
+        automation_insights = _build_automation_insights(
+            sector_intelligence=analytics_sector_intelligence,
+            progresso_atual=progresso_atual_pct,
+            meta_atual=expected_pct_now,
+            critical_eq_count=critical_eq_count,
+            no_start_eq_count=no_start_eq_count,
+        )
+
+        tab_resumo, tab_matriz, tab_evolucao, tab_analytics, tab_tempos, tab_editor, tab_exportar = st.tabs([
+            "📊 Resumo", "⚙️ Matriz", "📈 Evolução", "🧠 Analytics", "⏱️ Tempos", "✏️ Editar célula", "⬇️ Exportar"])
 
         # FIX #3 e #8: pré-computar dados de export ANTES das tabs
         # Assim Exportar funciona mesmo sem o usuário ter visitado Matriz ou
@@ -1609,7 +1774,7 @@ def render_matriz():
             st.markdown("### Drill-down por setor")
             st.caption(
                 "Marque as etapas (D/R/M) direto na tabela. Setores 🔴 são prioridade — expanda para editar.")
-            atraso_dias = int(st.session_state.get("matriz_atraso_dias", 7) or 7)
+            atraso_dias = group_atraso_dias
             fc1, fc2, fc3 = st.columns([1, 1.5, 1.5])
             with fc1:
                 atraso_dias = st.number_input(
@@ -1643,10 +1808,7 @@ def render_matriz():
                     "Aplicada apenas em tarefas que ainda não têm semana definida."
                 )
 
-            rev_start = pd.to_datetime((rev_row or {}).get("data_inicio") or (
-                rev_row or {}).get("created_at"), errors="coerce", utc=True)
-            if pd.isna(rev_start):
-                rev_start = pd.Timestamp(_now_utc()).normalize()
+            rev_start = group_rev_start
 
             # FIX #6: chips clicáveis — se o usuário clicou num chip, pular
             # direto para aquele setor
@@ -1674,12 +1836,7 @@ def render_matriz():
             if sector_intelligence:
                 _priority_sorted = sorted(
                     sector_intelligence,
-                    key=lambda x: (
-                        0 if x["risk"] == "alto" else (1 if x["risk"] == "medio" else 2),
-                        -x["criticos"],
-                        -x["atrasadas_m"],
-                        x["pct"],
-                    ),
+                    key=_sector_priority_sort_key,
                 )
                 st.markdown('<div class="mtz-priority-panel">', unsafe_allow_html=True)
                 st.markdown("#### 🔥 Prioridades agora")
@@ -2154,6 +2311,131 @@ def render_matriz():
                     st.info("Sem timestamps nem coluna semana disponíveis.")
             else:
                 st.info("Sem tarefas para esta revisão/grupo.")
+
+
+        # ── TAB: ANALYTICS & AUTOMAÇÃO ──
+        with tab_analytics:
+            st.markdown("### Gestão e automação")
+            st.caption("Indicadores executivos, riscos do grupo e atalhos operacionais seguros.")
+
+            a1, a2, a3, a4 = st.columns(4)
+            a1.metric("Progresso geral", f"{progresso_atual_pct:.0f}%")
+            a2.metric(
+                "Meta esperada",
+                f"{expected_pct_now:.1f}%",
+                delta=f"{delta_vs_expected_now:+.1f}%",
+                delta_color="normal" if delta_vs_expected_now >= 0 else "inverse",
+            )
+            a3.metric("Setores risco alto", sum(1 for item in analytics_sector_intelligence if item.get("risk") == "alto"))
+            a4.metric("Equip. críticos", critical_eq_count)
+
+            for insight in automation_insights[:5]:
+                level = str(insight.get("nivel") or "info")
+                title = str(insight.get("titulo") or "")
+                body = str(insight.get("texto") or "")
+                if level == "error":
+                    st.error(f"**{title}** — {body}")
+                elif level == "warning":
+                    st.warning(f"**{title}** — {body}")
+                elif level == "success":
+                    st.success(f"**{title}** — {body}")
+                else:
+                    st.info(f"**{title}** — {body}")
+
+            b1, b2, b3 = st.columns(3)
+            with b1:
+                if st.button("Abrir setores críticos", key=f"mtz_auto_open_high_{grupo_id}", use_container_width=True):
+                    opened = 0
+                    for item in analytics_priority_sorted:
+                        if item.get("risk") == "alto":
+                            _sector_set_open(revisao_id, grupo_id, str(item.get("setor_nome")), True)
+                            opened += 1
+                    if opened:
+                        st.toast(f"{opened} setor(es) críticos preparados na aba Matriz.")
+                    else:
+                        st.toast("Nenhum setor crítico para abrir.")
+                    st.rerun()
+            with b2:
+                if st.button("Abrir top 3 prioridades", key=f"mtz_auto_open_top3_{grupo_id}", use_container_width=True):
+                    opened = 0
+                    for item in analytics_priority_sorted[:3]:
+                        _sector_set_open(revisao_id, grupo_id, str(item.get("setor_nome")), True)
+                        opened += 1
+                    if opened:
+                        st.toast(f"Top {opened} prioridades preparadas na aba Matriz.")
+                    st.rerun()
+            with b3:
+                if st.button("Fechar setores sob controle", key=f"mtz_auto_close_low_{grupo_id}", use_container_width=True):
+                    closed = 0
+                    for item in analytics_sector_intelligence:
+                        if item.get("risk") == "baixo":
+                            _sector_set_open(revisao_id, grupo_id, str(item.get("setor_nome")), False)
+                            closed += 1
+                    if closed:
+                        st.toast(f"{closed} setor(es) de baixo risco foram recolhidos.")
+                    else:
+                        st.toast("Nenhum setor de baixo risco para recolher.")
+                    st.rerun()
+
+            if analytics_sector_intelligence:
+                sector_df = pd.DataFrame(
+                    [
+                        {
+                            "Setor": item.get("setor_nome"),
+                            "% Concluído": int(item.get("pct", 0) or 0),
+                            "Críticos": int(item.get("criticos", 0) or 0),
+                            "Sem início": int(item.get("sem_inicio", 0) or 0),
+                            "Atraso M": int(item.get("atrasadas_m", 0) or 0),
+                        }
+                        for item in analytics_priority_sorted
+                    ]
+                )
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown("#### Prioridade por setor")
+                    st.bar_chart(sector_df.set_index("Setor")["% Concluído"])
+                with c2:
+                    st.markdown("#### Risco operacional por setor")
+                    st.bar_chart(sector_df.set_index("Setor")[["Críticos", "Sem início", "Atraso M"]])
+
+                st.markdown("#### Ranking executivo")
+                st.dataframe(
+                    sector_df,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.info("Sem dados setoriais suficientes para analytics.")
+
+            st.markdown("#### Equipamentos que exigem atenção")
+            if resumo_df.empty:
+                st.info("Sem dados de equipamentos para análise.")
+            else:
+                critical_equipment_df = resumo_df.copy()
+                critical_equipment_df["Risco"] = critical_equipment_df["%"].apply(
+                    lambda v: "alto" if int(v) < 50 else ("medio" if int(v) < 80 else "baixo")
+                )
+                critical_equipment_df = critical_equipment_df.sort_values(
+                    by=["%", "Concluidos"],
+                    ascending=[True, True],
+                ).head(10)[["Equipamento", "%", "Concluidos", "Total", "Risco"]]
+                st.dataframe(
+                    critical_equipment_df,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+            st.markdown("#### Lead time médio entre etapas")
+            if view_agg.empty:
+                st.info("Sem dados de tempo suficientes para calcular lead time.")
+            else:
+                lt_dr = pd.to_numeric(view_agg.get("D→R (h)"), errors="coerce")
+                lt_rm = pd.to_numeric(view_agg.get("R→M (h)"), errors="coerce")
+                lt_dm = pd.to_numeric(view_agg.get("D→M (h)"), errors="coerce")
+                l1, l2, l3 = st.columns(3)
+                l1.metric("Mediana D→R", _fmt_duration_from_hours(lt_dr.dropna().median() if lt_dr is not None and not lt_dr.dropna().empty else None))
+                l2.metric("Mediana R→M", _fmt_duration_from_hours(lt_rm.dropna().median() if lt_rm is not None and not lt_rm.dropna().empty else None))
+                l3.metric("Mediana D→M", _fmt_duration_from_hours(lt_dm.dropna().median() if lt_dm is not None and not lt_dm.dropna().empty else None))
 
         # ── TAB: TEMPOS ──
         with tab_tempos:
