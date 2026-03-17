@@ -26,6 +26,7 @@ from src.auth.roles import Role
 from src.auth.scope import get_my_scope
 from src.ui.core.styles import page_header as _ph
 from src.ui.core.cache import bump_data_version, clear_cached_functions
+from src.ui.components.forms import form_submit_button, validation_summary
 from src.utils import nav
 from src.utils.supabase_helpers import (
     current_role,
@@ -1681,11 +1682,11 @@ def render_matriz():
 
                     sv1, sv2, _ = st.columns([1.2, 1.8, 1])
                     with sv1:
-                        save_now = st.button(
+                        save_now = form_submit_button(
                             "💾 Salvar alterações",
                             key=f"save_{kb}",
-                            type="primary",
-                            use_container_width=True)
+                            help="Valida e prepara as alterações feitas no grid deste setor antes da confirmação final.",
+                        )
                     with sv2:
                         st.caption(
                             "Marque/desmarque etapas acima e clique em Salvar.")
@@ -2292,29 +2293,38 @@ def render_matriz():
 
                 sv_a, sv_b, _ = st.columns([1, 1, 2])
                 with sv_a:
-                    if st.button(
+                    save_quick = form_submit_button(
                         "💾 Salvar",
-                        type="primary",
-                        use_container_width=True,
-                            key="mat_save_ed"):
-                        try:
-                            new_status = nst
-                            if etapa_d and etapa_r and etapa_m:
-                                new_status = "concluido"
-                            sb.table("tarefas_servico").update({
-                                "etapa_d": bool(etapa_d), "etapa_r": bool(etapa_r), "etapa_m": bool(etapa_m),
-                                "status": new_status, "semana": int(nsem) if int(nsem) > 0 else None,
-                                "observacao": nobs.strip() or None, "updated_by": current_user_id() or None
-                            }).eq("id", task_ed["id"]).execute()
-                            st.success(
-                                f"✅ Frota {esl} · {svc_name} atualizado!")
-                            bump_data_version()
+                        key="mat_save_ed",
+                        help="Salva as etapas, semana, status e observação da tarefa selecionada.",
+                    )
+                    if save_quick:
+                        new_status = nst
+                        if etapa_d and etapa_r and etapa_m:
+                            new_status = "concluido"
+
+                        quick_errors = []
+                        if new_status == "travado" and not (nobs or "").strip():
+                            quick_errors.append("Preencha a observação antes de salvar uma tarefa como Travado.")
+
+                        if quick_errors:
+                            validation_summary(quick_errors, title="Corrija o formulário da tarefa")
+                        else:
                             try:
-                                nav.rerun_keep_menu()
-                            except Exception:
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"Erro: {e}")
+                                sb.table("tarefas_servico").update({
+                                    "etapa_d": bool(etapa_d), "etapa_r": bool(etapa_r), "etapa_m": bool(etapa_m),
+                                    "status": new_status, "semana": int(nsem) if int(nsem) > 0 else None,
+                                    "observacao": nobs.strip() or None, "updated_by": current_user_id() or None
+                                }).eq("id", task_ed["id"]).execute()
+                                st.success(
+                                    f"✅ Frota {esl} · {svc_name} atualizado!")
+                                bump_data_version()
+                                try:
+                                    nav.rerun_keep_menu()
+                                except Exception:
+                                    st.rerun()
+                            except Exception as e:
+                                st.error(f"Erro: {e}")
                 with sv_b:
                     # Limpar observação rapidamente
                     if (task_ed.get("observacao") or "").strip():
