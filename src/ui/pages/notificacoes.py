@@ -22,6 +22,7 @@ from src.auth.scope import get_my_scope
 from src.ui.core.styles import page_header as _ph
 from src.ui.components.feedback import notice_card, selection_summary
 from src.ui.components.actions import download_action, refresh_button, primary_action_button
+from src.ui.components.forms import form_section, form_submit_button, validation_summary, validate_time_hhmm
 from src.ui.components.tables import data_table, titled_table
 from src.ui.components.states import empty_message, loading_block
 from src.ui.core.cache import bump_data_version, clear_cached_functions
@@ -760,9 +761,12 @@ def _fragment_disparo_manual(tenant_id: str, revisao_id: str, is_admin: bool,
                             changed[u["user_id"]] = novo
 
                 if changed:
-                    if st.button(
+                    submitted_prefs = form_submit_button(
                         "💾 Salvar preferências",
-                            key="save_email_prefs"):
+                        key="save_email_prefs",
+                        help="Aplica o tipo de relatório definido para cada usuário listado.",
+                    )
+                    if submitted_prefs:
                         from src.services.email.recipients import save_email_pref
                         ok = all(
                             save_email_pref(tenant_id, uid, tipo, ativo=(tipo != "nenhum"))
@@ -815,11 +819,11 @@ CREATE POLICY "service_role_all" ON tenant_email_prefs
     # ── 4. Botão de disparo ─────────────────────────────────────────────────
     btn_label = "🧪 Testar geração de PDFs" if dry_run else "📧 Enviar relatórios agora"
 
-    do_send = st.button(
+    do_send = form_submit_button(
         btn_label,
-        type="primary",
-        use_container_width=False,
         key="ntf_send_btn",
+        help="Executa o envio imediato ou um dry-run da geração dos relatórios.",
+        use_container_width=False,
     )
 
     # ── 5. Execução ─────────────────────────────────────────────────────────
@@ -878,7 +882,7 @@ def _fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
         ScheduleConfig, load_schedule_config, save_schedule_config,
     )
 
-    st.markdown("### ⏰ Agendamento Automático")
+    form_section("⏰ Agendamento Automático", "Configure o envio automático dos alertas operacionais e de prazo.")
 
     if not is_admin:
         st.info("Apenas administradores podem configurar o agendamento.")
@@ -959,33 +963,34 @@ def _fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
             key="sch_dias_par")
 
     # ── Validação e salvar ──────────────────────────────────────────────────
-    hora_valida = True
-    try:
-        hh, mm = hora_envio.split(":")
-        assert 0 <= int(hh) <= 23 and 0 <= int(mm) <= 59
-    except Exception:
-        st.error("Formato de horário inválido. Use HH:MM (ex: 07:00).")
-        hora_valida = False
+    schedule_errors = validate_time_hhmm(hora_envio, label="o horário de envio")
 
     col_save, col_preview = st.columns([1, 2])
     with col_save:
-        if st.button("💾 Salvar", type="primary", use_container_width=True,
-                     key="sch_save", disabled=not hora_valida):
-            new_cfg = ScheduleConfig(
-                tenant_id=tenant_id, id=cfg.id, ativo=ativo,
-                periodicidade=periodicidade, dia_semana=int(dia_semana),
-                dia_mes=int(dia_mes), hora_envio=hora_envio.strip(),
-                dias_travado=int(dias_travado), dias_parado=int(dias_parado),
-                revisao_fixa=cfg.revisao_fixa,
-            )
-            if save_schedule_config(new_cfg):
-                st.success("✅ Configuração salva!")
-                st.rerun()
+        submitted_schedule = form_submit_button(
+            "💾 Salvar",
+            key="sch_save",
+            help="Salva o agendamento automático com os parâmetros configurados.",
+        )
+        if submitted_schedule:
+            if schedule_errors:
+                validation_summary(schedule_errors, title="Corrija a configuração do agendamento")
             else:
-                st.error(
-                    "Falha ao salvar. Verifique se a tabela `email_schedule_config` existe no Supabase.")
+                new_cfg = ScheduleConfig(
+                    tenant_id=tenant_id, id=cfg.id, ativo=ativo,
+                    periodicidade=periodicidade, dia_semana=int(dia_semana),
+                    dia_mes=int(dia_mes), hora_envio=hora_envio.strip(),
+                    dias_travado=int(dias_travado), dias_parado=int(dias_parado),
+                    revisao_fixa=cfg.revisao_fixa,
+                )
+                if save_schedule_config(new_cfg):
+                    st.success("✅ Configuração salva!")
+                    st.rerun()
+                else:
+                    st.error(
+                        "Falha ao salvar. Verifique se a tabela `email_schedule_config` existe no Supabase.")
     with col_preview:
-        if hora_valida:
+        if not schedule_errors:
             try:
                 preview_cfg = ScheduleConfig(
                     tenant_id=tenant_id,

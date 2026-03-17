@@ -43,3 +43,15 @@ def validation_summary(errors: list[str], *, title: str = "Corrija antes de cont
 
 def form_submit_button(label: str, *, key: str, help: str | None = None, use_container_width: bool = True) -> bool:
     return st.button(label, key=key, type="primary", help=help, use_container_width=use_container_width)
+
+
+def validate_time_hhmm(value: str, *, label: str = "o horário") -> list[str]:
+    errors: list[str] = []
+    raw = (value or "").strip()
+    try:
+        hh, mm = raw.split(":")
+        if not (0 <= int(hh) <= 23 and 0 <= int(mm) <= 59):
+            raise ValueError
+    except Exception:
+        errors.append(f"Informe {label.lower()} no formato HH:MM (ex: 07:00).")
+    return errors
