@@ -27,6 +27,7 @@ from src.auth.scope import get_my_scope
 from src.ui.core.styles import page_header as _ph
 from src.ui.core.cache import bump_data_version, clear_cached_functions
 from src.ui.components.forms import form_submit_button, validation_summary
+from src.ui.components.confirmations import confirmation_panel
 from src.utils import nav
 from src.utils.supabase_helpers import (
     current_role,
@@ -2332,6 +2333,15 @@ def render_matriz():
                             "🗑️ Limpar obs.",
                             use_container_width=True,
                                 key="mat_clear_obs"):
+                            st.session_state["confirm_clear_obs_matriz"] = True
+                            st.rerun()
+
+                        if confirmation_panel(
+                            state_key="confirm_clear_obs_matriz",
+                            title="Confirma limpar a observação desta tarefa?",
+                            body="A observação atual será removida imediatamente da tarefa selecionada.",
+                            confirm_label="Limpar observação",
+                        ):
                             try:
                                 sb.table("tarefas_servico").update(
                                     {"observacao": None}).eq("id", task_ed["id"]).execute()

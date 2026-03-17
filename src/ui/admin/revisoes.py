@@ -6,6 +6,7 @@ from src.ui.components.forms import (
     validate_date_range,
     validation_summary,
 )
+from src.ui.components.confirmations import confirmation_panel
 from src.ui.core.styles import page_header as _ph
 import math
 import streamlit as st
@@ -456,6 +457,15 @@ def render_admin_revisoes():
                     disabled=not demo_candidates,
                     key="bulk_delete_demo_btn",
                 ):
+                    st.session_state["confirm_bulk_delete_demo"] = True
+                    st.rerun()
+
+                if confirmation_panel(
+                    state_key="confirm_bulk_delete_demo",
+                    title="Confirma a limpeza das revisões de teste?",
+                    body=f"Serão removidas {len(demo_candidates)} revisão(ões) de demo/teste e todos os dados relacionados.",
+                    confirm_label="Sim, limpar demo",
+                ):
                     if confirm_demo.strip().upper() != "LIMPAR DEMO":
                         st.error(
                             "Confirmação inválida. Digite exatamente LIMPAR DEMO.")
@@ -762,10 +772,12 @@ def render_admin_revisoes():
                 icon=":material/grid_on:",
                 type="primary",
                     use_container_width=True):
-                if len(com_grupo) == 0:
-                    st.warning("Nenhum equipamento com grupo.")
-                    st.stop()
+                st.session_state["confirm_generate_matrix"] = True
+                st.rerun()
 
+            if len(com_grupo) == 0:
+                payload = []
+            else:
                 equipamento_ids = [e["id"] for e in com_grupo]
                 existing = _load_existing_tasks(
                     sb, tenant_id, revisao_id, equipamento_ids)
@@ -788,7 +800,16 @@ def render_admin_revisoes():
                             "status": "pendente",
                         })
 
-                st.info(f"Tarefas novas a inserir: **{len(payload):,}**")
+            st.info(f"Tarefas novas a inserir: **{len(payload):,}**")
+            if confirmation_panel(
+                state_key="confirm_generate_matrix",
+                title="Confirmar geração da matriz?",
+                body=f"Serão inseridas {len(payload):,} tarefa(s) faltante(s) com base nos templates atuais do grupo.",
+                confirm_label="Gerar agora",
+            ):
+                if len(com_grupo) == 0:
+                    st.warning("Nenhum equipamento com grupo.")
+                    st.stop()
                 if payload:
                     try:
                         with st.spinner("Inserindo tarefas..."):
@@ -807,10 +828,13 @@ def render_admin_revisoes():
             if st.button(
                 "Sincronizar Matriz (add + marcar N/A)",
                     use_container_width=True):
-                if len(com_grupo) == 0:
-                    st.warning("Nenhum equipamento com grupo.")
-                    st.stop()
+                st.session_state["confirm_sync_matrix"] = True
+                st.rerun()
 
+            if len(com_grupo) == 0:
+                to_insert = []
+                to_na = []
+            else:
                 equipamento_ids = [e["id"] for e in com_grupo]
                 existing = _load_existing_tasks(
                     sb, tenant_id, revisao_id, equipamento_ids)
@@ -838,8 +862,18 @@ def render_admin_revisoes():
                         if row and row.get("status") != "nao_aplica":
                             to_na.append(row["id"])
 
-                st.markdown(f"- Inserir: **{len(to_insert):,}**")
-                st.markdown(f"- Marcar como não aplica: **{len(to_na):,}**")
+            st.markdown(f"- Inserir: **{len(to_insert):,}**")
+            st.markdown(f"- Marcar como não aplica: **{len(to_na):,}**")
+
+            if confirmation_panel(
+                state_key="confirm_sync_matrix",
+                title="Confirmar sincronização da matriz?",
+                body=f"Serão inseridas {len(to_insert):,} tarefa(s) e {len(to_na):,} tarefa(s) poderão ser marcadas como Não aplica.",
+                confirm_label="Sincronizar agora",
+            ):
+                if len(com_grupo) == 0:
+                    st.warning("Nenhum equipamento com grupo.")
+                    st.stop()
 
                 try:
                     with st.spinner("Sincronizando..."):
