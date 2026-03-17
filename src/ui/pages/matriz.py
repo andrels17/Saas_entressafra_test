@@ -39,6 +39,7 @@ from src.ui.pages.matriz_selection import (
     render_group_scope_actions,
     render_selection_header,
 )
+from src.ui.pages.matriz_selection import render_selection_context
 from src.ui.pages.matriz_sector import (
     build_change_preview_lines,
     build_sector_frame,
@@ -47,6 +48,7 @@ from src.ui.pages.matriz_sector import (
 )
 from src.ui.pages.matriz_runtime import (
     build_task_maps as _build_task_maps,
+    bulk_update_tasks as _bulk_update_tasks,
     eq_label_map as _eq_label_map,
     filter_obs_map_for_sector as _filter_obs_map_for_sector,
     normalize_service_ids as _normalize_service_ids,
@@ -968,33 +970,25 @@ def render_matriz():
                     '<div class="enterprise-sub">Etapas D/R/M · Setores · Evolucao semanal · Tempos</div>',
                     unsafe_allow_html=True)
             with c2:
-                if st.session_state.get("matriz_view") == "group":
-                    gn = next((g.get("nome") for g in grupos if g.get(
-                        "id") == st.session_state["matriz_grupo_id"]), "—")
-                    st.markdown(
-                        f'<div class=\'enterprise-chip\'><strong>Grupo:</strong> {gn}</div>',
-                        unsafe_allow_html=True)
-                else:
-                    dep_id = st.session_state.get("matriz_departamento_id")
-                    if dep_id and is_admin:
-                        dn = _dept_name(
-                            tenant_id, dep_id, st.session_state.get(
-                                "data_version", "0")) or "(departamento)"
-                        st.markdown(
-                            f'<div class=\'enterprise-chip\'><strong>Depto:</strong> {dn}</div>',
-                            unsafe_allow_html=True)
-                        if st.button(
-                            "Limpar depto",
-                            key="mtz_clear_dept",
-                                use_container_width=True):
-                            st.session_state["matriz_departamento_id"] = None
-                            st.rerun()
-                    if is_admin and st.button(
-                        "Ver todos",
-                        key="mtz_show_all",
-                            use_container_width=True):
-                        st.session_state["matriz_grp_search"] = ""
-                        st.session_state["matriz_departamento_id"] = None
+                _clear_dept, _show_all = render_selection_context(
+                    is_group_view=st.session_state.get("matriz_view") == "group",
+                    grupos=grupos,
+                    grupo_id=st.session_state.get("matriz_grupo_id"),
+                    departamento_id=st.session_state.get("matriz_departamento_id"),
+                    is_admin=is_admin,
+                    dept_name_fn=lambda dep_id: _dept_name(
+                        tenant_id,
+                        dep_id,
+                        st.session_state.get("data_version", "0"),
+                    ),
+                )
+                if _clear_dept:
+                    st.session_state["matriz_departamento_id"] = None
+                    st.rerun()
+                if _show_all:
+                    st.session_state["matriz_grp_search"] = ""
+                    st.session_state["matriz_departamento_id"] = None
+                    st.rerun()
             with c3:
                 rev_opts = [
                     (r.get("titulo") or f"Revisao {
@@ -1745,43 +1739,44 @@ def render_matriz():
 
                         if confirm_now:
                             now_iso = datetime.now(timezone.utc).isoformat()
-                            ok = missing = 0
+                            missing = 0
+                            payload_updates = []
+
+                            for eid, sid, field, nv in pending_changes:
+                                t = task_map.get((eid, sid)) or {}
+                                tid = t.get("id")
+                                if not tid:
+                                    missing += 1
+                                    continue
+
+                                upd = {
+                                    "id": tid,
+                                    field: bool(nv),
+                                    "updated_by": current_user_id() or None,
+                                }
+                                dtf = {
+                                    "etapa_d": "dt_etapa_d",
+                                    "etapa_r": "dt_etapa_r",
+                                    "etapa_m": "dt_etapa_m",
+                                }.get(field)
+                                if dtf:
+                                    upd[dtf] = now_iso if nv else None
+                                if nv and not t.get("semana") and int(semana_lote) > 0:
+                                    upd["semana"] = int(semana_lote)
+
+                                payload_updates.append(upd)
+
                             pb = st.empty()
-                            with st.spinner(f"Aplicando {len(pending_changes)} alterações..."):
-                                for ic, (eid, sid, field, nv) in enumerate(
-                                        pending_changes, 1):
-                                    t = task_map.get((eid, sid)) or {}
-                                    tid = t.get("id")
-                                    if not tid:
-                                        missing += 1
-                                        continue
-                                    upd = {
-                                        field: bool(nv), "updated_by": current_user_id() or None}
-                                    dtf = {
-                                        "etapa_d": "dt_etapa_d",
-                                        "etapa_r": "dt_etapa_r",
-                                        "etapa_m": "dt_etapa_m"}.get(field)
-                                    if dtf:
-                                        upd[dtf] = now_iso if nv else None
-                                    # Preenche semana se a tarefa ainda não
-                                    # tiver uma definida
-                                    if nv and not t.get("semana") and int(
-                                            semana_lote) > 0:
-                                        upd["semana"] = int(semana_lote)
-                                    try:
-                                        sb.table("tarefas_servico").update(
-                                            upd).eq("id", tid).execute()
-                                        ok += 1
-                                    except Exception:
-                                        pass
-                                    if ic % 15 == 0 or ic == len(
-                                            pending_changes):
-                                        pb.info(
-                                            f"Processando {ic}/{len(pending_changes)}  ✓ {ok}")
+                            with st.spinner(f"Aplicando {len(payload_updates)} alterações em lote..."):
+                                ok, failed = _bulk_update_tasks(sb, payload_updates)
+
                             st.session_state.pop(_pending_changes_key, None)
                             st.session_state.pop(_pending_preview_key, None)
                             pb.success(
-                                f"✅ {ok} etapas salvas" + (f"  ·  {missing} não encontradas" if missing else ""))
+                                f"✅ {ok} etapas salvas"
+                                + (f"  ·  {failed} falharam" if failed else "")
+                                + (f"  ·  {missing} não encontradas" if missing else "")
+                            )
                             st.toast("✅ Alterações aplicadas com sucesso!")
                             bump_data_version()
                             try:

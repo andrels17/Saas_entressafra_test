@@ -100,3 +100,33 @@ def normalize_service_ids(servicos_json: str) -> list[str]:
     import json
     servicos = json.loads(servicos_json or "[]")
     return [str(s.get("id")) for s in servicos if s.get("id")]
+
+
+def bulk_update_tasks(sb, updates: list[dict], *, chunk_size: int = 200) -> tuple[int, int]:
+    """Aplica updates em lote via upsert; cai para update individual se necessário.
+
+    Retorna (ok, failed).
+    """
+    if not updates:
+        return 0, 0
+
+    ok = 0
+    failed = 0
+    for i in range(0, len(updates), chunk_size):
+        chunk = updates[i:i + chunk_size]
+        try:
+            sb.table("tarefas_servico").upsert(chunk, on_conflict="id").execute()
+            ok += len(chunk)
+        except Exception:
+            for row in chunk:
+                row = dict(row)
+                tid = row.pop("id", None)
+                if not tid:
+                    failed += 1
+                    continue
+                try:
+                    sb.table("tarefas_servico").update(row).eq("id", tid).execute()
+                    ok += 1
+                except Exception:
+                    failed += 1
+    return ok, failed
