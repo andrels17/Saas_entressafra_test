@@ -37,13 +37,9 @@ from src.utils.supabase_helpers import (
 )
 from src.ui.pages.matriz_sector import (
     build_change_preview_lines,
-    build_mass_toggle_changes,
     build_sector_frame,
-    build_sector_intelligence,
-    build_global_intelligence_summary,
     sector_progress_label,
     sector_summary_metrics,
-    summarize_change_payload,
 )
 from src.ui.pages.matriz_runtime import (
     build_task_maps as _build_task_maps,
@@ -73,7 +69,6 @@ def _render_selection_context(
     is_admin: bool,
     dept_name_fn,
 ) -> tuple[bool, bool]:
-    """Renderiza o contexto da seleção sem quebrar a toolbar em telas estreitas."""
     clear_dept = False
     show_all = False
 
@@ -93,14 +88,12 @@ def _render_selection_context(
         )
 
     if is_admin:
-        a1, a2 = st.columns(2, gap="small")
-        with a1:
+        with st.popover("Ações", use_container_width=True):
             clear_dept = st.button(
                 "Limpar depto",
                 key="mtz_clear_dept",
                 use_container_width=True,
             )
-        with a2:
             show_all = st.button(
                 "Ver todos",
                 key="mtz_show_all",
@@ -109,6 +102,93 @@ def _render_selection_context(
 
     return clear_dept, show_all
 
+
+
+
+
+
+
+def _render_selection_context(
+    *,
+    is_group_view: bool,
+    grupos: list[dict],
+    grupo_id,
+    departamento_id,
+    is_admin: bool,
+    dept_name_fn,
+) -> tuple[bool, bool]:
+    clear_dept = False
+    show_all = False
+
+    if is_group_view:
+        gn = next((g.get("nome") for g in grupos if g.get("id") == grupo_id), "—")
+        st.markdown(
+            f'<div class="enterprise-chip"><strong>Grupo:</strong> {gn}</div>',
+            unsafe_allow_html=True,
+        )
+        return False, False
+
+    if departamento_id and is_admin:
+        dn = dept_name_fn(departamento_id) or "(departamento)"
+        st.markdown(
+            f'<div class="enterprise-chip"><strong>Depto:</strong> {dn}</div>',
+            unsafe_allow_html=True,
+        )
+
+    if is_admin:
+        clear_dept = st.button(
+            "Limpar depto",
+            key="mtz_clear_dept",
+            use_container_width=True,
+        )
+        show_all = st.button(
+            "Ver todos",
+            key="mtz_show_all",
+            use_container_width=True,
+        )
+
+    return clear_dept, show_all
+
+
+
+
+
+def __render_selection_context(
+    *,
+    is_group_view: bool,
+    grupos: list[dict],
+    grupo_id,
+    departamento_id,
+    is_admin: bool,
+    dept_name_fn,
+) -> tuple[bool, bool]:
+    """Renderiza chips/contexto da seleção e retorna ações do usuário."""
+    col_chip, col_actions = st.columns([1.6, 1.2])
+
+    with col_chip:
+        if is_group_view:
+            gn = next((g.get("nome") for g in grupos if g.get("id") == grupo_id), "—")
+            st.markdown(
+                f'<div class="enterprise-chip"><strong>Grupo:</strong> {gn}</div>',
+                unsafe_allow_html=True,
+            )
+        elif departamento_id and is_admin:
+            dn = dept_name_fn(departamento_id) or "(departamento)"
+            st.markdown(
+                f'<div class="enterprise-chip"><strong>Depto:</strong> {dn}</div>',
+                unsafe_allow_html=True,
+            )
+
+    with col_actions:
+        if not is_group_view and is_admin:
+            c1, c2 = st.columns(2)
+            with c1:
+                clear_dept = st.button("Limpar depto", key="mtz_clear_dept", use_container_width=True)
+            with c2:
+                show_all = st.button("Ver todos", key="mtz_show_all", use_container_width=True)
+            return clear_dept, show_all
+
+    return False, False
 
 def _inject_css():
     st.markdown("""<style>
@@ -135,37 +215,6 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
   transition:transform .08s ease,border-color .12s ease,background .12s ease;}
 .mtz-card-grid [data-testid="stButton"] button:hover{
   transform:translateY(-1px);border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.06);}
-.mtz-inline-summary{margin:10px 0 12px 0;padding:10px 12px;border-radius:14px;
-  border:1px solid rgba(18,183,106,.28);background:rgba(18,183,106,.08)}
-.mtz-inline-summary strong{color:rgba(255,255,255,.95)}
-.mtz-change-chip-wrap{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
-.mtz-change-chip{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;
-  border:1px solid rgba(18,183,106,.24);background:rgba(18,183,106,.10);
-  color:rgba(255,255,255,.88);font-size:.78rem}
-.mtz-preview-box{padding:10px 12px;border-radius:14px;
-  border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03)}
-.mtz-toolbar{position:sticky;top:68px;z-index:50;margin:8px 0 14px 0;padding:12px;border-radius:16px;
-  border:1px solid rgba(255,255,255,.10);background:rgba(18,18,18,.92);backdrop-filter:blur(10px);
-  box-shadow:0 10px 24px rgba(0,0,0,.22)}
-.mtz-toolbar-summary{font-size:.82rem;color:rgba(255,255,255,.72);margin-top:6px}
-.mtz-toolbar-summary b{color:rgba(255,255,255,.95)}
-.mtz-sector-pending{display:inline-flex;align-items:center;justify-content:center;min-width:72px;padding:4px 10px;
-  border-radius:999px;border:1px solid rgba(245,158,11,.30);background:rgba(245,158,11,.12);
-  color:rgba(255,255,255,.90);font-size:.78rem;font-weight:600;white-space:nowrap}
-.mtz-op-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;
-  border:1px solid rgba(56,189,248,.28);background:rgba(56,189,248,.10);font-size:.78rem;
-  color:rgba(255,255,255,.92);font-weight:600}
-.mtz-warn-box{padding:10px 12px;border-radius:14px;margin:8px 0 10px 0;
-  border:1px solid rgba(245,158,11,.30);background:rgba(245,158,11,.10)}
-.mtz-intel-panel{margin:6px 0 14px 0;padding:12px 14px;border-radius:16px;border:1px solid rgba(56,189,248,.18);background:linear-gradient(180deg, rgba(56,189,248,.08), rgba(255,255,255,.03));}
-.mtz-intel-alert{padding:8px 10px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);font-size:.82rem;margin-top:6px}
-.mtz-intel-risk{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);height:100%}
-.mtz-intel-risk small{display:block;color:rgba(255,255,255,.62);margin-top:4px}
-.mtz-sector-chip{display:inline-flex;align-items:center;justify-content:center;padding:4px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);font-size:.76rem;font-weight:600;white-space:nowrap}
-.mtz-sector-chip.bad{border-color:rgba(239,68,68,.28);background:rgba(239,68,68,.10)}
-.mtz-sector-chip.warn{border-color:rgba(245,158,11,.28);background:rgba(245,158,11,.10)}
-.mtz-sector-chip.ok{border-color:rgba(34,197,94,.28);background:rgba(34,197,94,.10)}
-.mtz-sector-reco{font-size:.8rem;color:rgba(255,255,255,.72);margin-top:6px}
 </style>""", unsafe_allow_html=True)
 
 
@@ -235,64 +284,6 @@ def _style_heatmap(df_: pd.DataFrame) -> pd.DataFrame:
         s.loc[df_[col] == "OK", col] = "background-color:rgba(46,204,113,.18);"
         s.loc[df_[col] == "!", col] = "background-color:rgba(231,76,60,.20);"
     return s
-
-
-def _stash_pending_sector_changes(*, state_key: str, preview_key: str, summary_key: str, changes: list[tuple], eq_label_short: dict[str, str], svc_names: dict[str, str], field_labels: dict[str, str], semana_lote: int | None) -> None:
-    if not changes:
-        st.session_state.pop(state_key, None)
-        st.session_state.pop(preview_key, None)
-        st.session_state.pop(summary_key, None)
-        return
-
-    st.session_state[state_key] = changes
-    st.session_state[preview_key] = build_change_preview_lines(
-        changes,
-        eq_label_short=eq_label_short,
-        svc_names=svc_names,
-        field_labels=field_labels,
-        limit=8,
-    )
-    st.session_state[summary_key] = summarize_change_payload(
-        changes,
-        field_labels=field_labels,
-        semana=semana_lote,
-    )
-
-
-def _pending_state_keys(kb: str) -> tuple[str, str, str]:
-    return (
-        f"pending_changes_{kb}",
-        f"pending_preview_{kb}",
-        f"pending_summary_{kb}",
-    )
-
-
-def _clear_pending_state(*keys: str) -> None:
-    for key in keys:
-        st.session_state.pop(key, None)
-
-
-def _clear_group_pending_changes(*, revisao_id, grupo_id, setor_nomes: list[str]) -> int:
-    cleared = 0
-    for setor_nome in setor_nomes:
-        kb = f"mat_ed_{revisao_id}_{grupo_id}_{setor_nome}".replace(" ", "_")
-        changes_key, preview_key, summary_key = _pending_state_keys(kb)
-        if st.session_state.get(changes_key):
-            cleared += len(st.session_state.get(changes_key) or [])
-        _clear_pending_state(changes_key, preview_key, summary_key)
-    return cleared
-
-
-def _pending_counts_by_sector(*, revisao_id, grupo_id, setor_nomes: list[str]) -> tuple[dict[str, int], int]:
-    counts: dict[str, int] = {}
-    total = 0
-    for setor_nome in setor_nomes:
-        kb = f"mat_ed_{revisao_id}_{grupo_id}_{setor_nome}".replace(" ", "_")
-        changes_key, _, _ = _pending_state_keys(kb)
-        qty = len(st.session_state.get(changes_key) or [])
-        counts[setor_nome] = qty
-        total += qty
-    return counts, total
 
 
 def _reportlab_available() -> bool:
@@ -1058,10 +1049,6 @@ def render_matriz():
         st.session_state.setdefault("matriz_show_legend", False)
         st.session_state.setdefault("matriz_departamento_id", None)
         st.session_state.setdefault("matriz_atraso_dias", 7)
-        st.session_state.setdefault("matriz_operation_mode", False)
-        st.session_state.setdefault("matriz_big_batch_alert", 80)
-        st.session_state.setdefault("mtz_sem_pick", "Todas as semanas")
-        st.session_state.setdefault("mtz_semana_lote", 0)
 
         revisoes = (
             sb.table("revisoes").select("id,titulo,status,created_at,data_inicio,semanas_total") .eq(
@@ -1103,7 +1090,7 @@ def render_matriz():
                 '<div class="enterprise-sticky">',
                 unsafe_allow_html=True)
             c1, c2, c3, c4 = st.columns(
-                [2.2, 1.8, 1.55, 1.65], vertical_alignment="bottom")
+                [2.7, 1.1, 1.7, 1.5], vertical_alignment="bottom")
             with c1:
                 st.markdown(
                     '<div class="enterprise-title">Matriz Operacional</div>',
@@ -1155,32 +1142,14 @@ def render_matriz():
                     st.session_state["matriz_revisao_id"] = rmap[pick]
             with c4:
                 st.session_state["matriz_limit_eq"] = st.number_input(
-                    "Limite eq.",
-                    min_value=20,
-                    max_value=500,
-                    value=int(st.session_state["matriz_limit_eq"]),
-                    step=20,
-                    key="mtz_lim_pick",
-                )
-                tcol1, tcol2 = st.columns(2, gap="small")
-                with tcol1:
-                    st.session_state["matriz_show_legend"] = st.toggle(
-                        "Legenda",
-                        value=bool(st.session_state["matriz_show_legend"]),
-                        key="mtz_leg",
-                    )
-                with tcol2:
-                    st.session_state["matriz_operation_mode"] = st.toggle(
-                        "Modo operação",
-                        value=bool(st.session_state["matriz_operation_mode"]),
-                        key="mtz_operation_mode",
-                        help="Enxuga a tela para focar na execução da matriz.",
-                    )
+                    "Limite eq.", min_value=20, max_value=500, value=int(
+                        st.session_state["matriz_limit_eq"]), step=20, key="mtz_lim_pick")
+                st.session_state["matriz_show_legend"] = st.toggle(
+                    "Legenda", value=bool(st.session_state["matriz_show_legend"]), key="mtz_leg")
                 if st.button(
                     "Recarregar",
                     key="mtz_reload",
-                    use_container_width=True,
-                ):
+                        use_container_width=True):
                     bump_data_version()
                     clear_cached_functions(
                         _load_payload,
@@ -1193,13 +1162,6 @@ def render_matriz():
                     st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
-        if st.session_state.get("matriz_operation_mode"):
-            st.markdown(
-                '<div class="mtz-op-chip">⚡ Modo operação ativo</div>'
-                '<div class="mtz-op-note">A tela prioriza checklist, lote e execução. O contexto atual continua preservado entre recargas.</div>',
-                unsafe_allow_html=True,
-            )
-
         # Tela de selecao — cards com barra de progresso (Melhoria 3)
         if st.session_state.get("matriz_view") != "group":
             revisao_id = st.session_state.get("matriz_revisao_id")
@@ -1208,38 +1170,33 @@ def render_matriz():
                     "data_version", "0")) if revisao_id else {}
 
             # FIX #9: busca por nome OU departamento, com filtro de status
-            if st.session_state.get("matriz_operation_mode"):
-                search = st.session_state.get("matriz_grp_search", "")
-                _status_filter = st.session_state.get("mtz_status_filter", "Todos")
-                _sort_by = st.session_state.get("mtz_sort_by", "% ↑ (mais atrasados)")
-            else:
-                sc1, sc2, sc3 = st.columns([2.2, 1.15, 1.15], vertical_alignment="bottom")
-                with sc1:
-                    st.session_state.setdefault("matriz_grp_search", "")
-                    search = st.text_input(
-                        "🔎 Buscar",
-                        value=st.session_state["matriz_grp_search"],
-                        placeholder="Grupo ou departamento…",
-                        key="mtz_search_in")
-                    st.session_state["matriz_grp_search"] = search
-                with sc2:
-                    _status_filter = st.selectbox(
-                        "Status",
-                        [
-                            "Todos",
-                            "🔴 Crítico (<50%)",
-                            "🟡 Em andamento (50–79%)",
-                            "🟢 Avançado (≥80%)",
-                            "⬜ Sem dados"],
-                        index=0,
-                        key="mtz_status_filter")
-                with sc3:
-                    _sort_by = st.selectbox("Ordenar",
-                                            ["Nome",
-                                             "% ↑ (mais atrasados)",
-                                             "% ↓ (mais avançados)"],
-                                            index=1,
-                                            key="mtz_sort_by")
+            sc1, sc2, sc3 = st.columns([2.2, 1.15, 1.15], vertical_alignment="bottom")
+            with sc1:
+                st.session_state.setdefault("matriz_grp_search", "")
+                search = st.text_input(
+                    "🔎 Buscar",
+                    value=st.session_state["matriz_grp_search"],
+                    placeholder="Grupo ou departamento…",
+                    key="mtz_search_in")
+                st.session_state["matriz_grp_search"] = search
+            with sc2:
+                _status_filter = st.selectbox(
+                    "Status",
+                    [
+                        "Todos",
+                        "🔴 Crítico (<50%)",
+                        "🟡 Em andamento (50–79%)",
+                        "🟢 Avançado (≥80%)",
+                        "⬜ Sem dados"],
+                    index=0,
+                    key="mtz_status_filter")
+            with sc3:
+                _sort_by = st.selectbox("Ordenar",
+                                        ["Nome",
+                                         "% ↑ (mais atrasados)",
+                                         "% ↓ (mais avançados)"],
+                                        index=1,
+                                        key="mtz_sort_by")
 
             q = (search or "").strip().lower()
             dep_id = st.session_state.get("matriz_departamento_id")
@@ -1521,14 +1478,8 @@ def render_matriz():
                 st.markdown('</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
-        operation_mode = bool(st.session_state.get("matriz_operation_mode"))
-        if operation_mode:
-            tab_matriz, tab_editor, tab_exportar = st.tabs([
-                "⚙️ Matriz", "✏️ Editar célula", "⬇️ Exportar"])
-            tab_resumo = tab_evolucao = tab_tempos = None
-        else:
-            tab_resumo, tab_matriz, tab_evolucao, tab_tempos, tab_editor, tab_exportar = st.tabs([
-                "📊 Resumo", "⚙️ Matriz", "📈 Evolução", "⏱️ Tempos", "✏️ Editar célula", "⬇️ Exportar"])
+        tab_resumo, tab_matriz, tab_evolucao, tab_tempos, tab_editor, tab_exportar = st.tabs([
+            "📊 Resumo", "⚙️ Matriz", "📈 Evolução", "⏱️ Tempos", "✏️ Editar célula", "⬇️ Exportar"])
 
         # FIX #3 e #8: pré-computar dados de export ANTES das tabs
         # Assim Exportar funciona mesmo sem o usuário ter visitado Matriz ou
@@ -1600,169 +1551,83 @@ def render_matriz():
         view_agg = pd.DataFrame(
             _view_agg_rows) if _view_agg_rows else pd.DataFrame()
 
-        if tab_resumo is not None:
-            # ── TAB: RESUMO ──
-            with tab_resumo:
-                st.markdown("### Ranking de equipamentos por progresso")
-                st.caption("Ordenado do mais atrasado para o mais adiantado.")
-                if resumo_df.empty:
-                    st.info("Sem dados de resumo para esta revisão.")
-                else:
-                    # KPIs rápidos no topo
-                    rk1, rk2, rk3, rk4 = st.columns(4)
-                    rk1.metric("Total equip.", len(resumo_df))
-                    rk2.metric(
-                        "100% concluídos", int(
-                            (resumo_df["%"] >= 100).sum()))
-                    rk3.metric("Progresso médio", f"{int(resumo_df['%'].mean())}%")
-                    rk4.metric("Sem início (0%)", int((resumo_df["%"] == 0).sum()))
-                    st.markdown("---")
-                    # Cards visuais — única representação, sem tabela duplicada
-                    for _, row in resumo_df.iterrows():
-                        pct_r = int(row["%"])
-                        color = _risk_color(pct_r)
-                        c1r, c2r = st.columns([0.6, 0.4])
-                        with c1r:
-                            st.markdown(
-                                f'<div style="font-size:.88rem;font-weight:600;margin-bottom:3px">{row["Equipamento"]}</div>'
-                                f'<div style="background:rgba(255,255,255,.08);border-radius:4px;height:7px">'
-                                f'<div style="width:{pct_r}%;background:{color};height:7px;border-radius:4px;transition:width .4s"></div></div>',
-                                unsafe_allow_html=True)
-                        with c2r:
-                            _done_lbl = int(row["Concluidos"])
-                            _tot_lbl = int(row["Total"])
-                            _st_lbl = "✅ Concluído" if pct_r >= 100 else (
-                                "🔴 Sem início" if pct_r == 0 else f"🟡 {pct_r}%")
-                            st.markdown(
-                                f'<div style="font-size:.82rem;color:rgba(255,255,255,.65);padding-top:3px">'
-                                f'<span style="color:{color};font-weight:700">{pct_r}%</span>'
-                                f'  ·  {_done_lbl}/{_tot_lbl} etapas'
-                                f'  <span style="opacity:.6">{_st_lbl}</span></div>',
-                                unsafe_allow_html=True)
+        # ── TAB: RESUMO ──
+        with tab_resumo:
+            st.markdown("### Ranking de equipamentos por progresso")
+            st.caption("Ordenado do mais atrasado para o mais adiantado.")
+            if resumo_df.empty:
+                st.info("Sem dados de resumo para esta revisão.")
+            else:
+                # KPIs rápidos no topo
+                rk1, rk2, rk3, rk4 = st.columns(4)
+                rk1.metric("Total equip.", len(resumo_df))
+                rk2.metric(
+                    "100% concluídos", int(
+                        (resumo_df["%"] >= 100).sum()))
+                rk3.metric("Progresso médio", f"{int(resumo_df['%'].mean())}%")
+                rk4.metric("Sem início (0%)", int((resumo_df["%"] == 0).sum()))
+                st.markdown("---")
+                # Cards visuais — única representação, sem tabela duplicada
+                for _, row in resumo_df.iterrows():
+                    pct_r = int(row["%"])
+                    color = _risk_color(pct_r)
+                    c1r, c2r = st.columns([0.6, 0.4])
+                    with c1r:
+                        st.markdown(
+                            f'<div style="font-size:.88rem;font-weight:600;margin-bottom:3px">{row["Equipamento"]}</div>'
+                            f'<div style="background:rgba(255,255,255,.08);border-radius:4px;height:7px">'
+                            f'<div style="width:{pct_r}%;background:{color};height:7px;border-radius:4px;transition:width .4s"></div></div>',
+                            unsafe_allow_html=True)
+                    with c2r:
+                        _done_lbl = int(row["Concluidos"])
+                        _tot_lbl = int(row["Total"])
+                        _st_lbl = "✅ Concluído" if pct_r >= 100 else (
+                            "🔴 Sem início" if pct_r == 0 else f"🟡 {pct_r}%")
+                        st.markdown(
+                            f'<div style="font-size:.82rem;color:rgba(255,255,255,.65);padding-top:3px">'
+                            f'<span style="color:{color};font-weight:700">{pct_r}%</span>'
+                            f'  ·  {_done_lbl}/{_tot_lbl} etapas'
+                            f'  <span style="opacity:.6">{_st_lbl}</span></div>',
+                            unsafe_allow_html=True)
 
         # ── TAB: MATRIZ ──
         with tab_matriz:
             st.markdown("### Drill-down por setor")
             st.caption(
                 "Marque as etapas (D/R/M) direto na tabela. Setores 🔴 são prioridade — expanda para editar.")
-
-            setor_names_sorted = sorted(setor_to_services.keys(), key=lambda x: x.lower())
-            rev_start = pd.to_datetime((rev_row or {}).get("data_inicio") or (
-                rev_row or {}).get("created_at"), errors="coerce", utc=True)
-            if pd.isna(rev_start):
-                rev_start = pd.Timestamp(_now_utc()).normalize()
-            pending_counts_map, pending_total_all = _pending_counts_by_sector(
-                revisao_id=revisao_id,
-                grupo_id=grupo_id,
-                setor_nomes=setor_names_sorted,
-            )
-            pending_sector_total = sum(1 for qty in pending_counts_map.values() if qty > 0)
-            _days_since_start = int((pd.Timestamp(_now_utc()) - rev_start).days) if isinstance(rev_start, pd.Timestamp) else 0
-            sector_intel_rows = []
-            for _setor_nome in setor_names_sorted:
-                _svs_intel = sorted(setor_to_services[_setor_nome], key=lambda x: (x.get("nome") or "").lower())
-                _svc_ids_intel = [s["id"] for s in _svs_intel if s.get("id")]
-                if not _svc_ids_intel:
-                    continue
-                sector_intel_rows.append(
-                    build_sector_intelligence(
-                        equipamentos=eqs,
-                        svc_ids=_svc_ids_intel,
-                        task_map=task_map,
-                        setor_nome=_setor_nome,
-                        atraso_dias=int(atraso_dias),
-                        days_since_start=_days_since_start,
-                    )
+            atraso_dias = int(st.session_state.get("matriz_atraso_dias", 7) or 7)
+            fc1, fc2, fc3 = st.columns([1, 1.5, 1.5])
+            with fc1:
+                atraso_dias = st.number_input(
+                    "Atraso (dias)",
+                    min_value=1,
+                    max_value=90,
+                    value=atraso_dias,
+                    step=1,
+                    key="mtz_atraso_in",
+                    help="Marca coluna M como atraso quando passou mais de X dias.")
+                st.session_state["matriz_atraso_dias"] = int(atraso_dias)
+            with fc2:
+                # Melhoria 4: filtro de semana
+                sem_opts = ["Todas as semanas"] + \
+                    [f"Semana {s}" for s in semanas_disp]
+                sem_pick = st.selectbox(
+                    "Filtrar por semana",
+                    sem_opts,
+                    index=0,
+                    key="mtz_sem_pick")
+                semana_filtro = None if sem_pick == "Todas as semanas" else int(
+                    sem_pick.split()[-1])
+            with fc3:
+                semana_lote = st.number_input(
+                    "📅 Semana do apontamento",
+                    min_value=0, max_value=99,
+                    value=int(_semana_sugerida),
+                    step=1, key="mtz_semana_lote",
+                    help=f"Semana sugerida automaticamente ({_semana_sugerida}) com base na data de início da revisão. "
+                    "Altere se estiver registrando uma etapa de outra semana. "
+                    "Aplicada apenas em tarefas que ainda não têm semana definida."
                 )
-            intel_summary = build_global_intelligence_summary(sector_intel_rows)
-
-            with st.container():
-                st.markdown('<div class="mtz-toolbar">', unsafe_allow_html=True)
-                fc1, fc2, fc3, fc4 = st.columns([0.95, 1.35, 1.2, 1.1])
-                with fc1:
-                    atraso_dias = st.number_input(
-                        "Atraso (dias)",
-                        min_value=1,
-                        max_value=90,
-                        value=int(st.session_state.get("matriz_atraso_dias", 7)),
-                        step=1,
-                        key="mtz_atraso_in",
-                        help="Marca coluna M como atraso quando passou mais de X dias.",
-                    )
-                    st.session_state["matriz_atraso_dias"] = int(atraso_dias)
-                with fc2:
-                    sem_opts = ["Todas as semanas"] + [f"Semana {s}" for s in semanas_disp]
-                    sem_pick = st.selectbox(
-                        "Filtrar por semana",
-                        sem_opts,
-                        index=0,
-                        key="mtz_sem_pick",
-                    )
-                    semana_filtro = None if sem_pick == "Todas as semanas" else int(sem_pick.split()[-1])
-                with fc3:
-                    semana_lote = st.number_input(
-                        "📅 Semana do apontamento",
-                        min_value=0,
-                        max_value=99,
-                        value=int(_semana_sugerida),
-                        step=1,
-                        key="mtz_semana_lote",
-                        help=f"Semana sugerida automaticamente ({_semana_sugerida}) com base na data de início da revisão. "
-                        "Altere se estiver registrando uma etapa de outra semana. "
-                        "Aplicada apenas em tarefas que ainda não têm semana definida.",
-                    )
-                with fc4:
-                    st.markdown("**Ações rápidas**")
-                    clear_all_pending = st.button(
-                        "Limpar seleções pendentes",
-                        key=f"mtz_clear_pending_all_{revisao_id}_{grupo_id}",
-                        use_container_width=True,
-                        disabled=(pending_total_all == 0),
-                    )
-                    st.caption("Remove apenas previews e pendências ainda não confirmadas.")
-
-                st.markdown(
-                    f'<div class="mtz-toolbar-summary">'
-                    f'Setores: <b>{len(setor_names_sorted)}</b> &nbsp;·&nbsp; '
-                    f'Com pendências: <b>{pending_sector_total}</b> &nbsp;·&nbsp; '
-                    f'Alterações aguardando confirmação: <b>{pending_total_all}</b> &nbsp;·&nbsp; '
-                    f'Semana do lote: <b>{int(semana_lote)}</b>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            if sector_intel_rows:
-                st.markdown('<div class="mtz-intel-panel">', unsafe_allow_html=True)
-                ia, ib, ic = st.columns(3)
-                ia.metric("Setores em risco alto", int(intel_summary.get("critical_sectors", 0)))
-                ib.metric("Frotas críticas", int(intel_summary.get("critical_equipment", 0)))
-                ic.metric("Setores com atraso", int(intel_summary.get("delayed_sectors", 0)))
-                for _alert in intel_summary.get("alerts", []):
-                    st.markdown(f'<div class="mtz-intel-alert">⚠️ {_alert}</div>', unsafe_allow_html=True)
-                _top_risks = intel_summary.get("top_risks") or []
-                if _top_risks:
-                    st.markdown("**Top 3 setores para priorizar agora**")
-                    _risk_cols = st.columns(min(len(_top_risks), 3))
-                    for _idx, _risk in enumerate(_top_risks):
-                        with _risk_cols[_idx]:
-                            st.markdown(
-                                f'<div class="mtz-intel-risk"><strong>{_risk.get("risk_icon", "🔎")} {_risk.get("setor", "-")}</strong>'
-                                f'<br>{int(_risk.get("pct", 0))}% concluído · {int(_risk.get("eq_critical", 0))} crítica(s)'
-                                f'<small>{_risk.get("recommendation", "")}</small></div>',
-                                unsafe_allow_html=True,
-                            )
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            if clear_all_pending:
-                cleared = _clear_group_pending_changes(
-                    revisao_id=revisao_id,
-                    grupo_id=grupo_id,
-                    setor_nomes=setor_names_sorted,
-                )
-                if cleared:
-                    st.toast(f"🧹 {cleared} alteração(ões) pendente(s) removida(s).")
-                st.rerun()
 
             rev_start = pd.to_datetime((rev_row or {}).get("data_inicio") or (
                 rev_row or {}).get("created_at"), errors="coerce", utc=True)
@@ -1773,7 +1638,9 @@ def render_matriz():
             # direto para aquele setor
             _chip_target = st.session_state.pop("mtz_chip_jump", None)
 
-            for setor_nome in setor_names_sorted:
+            for setor_nome in sorted(
+                    setor_to_services.keys(),
+                    key=lambda x: x.lower()):
                 svs = sorted(
                     setor_to_services[setor_nome],
                     key=lambda x: (
@@ -1812,17 +1679,9 @@ def render_matriz():
                 _sector_open = _sector_is_open(revisao_id, grupo_id, setor_nome)
 
                 with st.container(border=True):
-                    _pending_count = int(pending_counts_map.get(setor_nome, 0))
-                    _intel = next((row for row in sector_intel_rows if row.get("setor") == setor_nome), {})
-                    _head_l, _head_m, _head_r = st.columns([0.56, 0.20, 0.24])
+                    _head_l, _head_r = st.columns([0.78, 0.22])
                     with _head_l:
                         st.markdown(f"#### {_lbl_exp}")
-                    with _head_m:
-                        if _pending_count:
-                            st.markdown(
-                                f'<div class="mtz-sector-pending">{_pending_count} pend.</div>',
-                                unsafe_allow_html=True,
-                            )
                     with _head_r:
                         _toggle_label = "Ocultar setor" if _sector_open else "Abrir setor"
                         if st.button(
@@ -1832,34 +1691,6 @@ def render_matriz():
                         ):
                             _sector_set_open(revisao_id, grupo_id, setor_nome, not _sector_open)
                             st.rerun()
-
-                    _chip1, _chip2, _chip3, _chip4 = st.columns(4)
-                    with _chip1:
-                        _risk_cls = "bad" if _intel.get("risk_level") == "alto" else ("warn" if _intel.get("risk_level") == "moderado" else "ok")
-                        st.markdown(
-                            f'<div class="mtz-sector-chip {_risk_cls}">{_intel.get("risk_icon", "🔎")} risco {str(_intel.get("risk_level", "-")).title()}</div>',
-                            unsafe_allow_html=True,
-                        )
-                    with _chip2:
-                        st.markdown(
-                            f'<div class="mtz-sector-chip">Críticas: {int(_intel.get("eq_critical", 0))}</div>',
-                            unsafe_allow_html=True,
-                        )
-                    with _chip3:
-                        st.markdown(
-                            f'<div class="mtz-sector-chip">Sem início: {int(_intel.get("eq_not_started", 0))}</div>',
-                            unsafe_allow_html=True,
-                        )
-                    with _chip4:
-                        st.markdown(
-                            f'<div class="mtz-sector-chip">Atraso M: {int(_intel.get("atraso_m", 0))}</div>',
-                            unsafe_allow_html=True,
-                        )
-                    if _intel.get("recommendation"):
-                        st.markdown(
-                            f'<div class="mtz-sector-reco">💡 {_intel.get("recommendation")}</div>',
-                            unsafe_allow_html=True,
-                        )
 
                     if not _sector_open:
                         st.caption("Clique em **Abrir setor** para carregar a grade e editar apenas este setor.")
@@ -1959,65 +1790,6 @@ def render_matriz():
                                     col: st.column_config.CheckboxColumn(col) for col in svc_bool}}, disabled=[
                                 "Status", "Equipamento"])
 
-                    _pending_changes_key, _pending_preview_key, _pending_summary_key = _pending_state_keys(kb)
-                    _field_lbl = {
-                        "etapa_d": "D",
-                        "etapa_r": "R",
-                        "etapa_m": "M"}
-
-                    live_changes = []
-                    live_changed_eq = []
-                    live_field_counts = {"etapa_d": 0, "etapa_r": 0, "etapa_m": 0}
-                    if edited is not None:
-                        for equip_id, row in edited.iterrows():
-                            if equip_id not in df_display.index:
-                                continue
-                            row_changed = False
-                            for col in svc_bool:
-                                ov = bool(df_display.loc[equip_id, col])
-                                nv = bool(row[col])
-                                if ov != nv:
-                                    sid, field = col_meta[col]
-                                    live_changes.append((equip_id, sid, field, nv))
-                                    live_field_counts[field] = live_field_counts.get(field, 0) + 1
-                                    row_changed = True
-                            if row_changed:
-                                live_changed_eq.append(eq_label_short.get(equip_id, str(equip_id)))
-
-                    if live_changes:
-                        _live_fields = " · ".join(
-                            f"{_field_lbl.get(field, field)}: {qty}"
-                            for field, qty in live_field_counts.items() if qty
-                        )
-                        st.markdown(
-                            '<div class="mtz-inline-summary">'
-                            f'<strong>{len(live_changes)} alteração(ões) pendentes</strong>'
-                            f' &nbsp;·&nbsp; {len(live_changed_eq)} frota(s) afetada(s)'
-                            + (f' &nbsp;·&nbsp; {_live_fields}' if _live_fields else '')
-                            + '<div class="mtz-change-chip-wrap">'
-                            + "".join(
-                                f'<span class="mtz-change-chip">{eq_name}</span>'
-                                for eq_name in live_changed_eq[:10]
-                            )
-                            + (f'<span class="mtz-change-chip">+{len(live_changed_eq) - 10} outras</span>' if len(live_changed_eq) > 10 else '')
-                            + '</div></div>',
-                            unsafe_allow_html=True,
-                        )
-
-                    action_base = edited if edited is not None else df_display
-                    with st.container(border=True):
-                        st.markdown("**Ações rápidas do setor**")
-                        aq1, aq2, aq3, aq4 = st.columns(4)
-                        with aq1:
-                            mass_d = st.button("Selecionar todos D", key=f"mass_d_{kb}", use_container_width=True)
-                        with aq2:
-                            mass_r = st.button("Selecionar todos R", key=f"mass_r_{kb}", use_container_width=True)
-                        with aq3:
-                            mass_m = st.button("Selecionar todos M", key=f"mass_m_{kb}", use_container_width=True)
-                        with aq4:
-                            clear_sector = st.button("Limpar setor", key=f"mass_clear_{kb}", use_container_width=True)
-                        st.caption("Use as ações rápidas para preencher o setor inteiro e depois confirme no preview abaixo.")
-
                     sv1, sv2, _ = st.columns([1.2, 1.8, 1])
                     with sv1:
                         save_now = form_submit_button(
@@ -2027,41 +1799,14 @@ def render_matriz():
                         )
                     with sv2:
                         st.caption(
-                            "Marque/desmarque etapas acima, use seleção em massa se precisar e clique em Salvar.")
+                            "Marque/desmarque etapas acima e clique em Salvar.")
 
-                    if mass_d or mass_r or mass_m or clear_sector:
-                        target_field = None
-                        target_value = True
-                        if mass_d:
-                            target_field = "etapa_d"
-                        elif mass_r:
-                            target_field = "etapa_r"
-                        elif mass_m:
-                            target_field = "etapa_m"
-                        elif clear_sector:
-                            target_value = False
-
-                        mass_changes = build_mass_toggle_changes(
-                            action_base,
-                            svc_bool=svc_bool,
-                            col_meta=col_meta,
-                            target_field=target_field,
-                            target_value=target_value,
-                        )
-                        if not mass_changes:
-                            st.info("Nenhuma alteração adicional encontrada para essa ação em massa.")
-                        else:
-                            _stash_pending_sector_changes(
-                                state_key=_pending_changes_key,
-                                preview_key=_pending_preview_key,
-                                summary_key=_pending_summary_key,
-                                changes=mass_changes,
-                                eq_label_short=eq_label_short,
-                                svc_names=_svc_names,
-                                field_labels=_field_lbl,
-                                semana_lote=semana_lote,
-                            )
-                            st.rerun()
+                    _pending_changes_key = f"pending_changes_{kb}"
+                    _pending_preview_key = f"pending_preview_{kb}"
+                    _field_lbl = {
+                        "etapa_d": "D",
+                        "etapa_r": "R",
+                        "etapa_m": "M"}
 
                     if save_now:
                         if edited is None:
@@ -2083,45 +1828,29 @@ def render_matriz():
                                     _pending_changes_key, None)
                                 st.session_state.pop(
                                     _pending_preview_key, None)
-                                st.session_state.pop(
-                                    _pending_summary_key, None)
                                 st.info(
                                     "Nenhuma alteração detectada — faça alguma marcação antes de salvar.")
                             else:
-                                _stash_pending_sector_changes(
-                                    state_key=_pending_changes_key,
-                                    preview_key=_pending_preview_key,
-                                    summary_key=_pending_summary_key,
-                                    changes=changes,
+                                _prev_lines = build_change_preview_lines(
+                                    changes,
                                     eq_label_short=eq_label_short,
                                     svc_names=_svc_names,
                                     field_labels=_field_lbl,
-                                    semana_lote=semana_lote,
+                                    limit=8,
                                 )
+                                st.session_state[_pending_changes_key] = changes
+                                st.session_state[_pending_preview_key] = _prev_lines
                                 st.rerun()
 
                     pending_changes = st.session_state.get(
                         _pending_changes_key) or []
                     pending_preview = st.session_state.get(
                         _pending_preview_key) or []
-                    pending_summary = st.session_state.get(
-                        _pending_summary_key) or []
                     if pending_changes:
                         with st.container(border=True):
-                            st.markdown('<div class="mtz-preview-box">', unsafe_allow_html=True)
                             st.markdown(
-                                f"**Preview do batch — {len(pending_changes)} alteração(ões)**")
-                            for line in pending_summary:
-                                st.markdown(line)
-                            if pending_preview:
-                                st.markdown("**Amostra das alterações:**")
-                                st.markdown("\n".join(pending_preview))
-                            _alert_limit = int(st.session_state.get("matriz_big_batch_alert", 80) or 80)
-                            if len(pending_changes) >= _alert_limit:
-                                st.markdown(
-                                    f'<div class="mtz-warn-box"><strong>Atenção:</strong> você está prestes a alterar <b>{len(pending_changes)}</b> itens neste setor.</div>',
-                                    unsafe_allow_html=True,
-                                )
+                                f"**{len(pending_changes)} alteração(ões) a salvar:**")
+                            st.markdown("\n".join(pending_preview))
                             c_yes, c_no, _ = st.columns([1, 1, 2])
                             with c_yes:
                                 confirm_now = st.button(
@@ -2129,12 +1858,10 @@ def render_matriz():
                             with c_no:
                                 cancel_now = st.button(
                                     "✖ Cancelar", key=f"no_{kb}", use_container_width=True)
-                            st.markdown('</div>', unsafe_allow_html=True)
 
                         if cancel_now:
                             st.session_state.pop(_pending_changes_key, None)
                             st.session_state.pop(_pending_preview_key, None)
-                            st.session_state.pop(_pending_summary_key, None)
                             st.rerun()
 
                         if confirm_now:
@@ -2172,7 +1899,6 @@ def render_matriz():
 
                             st.session_state.pop(_pending_changes_key, None)
                             st.session_state.pop(_pending_preview_key, None)
-                            st.session_state.pop(_pending_summary_key, None)
                             pb.success(
                                 f"✅ {ok} etapas salvas"
                                 + (f"  ·  {failed} falharam" if failed else "")
@@ -2202,321 +1928,319 @@ def render_matriz():
                     # sector_tables_for_export já foi pré-populado antes das
                     # tabs (fix #3)
 
-        if tab_evolucao is not None:
-            # ── TAB: EVOLUÇÃO SEMANAL ──
-            with tab_evolucao:
-                st.markdown("### Evolução semanal")
-                st.caption(
-                    "Acompanhe o ritmo de conclusão semana a semana versus a meta linear.")
+        # ── TAB: EVOLUÇÃO SEMANAL ──
+        with tab_evolucao:
+            st.markdown("### Evolução semanal")
+            st.caption(
+                "Acompanhe o ritmo de conclusão semana a semana versus a meta linear.")
 
-                col_evo1, col_evo2 = st.columns([1, 2])
-                with col_evo1:
-                    rank_mode = st.radio("Escopo:",
-                                         ["Grupo inteiro",
-                                          "Setor específico"],
-                                         horizontal=False,
-                                         key=f"evo_mode_{revisao_id}_{grupo_id}")
-                setor_sel_rank = None
-                with col_evo2:
-                    if rank_mode == "Setor específico":
-                        setores_rank = sorted(
-                            setor_to_services.keys(), key=lambda x: x.lower())
-                        # FIX #7: persistir setor selecionado entre reruns
-                        _evo_setor_key = f"evo_setor_val_{grupo_id}"
-                        _evo_default = st.session_state.get(
-                            _evo_setor_key, setores_rank[0] if setores_rank else None)
-                        _evo_idx = setores_rank.index(
-                            _evo_default) if _evo_default in setores_rank else 0
-                        setor_sel_rank = st.selectbox(
-                            "Setor",
-                            setores_rank,
-                            index=_evo_idx,
-                            key=f"evo_setor_{revisao_id}_{grupo_id}")
-                        st.session_state[_evo_setor_key] = setor_sel_rank
-                    else:
-                        st.caption(
-                            f"Analisando **{
-                                len(eqs)} equipamentos** · **{
-                                len(all_services)} serviços** · **{
-                                len(all_services) *
-                                3 *
-                                len(eqs)} etapas** no total")
-
-                chosen = all_services if rank_mode == "Grupo inteiro" else sorted(
-                    setor_to_services.get(
-                        setor_sel_rank, []), key=lambda x: (
-                        x.get("nome") or "").lower())
-                seen_e = set()
-                svc_ids_rank = []
-                for s in chosen:
-                    sid = s.get("id")
-                    if sid and sid not in seen_e:
-                        seen_e.add(sid)
-                        svc_ids_rank.append(sid)
-                total_cells_rank = int(len(eqs) * max(len(svc_ids_rank), 1) * 3)
-                rev_start2 = pd.to_datetime((rev_row or {}).get("data_inicio") or (
-                    rev_row or {}).get("created_at"), errors="coerce", utc=True)
-                if pd.isna(rev_start2):
-                    rev_start2 = pd.Timestamp(_now_utc()).normalize()
-                df_tasks = pd.DataFrame(tarefas)
-                if not df_tasks.empty:
-                    has_dt = any(
-                        (c in df_tasks.columns and df_tasks[c].notna().any()) for c in [
-                            "dt_etapa_d", "dt_etapa_r", "dt_etapa_m"])
-                    if has_dt:
-                        def _wk(s):
-                            dt = pd.to_datetime(s, errors="coerce", utc=True)
-                            return ((dt - rev_start2).dt.days.clip(lower=0) //
-                                    7 + 1).astype("Int64")
-                        events = []
-                        for dc in ["dt_etapa_d", "dt_etapa_r", "dt_etapa_m"]:
-                            if dc not in df_tasks.columns:
-                                continue
-                            sub = df_tasks[df_tasks["servico_id"].isin(
-                                svc_ids_rank)].copy()
-                            if sub.empty:
-                                continue
-                            sub["wk"] = _wk(sub[dc])
-                            sub = sub.dropna(subset=["wk"])
-                            if not sub.empty:
-                                events.append(sub[["wk"]].assign(cnt=1))
-                        if events:
-                            ev = pd.concat(events, ignore_index=True)
-                            agg = ev.groupby("wk", dropna=True)[
-                                "cnt"].sum().sort_index()
-                            cum = agg.cumsum()
-                            mw = int(max(cum.index.max(), agg.index.max()))
-                            idx = range(1, mw + 1)
-                            pc = (cum / max(total_cells_rank, 1) *
-                                  100).round(1).to_frame("Cumulativo (%)")
-                            ps = (agg / max(total_cells_rank, 1) *
-                                  100).round(1).to_frame("Na semana (%)")
-                            pc = pc.reindex(idx).ffill().fillna(0)
-                            ps = ps.reindex(idx).fillna(0)
-                            wt = int(
-                                (rev_row or {}).get("semanas_total") or mw or 1)
-                            meta = pd.Series([min(100.0, (w / max(wt, 1)) * 100)
-                                             for w in idx], index=idx, name="Meta (%)")
-                            # KPIs de evolução
-                            pct_atual = float(
-                                pc["Cumulativo (%)"].iloc[-1]) if not pc.empty else 0
-                            sem_atual = int(pc.index[-1]) if not pc.empty else 0
-                            meta_atual = float(
-                                meta.iloc[-1]) if len(meta) > 0 else 0
-                            delta_vs_meta = round(pct_atual - meta_atual, 1)
-                            mk1, mk2, mk3, mk4 = st.columns(4)
-                            mk1.metric("Progresso atual", f"{pct_atual:.1f}%")
-                            mk2.metric("Meta (semana atual)",
-                                       f"{meta_atual:.1f}%",
-                                       delta=f"{delta_vs_meta:+.1f}%",
-                                       delta_color="normal" if delta_vs_meta >= 0 else "inverse")
-                            mk3.metric("Semanas decorridas", str(sem_atual))
-                            mk4.metric("Total etapas",
-                                       f"{int(cum.iloc[-1])}/{total_cells_rank}")
-                            st.divider()
-                            st.line_chart(pc.join(ps).join(meta))
-                            with st.expander("📋 Tabela detalhada", expanded=False):
-                                det = pc.join(ps).join(meta).copy()
-                                det["Concluídos (semana)"] = agg.reindex(
-                                    idx).fillna(0).astype(int).values
-                                det["Concluídos (acum.)"] = cum.reindex(
-                                    idx).ffill().fillna(0).astype(int).values
-                                st.dataframe(
-                                    det.reset_index(
-                                        names="Semana"),
-                                    use_container_width=True,
-                                    hide_index=True)
-                        else:
-                            st.info(
-                                "Ainda não há timestamps suficientes para gerar o gráfico.")
-                    elif "semana" in df_tasks.columns:
-                        df_done = df_tasks[(df_tasks["servico_id"].isin(
-                            svc_ids_rank)) & df_tasks["semana"].notna()].copy()
-                        if not df_done.empty:
-                            df_done["semana"] = pd.to_numeric(
-                                df_done["semana"], errors="coerce").astype("Int64")
-                            df_done = df_done.dropna(subset=["semana"])
-                            cum_vals = []
-                            for w in sorted(df_done["semana"].unique()):
-                                w_df = df_done[df_done["semana"] <= w]
-                                ok_w = int(w_df[["etapa_d", "etapa_r", "etapa_m"]].fillna(
-                                    False).astype(bool).astype(int).sum().sum())
-                                cum_vals.append({"Semana": int(w), "% Concluído": round(
-                                    (ok_w / max(total_cells_rank, 1)) * 100, 1)})
-                            st.line_chart(
-                                pd.DataFrame(cum_vals).set_index("Semana"))
-                        else:
-                            st.info("Sem dados de evolução.")
-                    else:
-                        st.info("Sem timestamps nem coluna semana disponíveis.")
+            col_evo1, col_evo2 = st.columns([1, 2])
+            with col_evo1:
+                rank_mode = st.radio("Escopo:",
+                                     ["Grupo inteiro",
+                                      "Setor específico"],
+                                     horizontal=False,
+                                     key=f"evo_mode_{revisao_id}_{grupo_id}")
+            setor_sel_rank = None
+            with col_evo2:
+                if rank_mode == "Setor específico":
+                    setores_rank = sorted(
+                        setor_to_services.keys(), key=lambda x: x.lower())
+                    # FIX #7: persistir setor selecionado entre reruns
+                    _evo_setor_key = f"evo_setor_val_{grupo_id}"
+                    _evo_default = st.session_state.get(
+                        _evo_setor_key, setores_rank[0] if setores_rank else None)
+                    _evo_idx = setores_rank.index(
+                        _evo_default) if _evo_default in setores_rank else 0
+                    setor_sel_rank = st.selectbox(
+                        "Setor",
+                        setores_rank,
+                        index=_evo_idx,
+                        key=f"evo_setor_{revisao_id}_{grupo_id}")
+                    st.session_state[_evo_setor_key] = setor_sel_rank
                 else:
-                    st.info("Sem tarefas para esta revisão/grupo.")
+                    st.caption(
+                        f"Analisando **{
+                            len(eqs)} equipamentos** · **{
+                            len(all_services)} serviços** · **{
+                            len(all_services) *
+                            3 *
+                            len(eqs)} etapas** no total")
 
-        if tab_tempos is not None:
-            # ── TAB: TEMPOS ──
-            with tab_tempos:
-                st.markdown("### ⏱️ Tempos de execução (D/R/M)")
-                st.caption(
-                    "Análise de duração entre as etapas Desmontagem → Revisão → Montagem.")
-                svc_ids_tempos = svc_ids_rank if svc_ids_rank else svc_ids_all
+            chosen = all_services if rank_mode == "Grupo inteiro" else sorted(
+                setor_to_services.get(
+                    setor_sel_rank, []), key=lambda x: (
+                    x.get("nome") or "").lower())
+            seen_e = set()
+            svc_ids_rank = []
+            for s in chosen:
+                sid = s.get("id")
+                if sid and sid not in seen_e:
+                    seen_e.add(sid)
+                    svc_ids_rank.append(sid)
+            total_cells_rank = int(len(eqs) * max(len(svc_ids_rank), 1) * 3)
+            rev_start2 = pd.to_datetime((rev_row or {}).get("data_inicio") or (
+                rev_row or {}).get("created_at"), errors="coerce", utc=True)
+            if pd.isna(rev_start2):
+                rev_start2 = pd.Timestamp(_now_utc()).normalize()
+            df_tasks = pd.DataFrame(tarefas)
+            if not df_tasks.empty:
+                has_dt = any(
+                    (c in df_tasks.columns and df_tasks[c].notna().any()) for c in [
+                        "dt_etapa_d", "dt_etapa_r", "dt_etapa_m"])
+                if has_dt:
+                    def _wk(s):
+                        dt = pd.to_datetime(s, errors="coerce", utc=True)
+                        return ((dt - rev_start2).dt.days.clip(lower=0) //
+                                7 + 1).astype("Int64")
+                    events = []
+                    for dc in ["dt_etapa_d", "dt_etapa_r", "dt_etapa_m"]:
+                        if dc not in df_tasks.columns:
+                            continue
+                        sub = df_tasks[df_tasks["servico_id"].isin(
+                            svc_ids_rank)].copy()
+                        if sub.empty:
+                            continue
+                        sub["wk"] = _wk(sub[dc])
+                        sub = sub.dropna(subset=["wk"])
+                        if not sub.empty:
+                            events.append(sub[["wk"]].assign(cnt=1))
+                    if events:
+                        ev = pd.concat(events, ignore_index=True)
+                        agg = ev.groupby("wk", dropna=True)[
+                            "cnt"].sum().sort_index()
+                        cum = agg.cumsum()
+                        mw = int(max(cum.index.max(), agg.index.max()))
+                        idx = range(1, mw + 1)
+                        pc = (cum / max(total_cells_rank, 1) *
+                              100).round(1).to_frame("Cumulativo (%)")
+                        ps = (agg / max(total_cells_rank, 1) *
+                              100).round(1).to_frame("Na semana (%)")
+                        pc = pc.reindex(idx).ffill().fillna(0)
+                        ps = ps.reindex(idx).fillna(0)
+                        wt = int(
+                            (rev_row or {}).get("semanas_total") or mw or 1)
+                        meta = pd.Series([min(100.0, (w / max(wt, 1)) * 100)
+                                         for w in idx], index=idx, name="Meta (%)")
+                        # KPIs de evolução
+                        pct_atual = float(
+                            pc["Cumulativo (%)"].iloc[-1]) if not pc.empty else 0
+                        sem_atual = int(pc.index[-1]) if not pc.empty else 0
+                        meta_atual = float(
+                            meta.iloc[-1]) if len(meta) > 0 else 0
+                        delta_vs_meta = round(pct_atual - meta_atual, 1)
+                        mk1, mk2, mk3, mk4 = st.columns(4)
+                        mk1.metric("Progresso atual", f"{pct_atual:.1f}%")
+                        mk2.metric("Meta (semana atual)",
+                                   f"{meta_atual:.1f}%",
+                                   delta=f"{delta_vs_meta:+.1f}%",
+                                   delta_color="normal" if delta_vs_meta >= 0 else "inverse")
+                        mk3.metric("Semanas decorridas", str(sem_atual))
+                        mk4.metric("Total etapas",
+                                   f"{int(cum.iloc[-1])}/{total_cells_rank}")
+                        st.divider()
+                        st.line_chart(pc.join(ps).join(meta))
+                        with st.expander("📋 Tabela detalhada", expanded=False):
+                            det = pc.join(ps).join(meta).copy()
+                            det["Concluídos (semana)"] = agg.reindex(
+                                idx).fillna(0).astype(int).values
+                            det["Concluídos (acum.)"] = cum.reindex(
+                                idx).ffill().fillna(0).astype(int).values
+                            st.dataframe(
+                                det.reset_index(
+                                    names="Semana"),
+                                use_container_width=True,
+                                hide_index=True)
+                    else:
+                        st.info(
+                            "Ainda não há timestamps suficientes para gerar o gráfico.")
+                elif "semana" in df_tasks.columns:
+                    df_done = df_tasks[(df_tasks["servico_id"].isin(
+                        svc_ids_rank)) & df_tasks["semana"].notna()].copy()
+                    if not df_done.empty:
+                        df_done["semana"] = pd.to_numeric(
+                            df_done["semana"], errors="coerce").astype("Int64")
+                        df_done = df_done.dropna(subset=["semana"])
+                        cum_vals = []
+                        for w in sorted(df_done["semana"].unique()):
+                            w_df = df_done[df_done["semana"] <= w]
+                            ok_w = int(w_df[["etapa_d", "etapa_r", "etapa_m"]].fillna(
+                                False).astype(bool).astype(int).sum().sum())
+                            cum_vals.append({"Semana": int(w), "% Concluído": round(
+                                (ok_w / max(total_cells_rank, 1)) * 100, 1)})
+                        st.line_chart(
+                            pd.DataFrame(cum_vals).set_index("Semana"))
+                    else:
+                        st.info("Sem dados de evolução.")
+                else:
+                    st.info("Sem timestamps nem coluna semana disponíveis.")
+            else:
+                st.info("Sem tarefas para esta revisão/grupo.")
+
+        # ── TAB: TEMPOS ──
+        with tab_tempos:
+            st.markdown("### ⏱️ Tempos de execução (D/R/M)")
+            st.caption(
+                "Análise de duração entre as etapas Desmontagem → Revisão → Montagem.")
+            svc_ids_tempos = svc_ids_rank if svc_ids_rank else svc_ids_all
+            tempos_rows = []
+            try:
+                tempos_rows = (
+                    sb.table("v_tarefas_etapas_duracoes") .select(
+                        "equipamento_id,servico_id,dt_inicio,dt_etapa_d,dt_etapa_r,dt_etapa_m,"
+                        "horas_d_para_r,horas_r_para_m,horas_d_para_m,horas_total") .eq(
+                        "tenant_id",
+                        tenant_id).eq(
+                        "revisao_id",
+                        revisao_id) .in_(
+                        "equipamento_id",
+                        eq_ids).execute().data) or []
+            except Exception:
                 tempos_rows = []
-                try:
-                    tempos_rows = (
-                        sb.table("v_tarefas_etapas_duracoes") .select(
-                            "equipamento_id,servico_id,dt_inicio,dt_etapa_d,dt_etapa_r,dt_etapa_m,"
-                            "horas_d_para_r,horas_r_para_m,horas_d_para_m,horas_total") .eq(
-                            "tenant_id",
-                            tenant_id).eq(
-                            "revisao_id",
-                            revisao_id) .in_(
-                            "equipamento_id",
-                            eq_ids).execute().data) or []
-                except Exception:
-                    tempos_rows = []
-                df_t = pd.DataFrame(
-                    tempos_rows) if tempos_rows else pd.DataFrame(tarefas)
-                if not tempos_rows:
-                    for col in [
-                        "dt_inicio",
-                        "dt_etapa_d",
-                        "dt_etapa_r",
-                            "dt_etapa_m"]:
-                        if col not in df_t.columns:
-                            df_t[col] = pd.NaT
-                        df_t[col] = pd.to_datetime(
-                            df_t[col], errors="coerce", utc=True)
-                    df_t["horas_d_para_r"] = (
-                        df_t["dt_etapa_r"] - df_t["dt_etapa_d"]).dt.total_seconds() / 3600
-                    df_t["horas_r_para_m"] = (
-                        df_t["dt_etapa_m"] - df_t["dt_etapa_r"]).dt.total_seconds() / 3600
-                    df_t["horas_d_para_m"] = (
-                        df_t["dt_etapa_m"] - df_t["dt_etapa_d"]).dt.total_seconds() / 3600
-                    df_t["horas_total"] = (
-                        df_t["dt_etapa_m"] - df_t["dt_inicio"]).dt.total_seconds() / 3600
-                if "servico_id" in df_t.columns:
-                    df_t = df_t[df_t["servico_id"].isin(svc_ids_tempos)].copy()
-                view_agg = pd.DataFrame()
-                if not df_t.empty:
-                    sv_map = {s["id"]: (s.get("nome") or str(s["id"]))
-                              for s in all_services if s.get("id")}
-                    # usar rótulo curto na tabela de tempos
-                    df_t["Frota"] = df_t["equipamento_id"].map(eq_label_short)
-                    df_t["Equipamento"] = df_t["equipamento_id"].map(
-                        eq_label)  # mantido para export
-                    df_t["Serviço"] = df_t["servico_id"].map(
-                        sv_map).fillna(df_t["servico_id"].astype(str))
-                    for c in [
-                        "horas_d_para_r",
-                        "horas_r_para_m",
-                        "horas_d_para_m",
-                            "horas_total"]:
-                        if c in df_t.columns:
-                            df_t[c] = pd.to_numeric(df_t[c], errors="coerce")
+            df_t = pd.DataFrame(
+                tempos_rows) if tempos_rows else pd.DataFrame(tarefas)
+            if not tempos_rows:
+                for col in [
+                    "dt_inicio",
+                    "dt_etapa_d",
+                    "dt_etapa_r",
+                        "dt_etapa_m"]:
+                    if col not in df_t.columns:
+                        df_t[col] = pd.NaT
+                    df_t[col] = pd.to_datetime(
+                        df_t[col], errors="coerce", utc=True)
+                df_t["horas_d_para_r"] = (
+                    df_t["dt_etapa_r"] - df_t["dt_etapa_d"]).dt.total_seconds() / 3600
+                df_t["horas_r_para_m"] = (
+                    df_t["dt_etapa_m"] - df_t["dt_etapa_r"]).dt.total_seconds() / 3600
+                df_t["horas_d_para_m"] = (
+                    df_t["dt_etapa_m"] - df_t["dt_etapa_d"]).dt.total_seconds() / 3600
+                df_t["horas_total"] = (
+                    df_t["dt_etapa_m"] - df_t["dt_inicio"]).dt.total_seconds() / 3600
+            if "servico_id" in df_t.columns:
+                df_t = df_t[df_t["servico_id"].isin(svc_ids_tempos)].copy()
+            view_agg = pd.DataFrame()
+            if not df_t.empty:
+                sv_map = {s["id"]: (s.get("nome") or str(s["id"]))
+                          for s in all_services if s.get("id")}
+                # usar rótulo curto na tabela de tempos
+                df_t["Frota"] = df_t["equipamento_id"].map(eq_label_short)
+                df_t["Equipamento"] = df_t["equipamento_id"].map(
+                    eq_label)  # mantido para export
+                df_t["Serviço"] = df_t["servico_id"].map(
+                    sv_map).fillna(df_t["servico_id"].astype(str))
+                for c in [
+                    "horas_d_para_r",
+                    "horas_r_para_m",
+                    "horas_d_para_m",
+                        "horas_total"]:
+                    if c in df_t.columns:
+                        df_t[c] = pd.to_numeric(df_t[c], errors="coerce")
 
-                    # KPIs globais de tempo
-                    med_total = df_t["horas_total"].dropna().mean(
-                    ) if "horas_total" in df_t.columns else None
-                    med_dr = df_t["horas_d_para_r"].dropna().mean(
-                    ) if "horas_d_para_r" in df_t.columns else None
-                    med_rm = df_t["horas_r_para_m"].dropna().mean(
-                    ) if "horas_r_para_m" in df_t.columns else None
-                    completos_total = int(
-                        df_t["horas_total"].notna().sum()) if "horas_total" in df_t.columns else 0
-                    tk1, tk2, tk3, tk4 = st.columns(4)
-                    tk1.metric("Itens completos", str(completos_total))
-                    tk2.metric(
-                        "Média total (D→M)",
-                        _fmt_duration_from_hours(med_total))
-                    tk3.metric("Média D→R", _fmt_duration_from_hours(med_dr))
-                    tk4.metric("Média R→M", _fmt_duration_from_hours(med_rm))
-                    st.divider()
+                # KPIs globais de tempo
+                med_total = df_t["horas_total"].dropna().mean(
+                ) if "horas_total" in df_t.columns else None
+                med_dr = df_t["horas_d_para_r"].dropna().mean(
+                ) if "horas_d_para_r" in df_t.columns else None
+                med_rm = df_t["horas_r_para_m"].dropna().mean(
+                ) if "horas_r_para_m" in df_t.columns else None
+                completos_total = int(
+                    df_t["horas_total"].notna().sum()) if "horas_total" in df_t.columns else 0
+                tk1, tk2, tk3, tk4 = st.columns(4)
+                tk1.metric("Itens completos", str(completos_total))
+                tk2.metric(
+                    "Média total (D→M)",
+                    _fmt_duration_from_hours(med_total))
+                tk3.metric("Média D→R", _fmt_duration_from_hours(med_dr))
+                tk4.metric("Média R→M", _fmt_duration_from_hours(med_rm))
+                st.divider()
 
-                    t_col1, t_col2 = st.columns([1, 1])
-                    with t_col1:
-                        st.markdown("#### Resumo por frota")
-                        agg = (
-                            df_t.groupby(
-                                "Frota", dropna=False) .agg(
-                                itens=(
-                                    "servico_id", "count"), completos=(
-                                    "horas_total", lambda s: int(
-                                        pd.Series(s).notna().sum())), media_total_h=(
-                                    "horas_total", "mean"), p90_total_h=(
-                                    "horas_total", lambda s: float(
-                                        pd.Series(s).dropna().quantile(.9)) if pd.Series(s).dropna().shape[0] else None), media_d_r_h=(
-                                            "horas_d_para_r", "mean"), media_r_m_h=(
-                                                "horas_r_para_m", "mean")) .reset_index())
-                        agg["Média Total"] = agg["media_total_h"].apply(
-                            _fmt_duration_from_hours)
-                        agg["P90"] = agg["p90_total_h"].apply(
-                            _fmt_duration_from_hours)
-                        agg["D→R"] = agg["media_d_r_h"].apply(
-                            _fmt_duration_from_hours)
-                        agg["R→M"] = agg["media_r_m_h"].apply(
-                            _fmt_duration_from_hours)
-                        view_agg_short = agg[["Frota",
-                                              "itens",
-                                              "completos",
-                                              "Média Total",
-                                              "P90",
-                                              "D→R",
-                                              "R→M"]].sort_values(["completos",
-                                                                   "itens"],
-                                                                  ascending=[False,
-                                                                             False])
-                        # view_agg para export ainda usa Equipamento
-                        agg2 = agg.copy()
-                        agg2["Equipamento"] = agg2["Frota"].map(
-                            {v: eq_label.get(k, v) for k, v in eq_label_short.items()})
-                        view_agg = agg2[["Equipamento",
-                                         "itens",
-                                         "completos",
-                                         "Média Total",
-                                         "P90",
-                                         "D→R",
-                                         "R→M"]].sort_values(["completos",
-                                                              "itens"],
-                                                             ascending=[False,
-                                                                        False])
-                        st.dataframe(view_agg_short.style .set_properties(subset=["Frota"],
-                                                                          **{"text-align": "left",
-                                                                             "font-weight": "600"}) .set_properties(**{"font-size": "12px"}),
-                                     use_container_width=True,
-                                     hide_index=True)
-
-                    with t_col2:
-                        st.markdown("#### Gargalos — Top tempos")
-                        metric = st.selectbox(
-                            "Ordenar por:", [
-                                "Total (D→M)", "D→R", "R→M"], index=0, key="tempo_metric")
-                        col_m = {
-                            "Total (D→M)": "horas_total",
-                            "D→R": "horas_d_para_r",
-                            "R→M": "horas_r_para_m"}[metric]
-                        top = df_t[["Frota", "Serviço", "horas_d_para_r",
-                                    "horas_r_para_m", "horas_total"]].copy()
-                        top = top.dropna(
-                            subset=[col_m]).sort_values(
-                            by=[col_m],
-                            ascending=False).head(20)
-                        top["D→R"] = top["horas_d_para_r"].apply(
-                            _fmt_duration_from_hours)
-                        top["R→M"] = top["horas_r_para_m"].apply(
-                            _fmt_duration_from_hours)
-                        top["Total"] = top["horas_total"].apply(
-                            _fmt_duration_from_hours)
-                        st.dataframe(top[["Frota",
-                                          "Serviço",
+                t_col1, t_col2 = st.columns([1, 1])
+                with t_col1:
+                    st.markdown("#### Resumo por frota")
+                    agg = (
+                        df_t.groupby(
+                            "Frota", dropna=False) .agg(
+                            itens=(
+                                "servico_id", "count"), completos=(
+                                "horas_total", lambda s: int(
+                                    pd.Series(s).notna().sum())), media_total_h=(
+                                "horas_total", "mean"), p90_total_h=(
+                                "horas_total", lambda s: float(
+                                    pd.Series(s).dropna().quantile(.9)) if pd.Series(s).dropna().shape[0] else None), media_d_r_h=(
+                                        "horas_d_para_r", "mean"), media_r_m_h=(
+                                            "horas_r_para_m", "mean")) .reset_index())
+                    agg["Média Total"] = agg["media_total_h"].apply(
+                        _fmt_duration_from_hours)
+                    agg["P90"] = agg["p90_total_h"].apply(
+                        _fmt_duration_from_hours)
+                    agg["D→R"] = agg["media_d_r_h"].apply(
+                        _fmt_duration_from_hours)
+                    agg["R→M"] = agg["media_r_m_h"].apply(
+                        _fmt_duration_from_hours)
+                    view_agg_short = agg[["Frota",
+                                          "itens",
+                                          "completos",
+                                          "Média Total",
+                                          "P90",
                                           "D→R",
-                                          "R→M",
-                                          "Total"]] .style.set_properties(subset=["Frota",
-                                                                                  "Serviço"],
-                                                                          **{"text-align": "left"}) .set_properties(**{"font-size": "12px"}),
-                                     use_container_width=True,
-                                     hide_index=True)
-                else:
-                    st.info(
-                        "Sem dados de tempo ainda. Marque etapas D/R/M com timestamps para começar.")
+                                          "R→M"]].sort_values(["completos",
+                                                               "itens"],
+                                                              ascending=[False,
+                                                                         False])
+                    # view_agg para export ainda usa Equipamento
+                    agg2 = agg.copy()
+                    agg2["Equipamento"] = agg2["Frota"].map(
+                        {v: eq_label.get(k, v) for k, v in eq_label_short.items()})
+                    view_agg = agg2[["Equipamento",
+                                     "itens",
+                                     "completos",
+                                     "Média Total",
+                                     "P90",
+                                     "D→R",
+                                     "R→M"]].sort_values(["completos",
+                                                          "itens"],
+                                                         ascending=[False,
+                                                                    False])
+                    st.dataframe(view_agg_short.style .set_properties(subset=["Frota"],
+                                                                      **{"text-align": "left",
+                                                                         "font-weight": "600"}) .set_properties(**{"font-size": "12px"}),
+                                 use_container_width=True,
+                                 hide_index=True)
+
+                with t_col2:
+                    st.markdown("#### Gargalos — Top tempos")
+                    metric = st.selectbox(
+                        "Ordenar por:", [
+                            "Total (D→M)", "D→R", "R→M"], index=0, key="tempo_metric")
+                    col_m = {
+                        "Total (D→M)": "horas_total",
+                        "D→R": "horas_d_para_r",
+                        "R→M": "horas_r_para_m"}[metric]
+                    top = df_t[["Frota", "Serviço", "horas_d_para_r",
+                                "horas_r_para_m", "horas_total"]].copy()
+                    top = top.dropna(
+                        subset=[col_m]).sort_values(
+                        by=[col_m],
+                        ascending=False).head(20)
+                    top["D→R"] = top["horas_d_para_r"].apply(
+                        _fmt_duration_from_hours)
+                    top["R→M"] = top["horas_r_para_m"].apply(
+                        _fmt_duration_from_hours)
+                    top["Total"] = top["horas_total"].apply(
+                        _fmt_duration_from_hours)
+                    st.dataframe(top[["Frota",
+                                      "Serviço",
+                                      "D→R",
+                                      "R→M",
+                                      "Total"]] .style.set_properties(subset=["Frota",
+                                                                              "Serviço"],
+                                                                      **{"text-align": "left"}) .set_properties(**{"font-size": "12px"}),
+                                 use_container_width=True,
+                                 hide_index=True)
+            else:
+                st.info(
+                    "Sem dados de tempo ainda. Marque etapas D/R/M com timestamps para começar.")
 
         # ── TAB: EDITAR CÉLULA ──
         with tab_editor:
