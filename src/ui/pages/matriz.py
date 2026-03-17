@@ -233,13 +233,17 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
   box-shadow:0 10px 20px rgba(0,0,0,.22);
 }
 .mtz-card-grid .mtz-pct-outer{
-  margin:0 8px 16px 8px;
+  margin:4px 14px 18px 14px;
+  height:8px !important;
   border-radius:999px;
-  background:rgba(255,255,255,.08);
+  background:rgba(255,255,255,.07);
   overflow:hidden;
+  border:1px solid rgba(255,255,255,.05);
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.22);
 }
 .mtz-card-grid .mtz-pct-inner{
   border-radius:999px;
+  box-shadow:0 0 10px rgba(255,255,255,.08);
 }
 .mtz-card-grid .mtz-pct-caption{
   margin-top:4px;
@@ -269,9 +273,10 @@ def _pct_bar_html(pct: int, height: int = 6) -> str:
     color = _risk_color(pct)
     w = max(0, min(100, pct))
     return (
-        f'<div class="mtz-pct-outer" style="height:{height}px">'
-        f'<div class="mtz-pct-inner" style="width:{w}%;background:{color};height:{height}px;transition:width .25s ease"></div>'
+        f'<div class="mtz-pct-outer" style="height:{max(height, 8)}px">'
+        f'<div class="mtz-pct-inner" style="width:{w}%;background:{color};height:{max(height, 8)}px;transition:width .25s ease"></div>'
         f'</div>'
+        f'<div class="mtz-pct-caption">{w}% concluído</div>'
     )
 
 
