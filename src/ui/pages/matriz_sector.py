@@ -104,178 +104,96 @@ def build_change_preview_lines(
     return preview
 
 
-
-def build_mass_toggle_changes(
-    frame: pd.DataFrame,
-    *,
-    svc_bool: list[str],
-    col_meta: dict[str, tuple[str, str]],
-    target_field: str | None = None,
-    target_value: bool = True,
-) -> list[tuple]:
-    """Gera alterações em massa a partir do estado atual da grade."""
-    changes: list[tuple] = []
-    if frame is None or frame.empty:
-        return changes
-
-    allowed_fields = {target_field} if target_field else {"etapa_d", "etapa_r", "etapa_m"}
-    for equip_id, row in frame.iterrows():
-        for col in svc_bool:
-            meta = col_meta.get(col)
-            if not meta:
-                continue
-            sid, field = meta
-            if field not in allowed_fields:
-                continue
-            current = bool(row.get(col, False))
-            if current != bool(target_value):
-                changes.append((equip_id, sid, field, bool(target_value)))
-    return changes
-
-
-def summarize_change_payload(
-    changes: list[tuple],
-    *,
-    field_labels: dict[str, str],
-    semana: int | None = None,
-) -> list[str]:
-    if not changes:
-        return []
-
-    total = len(changes)
-    checked = sum(1 for _, _, _, nv in changes if bool(nv))
-    unchecked = total - checked
-    per_field: dict[str, int] = {}
-    for _, _, field, _ in changes:
-        per_field[field] = per_field.get(field, 0) + 1
-
-    parts = [f"**{total} alteração(ões)**"]
-    if checked:
-        parts.append(f"{checked} marcação(ões)")
-    if unchecked:
-        parts.append(f"{unchecked} desmarcação(ões)")
-    lines = [" · ".join(parts)]
-
-    detail = " · ".join(
-        f"{field_labels.get(field, field)}: {qty}"
-        for field, qty in sorted(per_field.items(), key=lambda item: field_labels.get(item[0], item[0]))
-    )
-    if detail:
-        lines.append(detail)
-    if semana is not None:
-        lines.append(f"Semana aplicada em tarefas sem semana definida: **{int(semana)}**")
-    return lines
-
-
-
-def build_sector_intelligence(
+def summarize_sector_intelligence(
     *,
     equipamentos: list[dict],
     svc_ids: list[str],
     task_map: dict,
-    setor_nome: str,
-    atraso_dias: int = 7,
-    days_since_start: int = 0,
+    atraso_dias: int,
+    rev_start,
 ) -> dict[str, Any]:
-    eq_total = len(equipamentos)
-    total_steps = max(len(svc_ids) * 3, 1)
-    pct_values: list[int] = []
-    eq_critical = 0
-    eq_not_started = 0
-    eq_done_full = 0
-    atraso_m = 0
+    total_eq = len(equipamentos)
+    total_services = len(svc_ids)
+    total_steps = max(total_eq * total_services * 3, 1)
     done_steps = 0
+    criticos = 0
+    sem_inicio = 0
+    em_andamento = 0
+    atrasadas_m = 0
+
+    days_since = 0
+    try:
+        if isinstance(rev_start, pd.Timestamp):
+            days_since = int((pd.Timestamp.utcnow().tz_localize("UTC") - rev_start).days)
+    except Exception:
+        days_since = 0
 
     for e in equipamentos:
-        done_eq = 0
-        missing_mount_eq = 0
+        eq_done = 0
+        has_any = False
+        has_partial = False
+        has_missing_m = False
+
         for sid in svc_ids:
             t = task_map.get((e["id"], sid)) or {}
             d = bool(t.get("etapa_d"))
             r = bool(t.get("etapa_r"))
             m = bool(t.get("etapa_m"))
-            done_eq += int(d) + int(r) + int(m)
-            if not m:
-                missing_mount_eq += 1
-        pct_eq = round((done_eq / total_steps) * 100)
-        pct_values.append(pct_eq)
-        done_steps += done_eq
-        eq_critical += int(pct_eq < 50)
-        eq_not_started += int(pct_eq == 0)
-        eq_done_full += int(pct_eq >= 100)
-        if days_since_start > atraso_dias and missing_mount_eq > 0:
-            atraso_m += 1
 
-    pct_setor = round((done_steps / max(eq_total * len(svc_ids) * 3, 1)) * 100)
-    avg_pct = round(sum(pct_values) / max(len(pct_values), 1)) if pct_values else 0
-    risk_score = (eq_critical * 3) + (eq_not_started * 2) + atraso_m + max(0, 70 - pct_setor) // 10
-    if pct_setor >= 85 and eq_critical == 0:
-        risk_level = "baixo"
-        risk_icon = "🟢"
-    elif pct_setor >= 60 and eq_critical <= max(1, eq_total // 4):
-        risk_level = "moderado"
+            done_steps += int(d) + int(r) + int(m)
+            eq_done += int(d) + int(r) + int(m)
+            has_any = has_any or d or r or m
+            has_partial = has_partial or ((d or r or m) and not (d and r and m))
+            has_missing_m = has_missing_m or (not m)
+
+            if days_since > atraso_dias and not m:
+                atrasadas_m += 1
+
+        if eq_done == 0:
+            sem_inicio += 1
+        elif has_partial:
+            em_andamento += 1
+
+        eq_total = max(len(svc_ids) * 3, 1)
+        eq_pct = round((eq_done / eq_total) * 100)
+        if eq_pct < 50:
+            criticos += 1
+
+    pct = round((done_steps / total_steps) * 100)
+    if pct < 50 or criticos >= max(1, total_eq // 3):
+        risk = "alto"
+        risk_label = "ALTO"
+        risk_icon = "🔴"
+    elif pct < 80 or atrasadas_m > 0:
+        risk = "medio"
+        risk_label = "MÉDIO"
         risk_icon = "🟡"
     else:
-        risk_level = "alto"
-        risk_icon = "🔴"
+        risk = "baixo"
+        risk_label = "BAIXO"
+        risk_icon = "🟢"
 
-    recommendation = "Manter ritmo atual."
-    if atraso_m:
-        recommendation = "Priorize montagens pendentes deste setor."
-    elif eq_not_started >= max(2, eq_total // 3 if eq_total else 2):
-        recommendation = "Há muitas frotas sem início; vale redistribuir carga."
-    elif eq_critical:
-        recommendation = "Revisar frotas críticas antes do próximo lote."
+    if sem_inicio >= max(2, total_eq // 2):
+        recommendation = "Iniciar as frotas sem progresso primeiro."
+    elif atrasadas_m > 0:
+        recommendation = "Priorizar etapas de montagem pendentes."
+    elif criticos > 0:
+        recommendation = "Atacar as frotas abaixo de 50%."
+    else:
+        recommendation = "Setor sob controle; manter o ritmo atual."
 
     return {
-        "setor": setor_nome,
-        "pct": pct_setor,
-        "pct_medio": avg_pct,
-        "eq_total": eq_total,
-        "eq_critical": eq_critical,
-        "eq_not_started": eq_not_started,
-        "eq_done_full": eq_done_full,
-        "atraso_m": atraso_m,
-        "risk_score": int(risk_score),
-        "risk_level": risk_level,
+        "pct": pct,
+        "risk": risk,
+        "risk_label": risk_label,
         "risk_icon": risk_icon,
+        "criticos": int(criticos),
+        "sem_inicio": int(sem_inicio),
+        "em_andamento": int(em_andamento),
+        "atrasadas_m": int(atrasadas_m),
         "recommendation": recommendation,
-    }
-
-
-def build_global_intelligence_summary(sector_infos: list[dict[str, Any]]) -> dict[str, Any]:
-    if not sector_infos:
-        return {
-            "critical_sectors": 0,
-            "critical_equipment": 0,
-            "delayed_sectors": 0,
-            "top_risks": [],
-            "alerts": [],
-        }
-
-    ordered = sorted(
-        sector_infos,
-        key=lambda item: (item.get("risk_score", 0), item.get("eq_critical", 0), -item.get("pct", 0)),
-        reverse=True,
-    )
-    critical_sectors = sum(1 for item in sector_infos if item.get("risk_level") == "alto")
-    critical_equipment = sum(int(item.get("eq_critical") or 0) for item in sector_infos)
-    delayed_sectors = sum(1 for item in sector_infos if int(item.get("atraso_m") or 0) > 0)
-
-    alerts: list[str] = []
-    if critical_sectors:
-        alerts.append(f"{critical_sectors} setor(es) em risco alto neste grupo.")
-    if critical_equipment:
-        alerts.append(f"{critical_equipment} frota(s) crítica(s) abaixo de 50%.")
-    if delayed_sectors:
-        alerts.append(f"{delayed_sectors} setor(es) com montagem pendente além do limite de atraso.")
-    if not alerts:
-        alerts.append("Nenhum alerta crítico no momento.")
-
-    return {
-        "critical_sectors": critical_sectors,
-        "critical_equipment": critical_equipment,
-        "delayed_sectors": delayed_sectors,
-        "top_risks": ordered[:3],
-        "alerts": alerts,
+        "total_eq": int(total_eq),
+        "total_services": int(total_services),
+        "done_steps": int(done_steps),
+        "total_steps": int(total_steps),
     }

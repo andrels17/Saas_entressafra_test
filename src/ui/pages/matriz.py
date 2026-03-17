@@ -40,6 +40,7 @@ from src.ui.pages.matriz_sector import (
     build_sector_frame,
     sector_progress_label,
     sector_summary_metrics,
+    summarize_sector_intelligence,
 )
 from src.ui.pages.matriz_runtime import (
     build_task_maps as _build_task_maps,
@@ -215,6 +216,19 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
   transition:transform .08s ease,border-color .12s ease,background .12s ease;}
 .mtz-card-grid [data-testid="stButton"] button:hover{
   transform:translateY(-1px);border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.06);}
+
+.mtz-risk-badges{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 8px 0}
+.mtz-risk-badge{display:inline-flex;align-items:center;padding:4px 9px;border-radius:999px;font-size:.78rem;font-weight:600;border:1px solid rgba(255,255,255,.08)}
+.mtz-risk-badge.high{background:rgba(239,68,68,.14);border-color:rgba(239,68,68,.34);color:#fecaca}
+.mtz-risk-badge.medium{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.32);color:#fde68a}
+.mtz-risk-badge.low{background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.30);color:#bbf7d0}
+.mtz-sector-box{border-radius:16px;padding:10px 12px;margin:10px 0 14px 0;border:1px solid rgba(255,255,255,.08)}
+.mtz-sector-box.high{background:linear-gradient(180deg, rgba(127,29,29,.24), rgba(0,0,0,0));border-color:rgba(239,68,68,.30)}
+.mtz-sector-box.medium{background:linear-gradient(180deg, rgba(120,53,15,.18), rgba(0,0,0,0));border-color:rgba(245,158,11,.28)}
+.mtz-sector-box.low{background:linear-gradient(180deg, rgba(20,83,45,.16), rgba(0,0,0,0));border-color:rgba(34,197,94,.24)}
+.mtz-priority-panel{padding:12px 14px;border-radius:16px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);margin:6px 0 14px 0}
+.mtz-priority-item{padding:8px 10px;border-radius:12px;margin:6px 0;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}
+
 </style>""", unsafe_allow_html=True)
 
 
@@ -1638,6 +1652,49 @@ def render_matriz():
             # direto para aquele setor
             _chip_target = st.session_state.pop("mtz_chip_jump", None)
 
+            sector_intelligence = []
+            for _setor_nome in sorted(setor_to_services.keys(), key=lambda x: x.lower()):
+                _svs_all = sorted(setor_to_services[_setor_nome], key=lambda x: (x.get("nome") or "").lower())
+                _svc_ids_all = [s["id"] for s in _svs_all if s.get("id")]
+                if semana_filtro is not None:
+                    _svc_na_sem = {t["servico_id"] for t in tarefas if t.get("semana") == semana_filtro and t.get("servico_id")}
+                    _svc_ids_all = [sid for sid in _svc_ids_all if sid in _svc_na_sem]
+                if not _svc_ids_all:
+                    continue
+                _intel = summarize_sector_intelligence(
+                    equipamentos=eqs,
+                    svc_ids=_svc_ids_all,
+                    task_map=task_map,
+                    atraso_dias=int(atraso_dias),
+                    rev_start=rev_start,
+                )
+                _intel["setor_nome"] = _setor_nome
+                sector_intelligence.append(_intel)
+
+            if sector_intelligence:
+                _priority_sorted = sorted(
+                    sector_intelligence,
+                    key=lambda x: (
+                        0 if x["risk"] == "alto" else (1 if x["risk"] == "medio" else 2),
+                        -x["criticos"],
+                        -x["atrasadas_m"],
+                        x["pct"],
+                    ),
+                )
+                st.markdown('<div class="mtz-priority-panel">', unsafe_allow_html=True)
+                st.markdown("#### 🔥 Prioridades agora")
+                for _idx, _item in enumerate(_priority_sorted[:3], start=1):
+                    st.markdown(
+                        f'<div class="mtz-priority-item"><b>{_idx}. {_item["setor_nome"]}</b> · '
+                        f'{_item["risk_icon"]} risco {_item["risk_label"]} · '
+                        f'<b>{_item["pct"]}%</b> concluído · '
+                        f'{_item["criticos"]} críticos · '
+                        f'{_item["atrasadas_m"]} atraso(s) de montagem<br>'
+                        f'<span style="opacity:.78">{_item["recommendation"]}</span></div>',
+                        unsafe_allow_html=True,
+                    )
+                st.markdown('</div>', unsafe_allow_html=True)
+
             for setor_nome in sorted(
                     setor_to_services.keys(),
                     key=lambda x: x.lower()):
@@ -1677,11 +1734,31 @@ def render_matriz():
                     _sector_set_open(revisao_id, grupo_id, setor_nome, True)
 
                 _sector_open = _sector_is_open(revisao_id, grupo_id, setor_nome)
+                _sector_intel = summarize_sector_intelligence(
+                    equipamentos=eqs,
+                    svc_ids=svc_ids_v,
+                    task_map=task_map,
+                    atraso_dias=int(atraso_dias),
+                    rev_start=rev_start,
+                )
+                _risk_class = "high" if _sector_intel["risk"] == "alto" else ("medium" if _sector_intel["risk"] == "medio" else "low")
 
-                with st.container(border=True):
+                st.markdown(f'<div class="mtz-sector-box {_risk_class}">', unsafe_allow_html=True)
+                with st.container():
                     _head_l, _head_r = st.columns([0.78, 0.22])
                     with _head_l:
                         st.markdown(f"#### {_lbl_exp}")
+                        st.markdown(
+                            '<div class="mtz-risk-badges">'
+                            f'<span class="mtz-risk-badge {_risk_class}">{_sector_intel["risk_icon"]} Risco {_sector_intel["risk_label"]}</span>'
+                            f'<span class="mtz-risk-badge {"high" if _sector_intel["criticos"] else "low"}">Críticos: {_sector_intel["criticos"]}</span>'
+                            f'<span class="mtz-risk-badge {"medium" if _sector_intel["em_andamento"] else "low"}">Em andamento: {_sector_intel["em_andamento"]}</span>'
+                            f'<span class="mtz-risk-badge {"high" if _sector_intel["atrasadas_m"] else "low"}">Atraso M: {_sector_intel["atrasadas_m"]}</span>'
+                            f'<span class="mtz-risk-badge {"medium" if _sector_intel["sem_inicio"] else "low"}">Sem início: {_sector_intel["sem_inicio"]}</span>'
+                            '</div>',
+                            unsafe_allow_html=True,
+                        )
+                        st.caption(_sector_intel["recommendation"])
                     with _head_r:
                         _toggle_label = "Ocultar setor" if _sector_open else "Abrir setor"
                         if st.button(
@@ -1927,6 +2004,7 @@ def render_matriz():
                             lambda v: "OK" if bool(v) else "")
                     # sector_tables_for_export já foi pré-populado antes das
                     # tabs (fix #3)
+                    st.markdown("</div>", unsafe_allow_html=True)
 
         # ── TAB: EVOLUÇÃO SEMANAL ──
         with tab_evolucao:
