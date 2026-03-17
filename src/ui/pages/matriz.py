@@ -1421,29 +1421,31 @@ def render_matriz():
                 st.info("Nenhum grupo encontrado para os filtros selecionados.")
 
             st.markdown('<div class="mtz-card-grid">', unsafe_allow_html=True)
-            cols = st.columns(3)
-            for idx, g in enumerate(show_groups):
-                gid = g.get("id")
-                nome = g.get("nome") or str(gid)
-                info = kpis.get(gid, {})
-                pct = int(info.get("pct", 0))
-                eqc = int(info.get("eq_count", 0))
-                svc = int(info.get("svc_count", 0))
-                dept_lbl = dept_names.get(g.get("departamento_id"), "")
-                _icon = "🟢" if pct >= 80 else (
-                    "🟡" if pct >= 50 else (
-                        "🔴" if eqc > 0 else "⬜"))
-                _sub = f"{dept_lbl} · " if dept_lbl else ""
-                with cols[idx % 3]:
-                    if st.button(
+            for row_start in range(0, len(show_groups), 3):
+                row_groups = show_groups[row_start:row_start + 3]
+                cols = st.columns(3)
+                for col_idx, g in enumerate(row_groups):
+                    gid = g.get("id")
+                    nome = g.get("nome") or str(gid)
+                    info = kpis.get(gid, {})
+                    pct = int(info.get("pct", 0))
+                    eqc = int(info.get("eq_count", 0))
+                    svc = int(info.get("svc_count", 0))
+                    dept_lbl = dept_names.get(g.get("departamento_id"), "")
+                    _icon = "🟢" if pct >= 80 else (
+                        "🟡" if pct >= 50 else (
+                            "🔴" if eqc > 0 else "⬜"))
+                    _sub = f"{dept_lbl} · " if dept_lbl else ""
+                    with cols[col_idx]:
+                        if st.button(
                             f"{_icon} {nome}\n\n{_sub}{pct}%  ·  {eqc} equip.  ·  {svc} serviços",
-                        key=f"mtz_card_{gid}",
-                        help=f"Clique para abrir o grupo {nome}",
-                    ):
-                        st.session_state["matriz_grupo_id"] = gid
-                        st.session_state["matriz_view"] = "group"
-                        st.rerun()
-                    st.markdown(_pct_bar_html(pct), unsafe_allow_html=True)
+                            key=f"mtz_card_{gid}",
+                            help=f"Clique para abrir o grupo {nome}",
+                        ):
+                            st.session_state["matriz_grupo_id"] = gid
+                            st.session_state["matriz_view"] = "group"
+                            st.rerun()
+                        st.markdown(_pct_bar_html(pct), unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
             return
 
