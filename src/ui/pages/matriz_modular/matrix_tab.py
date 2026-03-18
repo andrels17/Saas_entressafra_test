@@ -39,6 +39,41 @@ def _pct_bar_html(pct: int, height: int = 6) -> str:
     )
 
 
+
+
+def _resolve_task_row(sb, task_map, revisao_id, equipamento_id, servico_id):
+    """Resolve a tarefa mesmo quando tipos do mapa divergem (str/int)."""
+    candidates = [
+        (equipamento_id, servico_id),
+        (str(equipamento_id), str(servico_id)),
+        (str(equipamento_id), servico_id),
+        (equipamento_id, str(servico_id)),
+    ]
+    for key in candidates:
+        row = task_map.get(key)
+        if row:
+            return row
+
+    try:
+        rows = (
+            sb.table('tarefas_servico')
+            .select('id,semana,equipamento_id,servico_id')
+            .eq('revisao_id', revisao_id)
+            .eq('equipamento_id', equipamento_id)
+            .eq('servico_id', servico_id)
+            .limit(1)
+            .execute()
+            .data
+        ) or []
+        if rows:
+            row = rows[0]
+            task_map[(equipamento_id, servico_id)] = row
+            task_map[(str(equipamento_id), str(servico_id))] = row
+            return row
+    except Exception:
+        pass
+    return {}
+
 def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_v, svc_names_v, eqs, task_map, eq_label_short, rev_start, atraso_dias, semana_lote):
     df, col_meta, obs_map = build_sector_frame(
         equipamentos=eqs,
@@ -144,7 +179,7 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
                     nv = bool(row[col])
                     if ov != nv:
                         sid, field = col_meta[col]
-                        changes.append((equip_id, sid, field, nv))
+                        changes.append((str(equip_id), str(sid), field, nv))
             if not changes:
                 st.session_state.pop(pending_changes_key, None)
                 st.session_state.pop(pending_preview_key, None)
@@ -183,7 +218,7 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
             missing = 0
             payload_updates = []
             for eid, sid, field, nv in pending_changes:
-                t = task_map.get((eid, sid)) or {}
+                t = _resolve_task_row(sb, task_map, revisao_id, eid, sid)
                 tid = t.get('id')
                 if not tid:
                     missing += 1
@@ -197,30 +232,39 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
                 payload_updates.append(upd)
 
             pb = st.empty()
-            with st.spinner(f'Aplicando {len(payload_updates)} alterações em lote...'):
-                ok, failed = _bulk_update_tasks(sb, payload_updates)
-
             st.session_state.pop(pending_changes_key, None)
             st.session_state.pop(pending_preview_key, None)
-            pb.success(
-                f'✅ {ok} etapas salvas'
-                + (f'  ·  {failed} falharam' if failed else '')
-                + (f'  ·  {missing} não encontradas' if missing else '')
-            )
-            st.toast('✅ Alterações aplicadas com sucesso!')
-            bump_data_version()
-            try:
-                _load_payload.clear()
-            except Exception:
-                pass
-            try:
-                _group_kpis.clear()
-            except Exception:
-                pass
-            try:
-                nav.rerun_keep_menu()
-            except Exception:
-                st.rerun()
+            if not payload_updates:
+                pb.error('Nenhuma tarefa elegível foi encontrada para salvar as alterações selecionadas.')
+                if missing:
+                    st.caption(f'Itens sem correspondência de tarefa: {missing}.')
+            else:
+                with st.spinner(f'Aplicando {len(payload_updates)} alterações em lote...'):
+                    ok, failed = _bulk_update_tasks(sb, payload_updates)
+
+                if ok <= 0:
+                    pb.error('Não foi possível persistir as alterações desta seleção.')
+                else:
+                    pb.success(
+                        f'✅ {ok} etapas salvas'
+                        + (f'  ·  {failed} falharam' if failed else '')
+                        + (f'  ·  {missing} não encontradas' if missing else '')
+                    )
+                    st.toast('✅ Alterações aplicadas com sucesso!')
+                    bump_data_version()
+                    try:
+                        _load_payload.clear()
+                    except Exception:
+                        pass
+                    try:
+                        _group_kpis.clear()
+                    except Exception:
+                        pass
+                    try:
+                        nav.rerun_keep_menu()
+                    except Exception:
+                        st.rerun()
+
 
 
 def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_disp, semana_sugerida, group_rev_start, setor_to_services, tarefas, eqs, task_map, eq_label_short):
