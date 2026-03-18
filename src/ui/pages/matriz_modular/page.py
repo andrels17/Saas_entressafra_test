@@ -920,21 +920,28 @@ def render_matriz():
                             now_iso = datetime.now(timezone.utc).isoformat()
                             missing = 0
                             payload_updates = []
-                            _tm_keys_sample = list(task_map.keys())[:3]
+                            inserts = []
 
                             for eid, sid, field, nv in pending_changes:
                                 t = (
                                     task_map.get((str(eid), str(sid)))
                                     or task_map.get((eid, sid))
-                                    or task_map.get((
-                                        int(eid) if str(eid).isdigit() else eid,
-                                        int(sid) if str(sid).isdigit() else sid,
-                                    ))
                                     or {}
                                 )
                                 tid = t.get("id")
+
                                 if not tid:
-                                    missing += 1
+                                    # Tarefa não existe no banco — criar antes de atualizar
+                                    inserts.append({
+                                        "tenant_id": tenant_id,
+                                        "revisao_id": revisao_id,
+                                        "equipamento_id": eid,
+                                        "servico_id": sid,
+                                        field: bool(nv),
+                                        "status": "em_andamento" if nv else "pendente",
+                                        "semana": int(semana_lote) if int(semana_lote) > 0 else None,
+                                        "updated_by": current_user_id() or None,
+                                    })
                                     continue
 
                                 upd = {
@@ -957,22 +964,30 @@ def render_matriz():
                             st.session_state.pop(_pending_changes_key, None)
                             st.session_state.pop(_pending_preview_key, None)
 
-                            if not payload_updates:
-                                _ex = pending_changes[0] if pending_changes else ("?", "?", "?", "?")
-                                st.error(
-                                    f"❌ Nenhuma tarefa encontrada para salvar "
-                                    f"({missing} não encontradas). "
-                                    f"Chave buscada: ({_ex[0]!r}, {_ex[1]!r}) | "
-                                    f"Exemplo de chaves no mapa: {_tm_keys_sample}"
-                                )
+                            ok = 0
+                            failed = 0
+
+                            # Inserir tarefas que ainda não existiam
+                            if inserts:
+                                try:
+                                    sb.table("tarefas_servico").insert(inserts).execute()
+                                    ok += len(inserts)
+                                except Exception as _ins_err:
+                                    st.error(f"Erro ao criar tarefas: {_ins_err}")
+                                    failed += len(inserts)
+
+                            # Atualizar tarefas existentes
+                            if payload_updates:
+                                _ok, _fail = _bulk_update_tasks(sb, payload_updates)
+                                ok += _ok
+                                failed += _fail
+
+                            if ok == 0 and failed == 0:
+                                st.warning("Nenhuma alteração para aplicar.")
                             else:
-                                pb = st.empty()
-                                with st.spinner(f"Aplicando {len(payload_updates)} alterações em lote..."):
-                                    ok, failed = _bulk_update_tasks(sb, payload_updates)
-                                pb.success(
+                                st.success(
                                     f"✅ {ok} etapas salvas"
                                     + (f"  ·  {failed} falharam" if failed else "")
-                                    + (f"  ·  {missing} não encontradas" if missing else "")
                                 )
                                 st.toast("✅ Alterações aplicadas com sucesso!")
                                 bump_data_version()
