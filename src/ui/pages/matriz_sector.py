@@ -20,11 +20,11 @@ def build_sector_frame(
 
     for e in equipamentos:
         total = max(len(svc_ids) * 3, 1)
-        row = {"_equip_id": e["id"], "%": 0, "Equipamento": eq_label_short[e["id"]]}
+        row = {"_equip_id": str(e["id"]), "%": 0, "Equipamento": eq_label_short[e["id"]]}
         done_c = 0
 
         for sid, sname in zip(svc_ids, svc_names):
-            t = task_map.get((e["id"], sid)) or {}
+            t = task_map.get((str(e["id"]), str(sid))) or {}
             d = bool(t.get("etapa_d"))
             r = bool(t.get("etapa_r"))
             m = bool(t.get("etapa_m"))
@@ -58,7 +58,7 @@ def sector_progress_label(*, equipamentos: list[dict], svc_ids: list[str], task_
     total_steps = 0
     for e in equipamentos:
         for sid in svc_ids:
-            t = task_map.get((e["id"], sid)) or {}
+            t = task_map.get((str(e["id"]), str(sid))) or {}
             done_steps += int(bool(t.get("etapa_d"))) + int(bool(t.get("etapa_r"))) + int(bool(t.get("etapa_m")))
             total_steps += 3
 
@@ -135,7 +135,7 @@ def summarize_sector_intelligence(
         has_missing_m = False
 
         for sid in svc_ids:
-            t = task_map.get((e["id"], sid)) or {}
+            t = task_map.get((str(e["id"]), str(sid))) or {}
             d = bool(t.get("etapa_d"))
             r = bool(t.get("etapa_r"))
             m = bool(t.get("etapa_m"))

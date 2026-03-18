@@ -103,11 +103,13 @@ def _collect_matrix_changes(df_display, edited, svc_bool, col_meta):
             continue
 
         for col in svc_bool:
+            if col not in col_meta:
+                continue
             ov = bool(df_display.loc[equip_id, col])
             nv = _row_value(row, col)
             if ov != nv:
                 sid, field = col_meta[col]
-                changes.append((equip_id, sid, field, nv))
+                changes.append((str(equip_id), str(sid), field, nv))
 
     return changes
 
@@ -392,7 +394,7 @@ def render_matriz():
                 return
 
         tarefas = payload.get("tarefas") or []
-        task_map = {(t["equipamento_id"], t["servico_id"]): t for t in tarefas}
+        task_map = {(str(t["equipamento_id"]), str(t["servico_id"])): t for t in tarefas}
 
         # Melhoria 7: svc_ids_all antes das tabs
         svc_ids_all = [s.get("id") for s in all_services if s.get("id")]
@@ -920,7 +922,7 @@ def render_matriz():
                             payload_updates = []
 
                             for eid, sid, field, nv in pending_changes:
-                                t = task_map.get((eid, sid)) or {}
+                                t = task_map.get((str(eid), str(sid))) or {}
                                 tid = t.get("id")
                                 if not tid:
                                     missing += 1
@@ -943,8 +945,16 @@ def render_matriz():
 
                                 payload_updates.append(upd)
 
-                            pb = st.empty()
-                            with st.spinner(f"Aplicando {len(payload_updates)} alterações em lote..."):
+                            if not payload_updates:
+                                st.warning(
+                                    f"⚠️ Nenhuma tarefa encontrada para salvar "
+                                    f"({missing} não encontradas). Recarregue a página e tente novamente."
+                                )
+                                st.session_state.pop(_pending_changes_key, None)
+                                st.session_state.pop(_pending_preview_key, None)
+                            else:
+                              pb = st.empty()
+                              with st.spinner(f"Aplicando {len(payload_updates)} alterações em lote..."):
                                 ok, failed = _bulk_update_tasks(sb, payload_updates)
 
                             st.session_state.pop(_pending_changes_key, None)
