@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.ui.pages.matriz_runtime import _sector_set_open
+from src.ui.pages.matriz_runtime import sector_set_open as _sector_set_open
 
 from .styles import _pct_bar_html
 
