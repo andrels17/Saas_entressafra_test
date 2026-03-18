@@ -1395,7 +1395,7 @@ def render_matriz():
             _show_all = False
             _reload = False
 
-            row1_c1, row1_c2, row1_c3, row1_c4 = st.columns([1.65, 1.1, 0.8, 1.15], vertical_alignment="bottom")
+            row1_c1, row1_c2, row1_c3 = st.columns([1.75, 1.15, 0.75], vertical_alignment="bottom")
             with row1_c1:
                 st.session_state.setdefault("matriz_grp_search", "")
                 search = st.text_input(
@@ -1420,24 +1420,8 @@ def render_matriz():
                 st.session_state["matriz_limit_eq"] = st.number_input(
                     "Limite eq.", min_value=20, max_value=500, value=int(
                         st.session_state["matriz_limit_eq"]), step=20, key="mtz_lim_pick")
-            with row1_c4:
-                st.markdown('<div class="mtz-inline-actions">', unsafe_allow_html=True)
-                a1, a2, a3 = st.columns([1, 1, 1], gap="small")
-                with a1:
-                    st.markdown('<div class="mtz-btn-secondary">', unsafe_allow_html=True)
-                    _clear_dept = st.button("Limpar depto", key="mtz_clear_dept", use_container_width=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
-                with a2:
-                    st.markdown('<div class="mtz-btn-secondary">', unsafe_allow_html=True)
-                    _show_all = st.button("Ver todos", key="mtz_show_all", use_container_width=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
-                with a3:
-                    st.markdown('<div class="mtz-btn-primary">', unsafe_allow_html=True)
-                    _reload = st.button("Recarregar", key="mtz_reload", use_container_width=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
 
-            row2_c1, row2_c2, row2_c3 = st.columns([1.1, 1.1, 0.8], vertical_alignment="bottom")
+            row2_c1, row2_c2, row2_c3, row2_c4 = st.columns([1.05, 1.05, 0.55, 1.35], vertical_alignment="bottom")
             with row2_c1:
                 _status_filter = st.selectbox(
                     "Status",
@@ -1451,6 +1435,22 @@ def render_matriz():
             with row2_c3:
                 st.session_state["matriz_show_legend"] = st.toggle(
                     "Legenda", value=bool(st.session_state["matriz_show_legend"]), key="mtz_leg")
+            with row2_c4:
+                st.markdown('<div class="mtz-inline-actions">', unsafe_allow_html=True)
+                a1, a2, a3 = st.columns([1.2, 1.0, 1.15], gap="small")
+                with a1:
+                    st.markdown('<div class="mtz-btn-secondary">', unsafe_allow_html=True)
+                    _clear_dept = st.button("Limpar depto", key="mtz_clear_dept", use_container_width=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                with a2:
+                    st.markdown('<div class="mtz-btn-secondary">', unsafe_allow_html=True)
+                    _show_all = st.button("Ver todos", key="mtz_show_all", use_container_width=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                with a3:
+                    st.markdown('<div class="mtz-btn-primary">', unsafe_allow_html=True)
+                    _reload = st.button("Recarregar", key="mtz_reload", use_container_width=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
 
             if _clear_dept:
                 st.session_state["matriz_departamento_id"] = None
