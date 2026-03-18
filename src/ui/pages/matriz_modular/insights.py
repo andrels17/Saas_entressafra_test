@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from src.ui.pages.matriz_sector import summarize_sector_intelligence
+
 def _fmt_duration_from_hours(hours) -> str:
     if hours is None:
         return "-"
