@@ -193,12 +193,12 @@ def __render_selection_context(
 
 def _inject_css():
     st.markdown("""<style>
-.enterprise-sticky{position:sticky;top:0;z-index:999;padding:10px 12px 8px 12px;
+.enterprise-sticky{position:sticky;top:0;z-index:999;padding:12px 12px 10px 12px;
 margin:0 0 12px 0;border-radius:18px;background:linear-gradient(180deg, rgba(18,18,18,.92), rgba(10,18,14,.88));
 backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.08);
-box-shadow:0 8px 22px rgba(0,0,0,.28);}
-.enterprise-title{font-size:1.02rem;font-weight:700;letter-spacing:.15px;margin:0}
-.enterprise-sub{color:rgba(255,255,255,.66);font-size:.80rem;margin-top:2px}
+box-shadow:0 10px 28px rgba(0,0,0,.35);}
+.enterprise-title{font-size:1.1rem;font-weight:700;letter-spacing:.2px;margin:0}
+.enterprise-sub{color:rgba(255,255,255,.68);font-size:.85rem;margin-top:2px}
 .enterprise-chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .enterprise-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;
 border-radius:999px;border:1px solid rgba(255,255,255,.10);
@@ -296,7 +296,13 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 .mtz-priority-panel{padding:12px 14px;border-radius:18px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);margin:6px 0 14px 0;box-shadow:0 8px 20px rgba(0,0,0,.16)}
 .mtz-priority-item{padding:8px 10px;border-radius:12px;margin:6px 0;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}
 .mtz-kpi-panel{border-radius:16px;padding:10px 12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03)}
-.header-action-row{margin-top:2px}
+.mtz-page-hero{margin:6px 0 10px 0;padding:2px 0 0 0}
+.mtz-page-title{font-size:1.7rem;font-weight:800;letter-spacing:-.02em;margin:0 0 4px 0;color:#fff}
+.mtz-page-sub{font-size:.90rem;color:rgba(255,255,255,.72);margin:0}
+.mtz-toolbar-inline [data-testid="stButton"] button{min-height:40px;font-weight:700}
+.mtz-toolbar-inline [data-testid="stNumberInput"] input{min-height:40px}
+.mtz-toolbar-inline [data-testid="stTextInput"] input{min-height:40px}
+.mtz-toolbar-inline [data-testid="stToggle"]{padding-top:24px}
 </style>""", unsafe_allow_html=True)
 
 
@@ -1352,23 +1358,16 @@ def render_matriz():
             st.session_state["matriz_grupo_id"] = grupos[0]["id"]
 
         hph = st.empty()
-        # Header sticky inicial (tela de selecao)
-        with hph.container():
-            st.markdown(
-                '<div class="enterprise-sticky">',
-                unsafe_allow_html=True)
 
-            top_l, top_r = st.columns([2.15, 1.85], vertical_alignment="bottom")
+        # Toolbar compacta inicial (tela de seleção)
+        with hph.container():
+            st.markdown('<div class="enterprise-sticky mtz-toolbar-inline">', unsafe_allow_html=True)
+            top_l, top_r = st.columns([1.45, 1.55], vertical_alignment="center")
             with top_l:
-                st.markdown(
-                    '<div class="enterprise-title">Matriz Operacional</div>',
-                    unsafe_allow_html=True)
-                st.markdown(
-                    '<div class="enterprise-sub">Etapas D/R/M · Setores · Evolução semanal · Tempos</div>',
-                    unsafe_allow_html=True)
+                st.markdown('<div class="enterprise-title">Matriz Operacional</div>', unsafe_allow_html=True)
+                st.markdown('<div class="enterprise-sub">Filtros, revisão e acesso rápido aos grupos</div>', unsafe_allow_html=True)
             with top_r:
-                st.markdown('<div class="header-action-row">', unsafe_allow_html=True)
-                a1, a2 = st.columns([1, 1], gap="small")
+                a1, a2, a3 = st.columns([1, 1, 1], gap="small")
                 with a1:
                     _clear_dept, _show_all = _render_selection_context(
                         is_group_view=st.session_state.get("matriz_view") == "group",
@@ -1383,11 +1382,9 @@ def render_matriz():
                         ),
                     )
                 with a2:
-                    if st.button(
-                        "Recarregar",
-                        key="mtz_reload",
-                        use_container_width=True,
-                    ):
+                    pass
+                with a3:
+                    if st.button("Recarregar", key="mtz_reload", use_container_width=True):
                         bump_data_version()
                         clear_cached_functions(
                             _load_payload,
@@ -1398,7 +1395,6 @@ def render_matriz():
                             _normalize_service_ids,
                         )
                         st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
                 if _clear_dept:
                     st.session_state["matriz_departamento_id"] = None
                     st.rerun()
@@ -1407,36 +1403,46 @@ def render_matriz():
                     st.session_state["matriz_departamento_id"] = None
                     st.rerun()
 
-            row1_c1, row1_c2, row1_c3 = st.columns([2.1, 1.0, 0.9], vertical_alignment="bottom")
+            row1_c1, row1_c2, row1_c3 = st.columns([1.8, 1.2, 0.9], vertical_alignment="bottom")
             with row1_c1:
+                st.session_state.setdefault("matriz_grp_search", "")
+                search = st.text_input(
+                    "Buscar",
+                    value=st.session_state["matriz_grp_search"],
+                    placeholder="Grupo ou departamento…",
+                    key="mtz_search_in")
+                st.session_state["matriz_grp_search"] = search
+            with row1_c2:
                 rev_opts = [
                     (r.get("titulo") or f"Revisao {r['id']}", r["id"])
                     for r in revisoes if r.get("id")]
                 if not rev_opts:
-                    st.selectbox(
-                        "Revisao",
-                        ["Nenhuma revisao"],
-                        disabled=True,
-                        key="rev_pick_dis")
+                    st.selectbox("Revisao", ["Nenhuma revisao"], disabled=True, key="rev_pick_dis")
                 else:
                     rlbls = [lbl for lbl, _ in rev_opts]
                     rmap = {lbl: rid for lbl, rid in rev_opts}
-                    cur = next((lbl for lbl, rid in rev_opts if rid ==
-                               st.session_state["matriz_revisao_id"]), rlbls[0])
-                    pick = st.selectbox(
-                        "Revisao",
-                        rlbls,
-                        index=rlbls.index(cur),
-                        key="mtz_rev_pick")
+                    cur = next((lbl for lbl, rid in rev_opts if rid == st.session_state["matriz_revisao_id"]), rlbls[0])
+                    pick = st.selectbox("Revisao", rlbls, index=rlbls.index(cur), key="mtz_rev_pick")
                     st.session_state["matriz_revisao_id"] = rmap[pick]
-            with row1_c2:
+            with row1_c3:
                 st.session_state["matriz_limit_eq"] = st.number_input(
                     "Limite eq.", min_value=20, max_value=500, value=int(
                         st.session_state["matriz_limit_eq"]), step=20, key="mtz_lim_pick")
-            with row1_c3:
+
+            row2_c1, row2_c2, row2_c3 = st.columns([1.1, 1.1, 0.8], vertical_alignment="bottom")
+            with row2_c1:
+                _status_filter = st.selectbox(
+                    "Status",
+                    ["Todos", "🔴 Crítico (<50%)", "🟡 Em andamento (50–79%)", "🟢 Avançado (≥80%)", "⬜ Sem dados"],
+                    index=0, key="mtz_status_filter")
+            with row2_c2:
+                _sort_by = st.selectbox(
+                    "Ordenar",
+                    ["Nome", "% ↑ (mais atrasados)", "% ↓ (mais avançados)"],
+                    index=1, key="mtz_sort_by")
+            with row2_c3:
                 st.session_state["matriz_show_legend"] = st.toggle(
                     "Legenda", value=bool(st.session_state["matriz_show_legend"]), key="mtz_leg")
-            st.markdown('</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
         # Tela de selecao — cards com barra de progresso (Melhoria 3)
@@ -1446,34 +1452,7 @@ def render_matriz():
                 tenant_id, revisao_id, st.session_state.get(
                     "data_version", "0")) if revisao_id else {}
 
-            # FIX #9: busca por nome OU departamento, com filtro de status
-            sc1, sc2, sc3 = st.columns([2.2, 1.15, 1.15], vertical_alignment="bottom")
-            with sc1:
-                st.session_state.setdefault("matriz_grp_search", "")
-                search = st.text_input(
-                    "🔎 Buscar",
-                    value=st.session_state["matriz_grp_search"],
-                    placeholder="Grupo ou departamento…",
-                    key="mtz_search_in")
-                st.session_state["matriz_grp_search"] = search
-            with sc2:
-                _status_filter = st.selectbox(
-                    "Status",
-                    [
-                        "Todos",
-                        "🔴 Crítico (<50%)",
-                        "🟡 Em andamento (50–79%)",
-                        "🟢 Avançado (≥80%)",
-                        "⬜ Sem dados"],
-                    index=0,
-                    key="mtz_status_filter")
-            with sc3:
-                _sort_by = st.selectbox("Ordenar",
-                                        ["Nome",
-                                         "% ↑ (mais atrasados)",
-                                         "% ↓ (mais avançados)"],
-                                        index=1,
-                                        key="mtz_sort_by")
+            # filtros da seleção já renderizados na toolbar compacta
 
             q = (search or "").strip().lower()
             dep_id = st.session_state.get("matriz_departamento_id")
