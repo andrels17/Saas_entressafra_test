@@ -212,40 +212,39 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 /* Cards de grupos — versão estável */
 .mtz-card-grid{margin-top:8px}
 .mtz-card-grid [data-testid="stButton"]{margin-bottom:10px}
+.mtz-card-grid [data-testid="stButton"]{margin-bottom:8px}
 .mtz-card-grid [data-testid="stButton"] button{
   display:flex;
+  align-items:flex-start;
+  justify-content:flex-start;
   flex-direction:column;
-  align-items:center;
-  justify-content:center;
-  height:96px;
-  font-size:13px;
-  line-height:1.15;
-  overflow:hidden;
-  text-overflow:ellipsis;
-}
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  height:96px;
-
   width:100%;
-  min-height:88px;
-  padding:8px 10px;
-  border-radius:14px;
-  border:1px solid rgba(84,255,165,.14);
-  background:linear-gradient(180deg, rgba(10,72,48,.52), rgba(7,40,28,.88));
-  color:rgba(255,255,255,.96);
-  box-shadow:0 6px 14px rgba(0,0,0,.18);
-  transition:transform .12s ease, border-color .14s ease, box-shadow .14s ease;
-  white-space:normal;
-  line-height:1.42;
+  height:132px;
+  min-height:132px;
+  padding:14px 16px;
+  border-radius:18px;
+  border:1px solid rgba(84,255,165,.16);
+  background:linear-gradient(180deg, rgba(9,70,47,.72), rgba(6,34,24,.96));
+  color:rgba(255,255,255,.97);
+  box-shadow:0 10px 22px rgba(0,0,0,.20), inset 0 1px 0 rgba(255,255,255,.04);
+  transition:transform .14s ease, border-color .14s ease, box-shadow .14s ease, background .14s ease;
+  white-space:pre-wrap;
+  line-height:1.08;
   font-weight:600;
-  text-align:center;
+  text-align:left;
+  overflow:hidden;
+  font-size:13px;
+}
+.mtz-card-grid [data-testid="stButton"] button p{
+  text-align:left !important;
+  margin:0 !important;
+  white-space:pre-wrap !important;
 }
 .mtz-card-grid [data-testid="stButton"] button:hover{
-  transform:translateY(-1px);
-  border-color:rgba(110,255,180,.24);
-  box-shadow:0 10px 20px rgba(0,0,0,.22);
+  transform:translateY(-2px);
+  border-color:rgba(110,255,180,.30);
+  background:linear-gradient(180deg, rgba(12,86,58,.78), rgba(8,42,29,.98));
+  box-shadow:0 14px 28px rgba(0,0,0,.24);
 }
 .mtz-card-grid .mtz-pct-outer{
   margin:-6px 14px 12px 14px;
@@ -296,7 +295,7 @@ def _compact_card_summary(pct: int, eqc: int, svc: int) -> str:
     return f"{int(eqc)} eq · {int(svc)} svc"
 
 
-def _truncate_card_subtitle(value: str, limit: int = 18) -> str:
+def _truncate_card_subtitle(value: str, limit: int = 16) -> str:
     value = (value or "").strip()
     if not value:
         return "Sem departamento"
@@ -316,11 +315,11 @@ def _card_status_meta(pct: int, eqc: int, svc: int) -> tuple[str, str]:
 
 
 def _build_group_card_label(nome: str, dept_lbl: str, pct: int, eqc: int, svc: int) -> str:
-    title = _truncate_card_title(nome, 20)
-    subtitle = _truncate_card_subtitle(dept_lbl, 18)
+    title = _truncate_card_title(nome, 18)
+    subtitle = _truncate_card_subtitle(dept_lbl, 16)
     status_txt, _ = _card_status_meta(pct, eqc, svc)
-    metrics = f"{int(pct)}% · {int(eqc)} eq · {int(svc)} svc"
-    return f"{title}\n{subtitle}\n{metrics}\n{status_txt}  ↗ Abrir matriz"
+    metrics = f"{int(pct)}%  •  {int(eqc)} eq  •  {int(svc)} svc"
+    return f"{title}\n{subtitle}\n{metrics}\n{status_txt}   ↗ Abrir"
 
 
 def _pct_bar_html(pct: int, height: int = 6) -> str:
