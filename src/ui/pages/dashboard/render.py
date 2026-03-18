@@ -13,6 +13,7 @@ import plotly.express as px
 import streamlit as st
 
 from src.auth.scope import get_my_scope
+from src.auth.permissions import can_view_all_data
 from src.domain.kpi import calc_global_kpis
 from src.ui.core.empty_state import empty_state
 from src.ui.components.filters import multiselect_departamentos, multiselect_grupos
@@ -578,6 +579,10 @@ def render_dashboard() -> None:
 
     sb = sb_for_user()
     dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id)
+    role = st.session_state.get("current_role") or ""
+    if not can_view_all_data(role) and dep_scope_ids == [] and grp_scope_ids == []:
+        st.warning("Você não possui departamentos ou grupos vinculados para visualizar o dashboard.")
+        return
 
     with st.spinner("", show_time=False):
         rev = _load_revisao(sb, tenant_id)
@@ -615,6 +620,11 @@ def render_dashboard() -> None:
         departamentos = _load_departamentos(tenant_id, ver)
         grupos = _load_grupos(tenant_id, ver)
 
+    if dep_scope_ids is not None:
+        departamentos = [d for d in departamentos if d.get("id") in dep_scope_ids]
+    if grp_scope_ids is not None:
+        grupos = [g for g in grupos if g.get("id") in grp_scope_ids]
+
     dept_map = {d["id"]: d.get("nome", "—")
                 for d in departamentos if d.get("id")}
     gid_to_name = {g["id"]: g.get("nome", "—") for g in grupos if g.get("id")}
@@ -634,10 +644,10 @@ def render_dashboard() -> None:
 
     group_kpis_df = get_group_kpis(tenant_id, revisao_id, ver)
     if group_kpis_df is not None and not group_kpis_df.empty:
-        if grp_scope_ids:
+        if grp_scope_ids is not None:
             group_kpis_df = group_kpis_df[group_kpis_df["grupo_id"].isin(
                 grp_scope_ids)]
-        if dep_scope_ids:
+        if dep_scope_ids is not None:
             group_kpis_df = group_kpis_df[group_kpis_df["grupo_id"].map(
                 gid_to_dept).isin(dep_scope_ids)]
         dashboard_groups = group_kpis_df.copy()

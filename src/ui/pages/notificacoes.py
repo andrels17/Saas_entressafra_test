@@ -19,6 +19,7 @@ import streamlit as st
 
 from src.auth.roles import Role
 from src.auth.scope import get_my_scope
+from src.auth.permissions import can_view_all_data
 from src.ui.core.styles import page_header as _ph
 from src.ui.components.feedback import notice_card, selection_summary
 from src.ui.components.actions import download_action, refresh_button, primary_action_button
@@ -1086,10 +1087,12 @@ def render_notificacoes() -> None:
 
     # Filtro de escopo (não-admin vê apenas seus grupos)
     role = current_role()
-    is_admin = Role.is_admin(role)
-    if not is_admin:
-        dep_ids, grp_ids = get_my_scope(tenant_id)
-        if grp_ids:
+    dep_ids, grp_ids = get_my_scope(tenant_id)
+    if not can_view_all_data(role):
+        if dep_ids == [] and grp_ids == []:
+            st.warning("Você não possui departamentos ou grupos vinculados para visualizar notificações.")
+            return
+        if grp_ids is not None:
             tarefas = [
                 t for t in tarefas
                 if (t.get("equipamentos") or {}).get("grupo_id") in grp_ids

@@ -125,9 +125,9 @@ def apply_filters(
         grupo_ids=None,
         equipamento_ids=None) -> pd.DataFrame:
     f = df.copy()
-    if departamento_ids and "departamento_id" in f.columns:
+    if departamento_ids is not None and "departamento_id" in f.columns:
         f = f[f["departamento_id"].isin(departamento_ids)]
-    if grupo_ids and "grupo_id" in f.columns:
+    if grupo_ids is not None and "grupo_id" in f.columns:
         f = f[f["grupo_id"].isin(grupo_ids)]
     if equipamento_ids and "equipamento_id" in f.columns:
         f = f[f["equipamento_id"].isin(equipamento_ids)]

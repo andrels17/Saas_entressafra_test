@@ -17,6 +17,7 @@ import plotly.express as px
 import streamlit as st
 
 from src.auth.scope import get_my_scope
+from src.auth.permissions import can_view_all_data
 from src.domain.kpi import calc_global_kpis, calc_dept_kpis
 from src.ui.core.styles import page_header
 from src.ui.components.feedback import selection_summary
@@ -360,6 +361,15 @@ def render_home_overview() -> None:
                     for d in deps if d.get("id")}
 
     dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id)
+    role = st.session_state.get("current_role") or ""
+    if not can_view_all_data(role) and dep_scope_ids == [] and grp_scope_ids == []:
+        st.warning("Você não possui departamentos ou grupos vinculados para visualizar esta revisão.")
+        return
+
+    if dep_scope_ids is not None:
+        deps = [d for d in deps if d.get("id") in dep_scope_ids]
+    if grp_scope_ids is not None:
+        grupos = [g for g in grupos if g.get("id") in grp_scope_ids]
 
     # ── Header da revisão ───────────────────────────────────────────────────
     h1_col, h2_col = st.columns([0.82, 0.18])

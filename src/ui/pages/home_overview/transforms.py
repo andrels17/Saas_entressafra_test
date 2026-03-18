@@ -105,9 +105,9 @@ def enrich_kdf(
     kdf["Grupo"] = kdf["grupo_id"].map(
         gid_to_name).fillna(kdf["grupo_id"].astype(str))
     kdf["departamento_id"] = kdf["grupo_id"].map(gid_to_dept)
-    if dep_scope_ids:
+    if dep_scope_ids is not None:
         kdf = kdf[kdf["departamento_id"].isin(dep_scope_ids)].copy()
-    if grp_scope_ids:
+    if grp_scope_ids is not None:
         kdf = kdf[kdf["grupo_id"].isin(grp_scope_ids)].copy()
     return kdf
 

@@ -67,7 +67,7 @@ def multiselect_departamentos(
     options = [
         (item["id"], item.get("nome", "—"))
         for item in departamentos
-        if item.get("id") and (not allowed_ids or item["id"] in allowed_ids)
+        if item.get("id") and (allowed_ids is None or item["id"] in allowed_ids)
     ]
     label_to_id = {name: dep_id for dep_id, name in options}
     selected_names = st.multiselect(
@@ -92,7 +92,7 @@ def multiselect_grupos(
         grupo_id = grupo.get("id")
         if not grupo_id:
             continue
-        if allowed_group_ids and grupo_id not in allowed_group_ids:
+        if allowed_group_ids is not None and grupo_id not in allowed_group_ids:
             continue
         if departamento_ids and grupo.get("departamento_id") not in departamento_ids:
             continue

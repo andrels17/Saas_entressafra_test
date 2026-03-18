@@ -370,7 +370,7 @@ def _fragment_pendencias(
 
         if scope_dept_ids and dep_id and dep_id not in scope_dept_ids:
             continue
-        if scope_grp_ids and grp_id and grp_id not in scope_grp_ids:
+        if scope_grp_ids is not None and grp_id and grp_id not in scope_grp_ids:
             continue
 
         equipamento = f"{frota} — {modelo}".strip(" —")
@@ -637,7 +637,7 @@ def render_gestor_painel() -> None:
     )
     if scope_dept_ids:
         gq = gq.in_("departamento_id", scope_dept_ids)
-    if scope_grp_ids:
+    if scope_grp_ids is not None:
         gq = gq.in_("id", scope_grp_ids)
     grupos = gq.execute().data or []
 

@@ -27,6 +27,7 @@ from src.utils.config import validate_config_or_stop
 from src.utils.mobile import is_mobile, render_mobile_toggle
 from src.utils.supabase_helpers import sb_for_user
 from src.auth.scope import get_user_scope
+from src.auth.permissions import can_view_all_data
 
 # ── Pages ─────────────────────────────────────────────────────────────────────
 from src.ui.pages.home_overview import render_home_overview
@@ -234,7 +235,7 @@ def _resolve_scope(tenant_id: str, user_id: str, role: str) -> None:
         sb = sb_for_user()
         dept_ids, grp_ids = get_user_scope(sb, tenant_id, user_id, role=role)
     except Exception:
-        dept_ids, grp_ids = None, None
+        dept_ids, grp_ids = (None, None) if can_view_all_data(role) else ([], [])
     st.session_state["scope_departamento_ids"] = dept_ids
     st.session_state["scope_grupo_ids"]        = grp_ids
 

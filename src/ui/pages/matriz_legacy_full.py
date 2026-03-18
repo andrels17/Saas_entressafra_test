@@ -1,8 +1,23 @@
-"""Renderização principal da Matriz Operacional (módulo modularizado)."""
+"""Matriz Operacional — visao por grupo com drill-down por setor.
+
+Melhorias v2:
+  1. Scope/permissoes — nao-admin veem apenas seus grupos/departamentos
+  2. Tab "Resumo" dedicada com ranking visual por equipamento + barra de progresso
+  3. Barra de progresso visual nos cards de grupo (tela de selecao)
+  4. Filtro de semana na aba Matriz
+  5. Observacoes inline no editor — expander por setor + campo no editor rapido
+  6. _style_heatmap definida uma vez fora do loop de setores
+  7. svc_ids_all calculado antes das tabs (sem dir() fragil)
+  8. Barra de progresso no header do grupo
+"""
 from __future__ import annotations
 
+import io
 import time
-from datetime import date, datetime, timezone
+from collections import defaultdict
+from datetime import datetime, date, timezone
+from src.utils.timezone import now_utc as _now_utc, now_brt as _now_brt
+from src.utils.weeks import week_from_revisao as _week_from_revisao
 
 import pandas as pd
 import streamlit as st
@@ -21,8 +36,6 @@ from src.utils.supabase_helpers import (
     current_user_id,
     sb_for_user,
 )
-from src.utils.timezone import now_utc as _now_utc, now_brt as _now_brt
-from src.utils.weeks import week_from_revisao as _week_from_revisao
 from src.ui.pages.matriz_sector import (
     build_change_preview_lines,
     build_sector_frame,
@@ -44,19 +57,1390 @@ from src.ui.pages.matriz_runtime import (
     task_key as _task_key,
 )
 
-from .data import _all_dept_names, _dept_name, _fetch_template, _group_kpis, _load_payload
-from .insights import _build_automation_insights, _build_group_sector_intelligence, _fmt_duration_from_hours, _sector_priority_sort_key
-from .pdf_export import _build_pdf_tables, _compute_setor_ok_counts, _df_to_csv_bytes, _reportlab_available, _style_heatmap
-from .styles import (
-    _build_group_card_html,
-    _build_group_card_label,
-    _card_status_meta,
-    _compact_card_summary,
-    _inject_css,
-)
-from .selection import render_selection_screen
-from .header import render_group_header
-from .summary_tab import render_summary_tab
+
+
+
+
+
+def _render_selection_context(
+    *,
+    is_group_view: bool,
+    grupos: list[dict],
+    grupo_id,
+    departamento_id,
+    is_admin: bool,
+    dept_name_fn,
+) -> tuple[bool, bool]:
+    clear_dept = False
+    show_all = False
+
+    if is_group_view:
+        gn = next((g.get("nome") for g in grupos if g.get("id") == grupo_id), "—")
+        st.markdown(
+            f'<div class="enterprise-chip"><strong>Grupo:</strong> {gn}</div>',
+            unsafe_allow_html=True,
+        )
+        return False, False
+
+    if departamento_id and is_admin:
+        dn = dept_name_fn(departamento_id) or "(departamento)"
+        st.markdown(
+            f'<div class="enterprise-chip"><strong>Depto:</strong> {dn}</div>',
+            unsafe_allow_html=True,
+        )
+
+    if is_admin:
+        with st.popover("Ações", use_container_width=True):
+            clear_dept = st.button(
+                "Limpar depto",
+                key="mtz_clear_dept",
+                use_container_width=True,
+            )
+            show_all = st.button(
+                "Ver todos",
+                key="mtz_show_all",
+                use_container_width=True,
+            )
+
+    return clear_dept, show_all
+
+
+
+
+
+
+
+def _render_selection_context(
+    *,
+    is_group_view: bool,
+    grupos: list[dict],
+    grupo_id,
+    departamento_id,
+    is_admin: bool,
+    dept_name_fn,
+) -> tuple[bool, bool]:
+    clear_dept = False
+    show_all = False
+
+    if is_group_view:
+        gn = next((g.get("nome") for g in grupos if g.get("id") == grupo_id), "—")
+        st.markdown(
+            f'<div class="enterprise-chip"><strong>Grupo:</strong> {gn}</div>',
+            unsafe_allow_html=True,
+        )
+        return False, False
+
+    if departamento_id and is_admin:
+        dn = dept_name_fn(departamento_id) or "(departamento)"
+        st.markdown(
+            f'<div class="enterprise-chip"><strong>Depto:</strong> {dn}</div>',
+            unsafe_allow_html=True,
+        )
+
+    if is_admin:
+        clear_dept = st.button(
+            "Limpar depto",
+            key="mtz_clear_dept",
+            use_container_width=True,
+        )
+        show_all = st.button(
+            "Ver todos",
+            key="mtz_show_all",
+            use_container_width=True,
+        )
+
+    return clear_dept, show_all
+
+
+
+
+
+def __render_selection_context(
+    *,
+    is_group_view: bool,
+    grupos: list[dict],
+    grupo_id,
+    departamento_id,
+    is_admin: bool,
+    dept_name_fn,
+) -> tuple[bool, bool]:
+    """Renderiza chips/contexto da seleção e retorna ações do usuário."""
+    col_chip, col_actions = st.columns([1.6, 1.2])
+
+    with col_chip:
+        if is_group_view:
+            gn = next((g.get("nome") for g in grupos if g.get("id") == grupo_id), "—")
+            st.markdown(
+                f'<div class="enterprise-chip"><strong>Grupo:</strong> {gn}</div>',
+                unsafe_allow_html=True,
+            )
+        elif departamento_id and is_admin:
+            dn = dept_name_fn(departamento_id) or "(departamento)"
+            st.markdown(
+                f'<div class="enterprise-chip"><strong>Depto:</strong> {dn}</div>',
+                unsafe_allow_html=True,
+            )
+
+    with col_actions:
+        if not is_group_view and is_admin:
+            c1, c2 = st.columns(2)
+            with c1:
+                clear_dept = st.button("Limpar depto", key="mtz_clear_dept", use_container_width=True)
+            with c2:
+                show_all = st.button("Ver todos", key="mtz_show_all", use_container_width=True)
+            return clear_dept, show_all
+
+    return False, False
+
+def _inject_css():
+    st.markdown("""<style>
+.enterprise-sticky{position:sticky;top:0;z-index:999;padding:12px 12px 10px 12px;
+margin:0 0 12px 0;border-radius:18px;background:linear-gradient(180deg, rgba(18,18,18,.92), rgba(10,18,14,.88));
+backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.08);
+box-shadow:0 10px 28px rgba(0,0,0,.35);}
+.enterprise-title{font-size:1.1rem;font-weight:700;letter-spacing:.2px;margin:0}
+.enterprise-sub{color:rgba(255,255,255,.68);font-size:.85rem;margin-top:2px}
+.enterprise-chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.enterprise-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;
+border-radius:999px;border:1px solid rgba(255,255,255,.10);
+background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
+.enterprise-chip strong{color:rgba(255,255,255,.95)}
+.enterprise-chip.ok{border-color:rgba(18,183,106,.35);background:rgba(18,183,106,.10)}
+.enterprise-chip.warn{border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.10)}
+.enterprise-chip.bad{border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.10)}
+.enterprise-divider{height:1px;background:rgba(255,255,255,.08);margin:10px 0}
+
+/* Cards de grupos — versão estável */
+.mtz-card-grid{margin-top:8px}
+.mtz-card-grid [data-testid="stButton"]{margin-bottom:10px}
+.mtz-card-grid{margin-top:10px}
+.mtz-select-card{
+  border-radius:18px;
+  padding:4px 4px 2px 4px;
+  background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+}
+.mtz-select-card.high{
+  box-shadow:0 0 0 1px rgba(239,68,68,.28) inset;
+}
+.mtz-select-card.medium{
+  box-shadow:0 0 0 1px rgba(245,158,11,.24) inset;
+}
+.mtz-select-card.low{
+  box-shadow:0 0 0 1px rgba(34,197,94,.20) inset;
+}
+.mtz-select-card.neutral{
+  box-shadow:0 0 0 1px rgba(229,231,235,.14) inset;
+}
+.mtz-select-card .mtz-card-title{
+  font-size:1rem;
+  font-weight:700;
+  line-height:1.15;
+  color:#fff;
+  margin-bottom:4px;
+}
+.mtz-select-card .mtz-card-subtitle{
+  font-size:.83rem;
+  line-height:1.1;
+  color:rgba(255,255,255,.68);
+  margin-bottom:10px;
+}
+.mtz-select-card .mtz-card-metrics{
+  font-size:.88rem;
+  font-weight:600;
+  color:rgba(255,255,255,.94);
+  margin-bottom:10px;
+}
+.mtz-select-card .mtz-card-status{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-size:.78rem;
+  font-weight:700;
+  color:rgba(255,255,255,.92);
+  padding:4px 8px;
+  border-radius:999px;
+  background:rgba(255,255,255,.05);
+  border:1px solid rgba(255,255,255,.08);
+}
+.mtz-select-card .mtz-card-status.critico{
+  background:rgba(239,68,68,.12);
+  border-color:rgba(239,68,68,.28);
+}
+.mtz-select-card .mtz-card-status.atencao{
+  background:rgba(245,158,11,.12);
+  border-color:rgba(245,158,11,.26);
+}
+.mtz-select-card .mtz-card-status.avancado{
+  background:rgba(34,197,94,.12);
+  border-color:rgba(34,197,94,.24);
+}
+.mtz-select-card .mtz-card-status.sem-dados{
+  background:rgba(229,231,235,.08);
+  border-color:rgba(229,231,235,.16);
+}
+.mtz-select-card .mtz-toolbar-actions [data-testid="stButton"] button{
+  min-height:36px;
+  padding:0 12px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.10);
+  background:rgba(255,255,255,.03);
+  color:rgba(255,255,255,.92);
+  box-shadow:none;
+  font-weight:600;
+  font-size:.92rem;
+}
+.mtz-toolbar-actions [data-testid="stButton"] button:hover{
+  border-color:rgba(255,255,255,.18);
+  background:rgba(255,255,255,.06);
+  transform:none;
+  box-shadow:none;
+}
+.mtz-toolbar-actions .mtz-btn-primary [data-testid="stButton"] button{
+  background:rgba(16,185,129,.10);
+  border-color:rgba(16,185,129,.22);
+}
+.mtz-toolbar-actions .mtz-btn-primary [data-testid="stButton"] button:hover{
+  background:rgba(16,185,129,.16);
+  border-color:rgba(16,185,129,.30);
+}
+
+[data-testid="stButton"] button{
+  width:100%;
+  border-radius:12px;
+  min-height:40px;
+  font-weight:700;
+}
+/* Painéis e inteligência */
+.mtz-risk-badges{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 8px 0}
+.mtz-risk-badge{display:inline-flex;align-items:center;padding:4px 9px;border-radius:999px;font-size:.78rem;font-weight:600;border:1px solid rgba(255,255,255,.08)}
+.mtz-risk-badge.high{background:rgba(239,68,68,.14);border-color:rgba(239,68,68,.34);color:#fecaca}
+.mtz-risk-badge.medium{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.32);color:#fde68a}
+.mtz-risk-badge.low{background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.30);color:#bbf7d0}
+.mtz-sector-box{border-radius:18px;padding:12px 14px;margin:10px 0 14px 0;border:1px solid rgba(255,255,255,.08);box-shadow:0 8px 20px rgba(0,0,0,.18)}
+.mtz-sector-box.high{background:linear-gradient(180deg, rgba(127,29,29,.24), rgba(0,0,0,0));border-color:rgba(239,68,68,.30)}
+.mtz-sector-box.medium{background:linear-gradient(180deg, rgba(120,53,15,.18), rgba(0,0,0,0));border-color:rgba(245,158,11,.28)}
+.mtz-sector-box.low{background:linear-gradient(180deg, rgba(20,83,45,.16), rgba(0,0,0,0));border-color:rgba(34,197,94,.24)}
+.mtz-priority-panel{padding:12px 14px;border-radius:18px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);margin:6px 0 14px 0;box-shadow:0 8px 20px rgba(0,0,0,.16)}
+.mtz-priority-item{padding:8px 10px;border-radius:12px;margin:6px 0;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}
+.mtz-kpi-panel{border-radius:16px;padding:10px 12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03)}
+.mtz-page-hero{margin:6px 0 10px 0;padding:2px 0 0 0}
+.mtz-page-title{font-size:1.7rem;font-weight:800;letter-spacing:-.02em;margin:0 0 4px 0;color:#fff}
+.mtz-page-sub{font-size:.90rem;color:rgba(255,255,255,.72);margin:0}
+.mtz-toolbar-inline [data-testid="stButton"] button{min-height:40px;font-weight:700}
+.mtz-toolbar-inline [data-testid="stNumberInput"] input{min-height:40px}
+.mtz-toolbar-inline [data-testid="stTextInput"] input{min-height:40px}
+.mtz-toolbar-inline [data-testid="stToggle"]{padding-top:8px}
+
+/* Toolbar actions premium */
+.mtz-inline-actions{
+  border:1px solid rgba(255,255,255,.08);
+  background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.012));
+  border-radius:14px;
+  padding:6px;
+  box-shadow:0 10px 24px rgba(0,0,0,.16);
+}
+.mtz-inline-actions [data-testid="column"]{display:flex;align-items:stretch}
+.mtz-inline-actions [data-testid="stButton"]{height:100%}
+.mtz-inline-actions [data-testid="stButton"] button{
+  min-height:42px !important;
+  height:42px;
+  padding:0 14px !important;
+  border-radius:10px !important;
+  font-size:.90rem !important;
+  font-weight:700 !important;
+  white-space:nowrap !important;
+  letter-spacing:-.01em;
+}
+.mtz-inline-actions .mtz-btn-ghost [data-testid="stButton"] button{
+  background:rgba(255,255,255,.018) !important;
+  border:1px solid rgba(255,255,255,.09) !important;
+  color:rgba(255,255,255,.84) !important;
+}
+.mtz-inline-actions .mtz-btn-ghost [data-testid="stButton"] button:hover{
+  background:rgba(255,255,255,.04) !important;
+  border-color:rgba(255,255,255,.16) !important;
+  color:rgba(255,255,255,.96) !important;
+}
+.mtz-inline-actions .mtz-btn-neutral [data-testid="stButton"] button{
+  background:rgba(16,185,129,.06) !important;
+  border:1px solid rgba(16,185,129,.16) !important;
+  color:rgba(255,255,255,.94) !important;
+}
+.mtz-inline-actions .mtz-btn-neutral [data-testid="stButton"] button:hover{
+  background:rgba(16,185,129,.10) !important;
+  border-color:rgba(16,185,129,.24) !important;
+}
+.mtz-inline-actions .mtz-btn-primary [data-testid="stButton"] button{
+  background:linear-gradient(180deg, rgba(16,185,129,.18), rgba(16,185,129,.11)) !important;
+  border:1px solid rgba(16,185,129,.28) !important;
+  color:#f0fdf4 !important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05), 0 8px 18px rgba(16,185,129,.10) !important;
+}
+.mtz-inline-actions .mtz-btn-primary [data-testid="stButton"] button:hover{
+  background:linear-gradient(180deg, rgba(16,185,129,.24), rgba(16,185,129,.14)) !important;
+  border-color:rgba(16,185,129,.36) !important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06), 0 10px 22px rgba(16,185,129,.14) !important;
+}
+.mtz-inline-actions .mtz-btn-primary [data-testid="stButton"] button p,
+.mtz-inline-actions .mtz-btn-neutral [data-testid="stButton"] button p,
+.mtz-inline-actions .mtz-btn-ghost [data-testid="stButton"] button p{
+  white-space:nowrap !important;
+}
+.mtz-inline-actions [data-testid="column"]{display:flex;align-items:stretch}
+.mtz-inline-actions [data-testid="stButton"]{height:100%}
+.mtz-inline-actions [data-testid="stButton"] > div{height:100%}
+.mtz-inline-actions [data-testid="stButton"] button{
+  min-height:46px;
+  border-radius:12px;
+  font-size:.92rem;
+  font-weight:700;
+  letter-spacing:.01em;
+  border:1px solid rgba(255,255,255,.10);
+  background:rgba(255,255,255,.035);
+  color:rgba(255,255,255,.94);
+  transition:all .18s ease;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+}
+.mtz-inline-actions [data-testid="stButton"] button:hover{
+  transform:translateY(-1px);
+  border-color:rgba(255,255,255,.18);
+  background:rgba(255,255,255,.06);
+  box-shadow:0 10px 18px rgba(0,0,0,.16);
+}
+.mtz-inline-actions [data-testid="stButton"] button:focus:not(:active){
+  border-color:rgba(52,211,153,.38);
+  box-shadow:0 0 0 1px rgba(52,211,153,.22), 0 10px 18px rgba(0,0,0,.16);
+}
+.mtz-btn-ghost [data-testid="stButton"] button{
+  background:rgba(255,255,255,.018);
+  color:rgba(255,255,255,.80);
+}
+.mtz-btn-ghost [data-testid="stButton"] button:hover{
+  background:rgba(255,255,255,.045);
+  color:rgba(255,255,255,.94);
+}
+.mtz-btn-neutral [data-testid="stButton"] button{
+  background:linear-gradient(180deg, rgba(16,185,129,.08), rgba(255,255,255,.03));
+  border-color:rgba(16,185,129,.16);
+}
+.mtz-btn-neutral [data-testid="stButton"] button:hover{
+  border-color:rgba(16,185,129,.26);
+  background:linear-gradient(180deg, rgba(16,185,129,.12), rgba(255,255,255,.05));
+}
+.mtz-btn-primary [data-testid="stButton"] button{
+  background:linear-gradient(180deg, rgba(16,185,129,.28), rgba(5,150,105,.22));
+  border-color:rgba(52,211,153,.34);
+  color:#ecfdf5;
+  box-shadow:0 8px 18px rgba(6,95,70,.22), inset 0 1px 0 rgba(255,255,255,.08);
+}
+.mtz-btn-primary [data-testid="stButton"] button:hover{
+  background:linear-gradient(180deg, rgba(16,185,129,.36), rgba(5,150,105,.28));
+  border-color:rgba(52,211,153,.48);
+  box-shadow:0 12px 22px rgba(6,95,70,.28), inset 0 1px 0 rgba(255,255,255,.10);
+}
+.mtz-btn-primary [data-testid="stButton"] button p,
+.mtz-btn-neutral [data-testid="stButton"] button p,
+.mtz-btn-ghost [data-testid="stButton"] button p{font-weight:700}
+</style>""", unsafe_allow_html=True)
+
+
+
+
+def _truncate_card_title(value: str, limit: int = 18) -> str:
+    value = (value or "").strip()
+    if len(value) <= limit:
+        return value
+    return value[: max(limit - 1, 1)].rstrip() + "…"
+
+
+def _compact_card_summary(pct: int, eqc: int, svc: int) -> str:
+    return f"{int(eqc)} eq · {int(svc)} svc"
+
+
+def _truncate_card_subtitle(value: str, limit: int = 16) -> str:
+    value = (value or "").strip()
+    if not value:
+        return "Sem departamento"
+    if len(value) <= limit:
+        return value
+    return value[: max(limit - 1, 1)].rstrip() + "…"
+
+
+def _card_status_meta(pct: int, eqc: int, svc: int) -> tuple[str, str]:
+    if eqc == 0 or svc == 0:
+        return "⬜ Sem dados", "sem-dados"
+    if pct < 50:
+        return "🔴 Crítico", "critico"
+    if pct < 80:
+        return "🟡 Atenção", "atencao"
+    return "🟢 Avançado", "avancado"
+
+
+def _build_group_card_label(nome: str, dept_lbl: str, pct: int, eqc: int, svc: int) -> str:
+    title = _truncate_card_title(nome, 18)
+    subtitle = _truncate_card_subtitle(dept_lbl, 16)
+    status_txt, _ = _card_status_meta(pct, eqc, svc)
+    metrics = f"{int(pct)}%  •  {int(eqc)} eq  •  {int(svc)} svc"
+    return f"{title}\n{subtitle}\n{metrics}\n{status_txt}   ↗ Abrir"
+
+
+def _card_status_badge(pct: int, eqc: int, svc: int) -> tuple[str, str]:
+    if eqc == 0 or svc == 0:
+        return "⬜ Sem dados", "sem-dados"
+    if pct < 50:
+        return "🔴 Crítico", "critico"
+    if pct < 80:
+        return "🟡 Atenção", "atencao"
+    return "🟢 Avançado", "avancado"
+
+
+def _build_group_card_html(nome: str, dept_lbl: str, pct: int, eqc: int, svc: int) -> str:
+    title = _truncate_card_title(nome, 20)
+    subtitle = _truncate_card_subtitle(dept_lbl, 18)
+    status_txt, status_cls = _card_status_meta(pct, eqc, svc)
+    metrics = f"{int(pct)}% <span>•</span> {int(eqc)} eq <span>•</span> {int(svc)} svc"
+    return f"""
+    <div class="mtz-group-card {status_cls}">
+        <div class="mtz-group-card__title">{title}</div>
+        <div class="mtz-group-card__subtitle">{subtitle}</div>
+        <div class="mtz-group-card__metrics">{metrics}</div>
+        <div class="mtz-group-card__footer">
+            <span class="mtz-group-card__status">{status_txt}</span>
+            <span class="mtz-group-card__cta">↗ Abrir</span>
+        </div>
+    </div>
+    """
+
+
+
+def _pct_bar_html(pct: int, height: int = 6) -> str:
+    color = _risk_color(pct)
+    w = max(0, min(100, pct))
+    h = max(height, 8)
+    return (
+        f'<div class="mtz-pct-outer" style="height:{h}px">'
+        f'<div class="mtz-pct-inner" style="width:{w}%;background:{color};height:{h}px;transition:width .25s ease"></div>'
+        f'</div>'
+    )
+
+
+def _fmt_duration_from_hours(hours) -> str:
+    if hours is None:
+        return "-"
+    try:
+        total_seconds = int(round(float(hours) * 3600))
+    except Exception:
+        return "-"
+    if total_seconds < 0:
+        total_seconds = 0
+    days = total_seconds // 86400
+    rem = total_seconds % 86400
+    hrs = rem // 3600
+    mins = (rem % 3600) // 60
+    if days >= 1:
+        return f"{days} dia{'s' if days != 1 else ''} e {hrs}h"
+    if hrs >= 1:
+        return f"{hrs} hora{'s' if hrs != 1 else ''}"
+    return f"{mins} min"
+
+
+def _sector_priority_sort_key(item: dict) -> tuple:
+    risk_order = {"alto": 0, "medio": 1, "baixo": 2}
+    return (
+        risk_order.get(str(item.get("risk")), 3),
+        -int(item.get("criticos", 0) or 0),
+        -int(item.get("atrasadas_m", 0) or 0),
+        int(item.get("pct", 0) or 0),
+        str(item.get("setor_nome") or ""),
+    )
+
+
+def _build_group_sector_intelligence(
+    *,
+    equipamentos: list[dict],
+    setor_to_services: dict,
+    task_map: dict,
+    atraso_dias: int,
+    rev_start,
+) -> list[dict]:
+    intelligence: list[dict] = []
+    for setor_nome in sorted(setor_to_services.keys(), key=lambda x: x.lower()):
+        svs = sorted(
+            setor_to_services[setor_nome],
+            key=lambda x: (x.get("nome") or "").lower(),
+        )
+        svc_ids = [s.get("id") for s in svs if s.get("id")]
+        if not svc_ids:
+            continue
+        intel = summarize_sector_intelligence(
+            equipamentos=equipamentos,
+            svc_ids=svc_ids,
+            task_map=task_map,
+            atraso_dias=int(atraso_dias),
+            rev_start=rev_start,
+        )
+        intel["setor_nome"] = setor_nome
+        intelligence.append(intel)
+    return intelligence
+
+
+def _build_automation_insights(
+    *,
+    sector_intelligence: list[dict],
+    progresso_atual: float,
+    meta_atual: float,
+    critical_eq_count: int,
+    no_start_eq_count: int,
+) -> list[dict]:
+    insights: list[dict] = []
+    delta = round(float(progresso_atual) - float(meta_atual), 1)
+
+    if delta <= -10:
+        insights.append(
+            {
+                "nivel": "error",
+                "titulo": "Ritmo abaixo da meta",
+                "texto": f"O grupo está {abs(delta):.1f}% abaixo da meta linear da revisão.",
+            }
+        )
+    elif delta < 0:
+        insights.append(
+            {
+                "nivel": "warning",
+                "titulo": "Leve atraso no ritmo",
+                "texto": f"O grupo está {abs(delta):.1f}% abaixo da meta esperada.",
+            }
+        )
+    else:
+        insights.append(
+            {
+                "nivel": "success",
+                "titulo": "Ritmo dentro da meta",
+                "texto": f"O grupo está {delta:.1f}% acima da meta esperada.",
+            }
+        )
+
+    delayed_mount = sum(int(item.get("atrasadas_m", 0) or 0) for item in sector_intelligence)
+    if delayed_mount > 0:
+        insights.append(
+            {
+                "nivel": "warning",
+                "titulo": "Montagens atrasadas detectadas",
+                "texto": f"Há {delayed_mount} montagem(ns) pendente(s) além do limite configurado.",
+            }
+        )
+
+    high_risk = [item for item in sector_intelligence if item.get("risk") == "alto"]
+    if high_risk:
+        nomes = ", ".join(str(item.get("setor_nome")) for item in high_risk[:3])
+        insights.append(
+            {
+                "nivel": "error",
+                "titulo": f"{len(high_risk)} setor(es) em risco alto",
+                "texto": f"Priorize: {nomes}" + ("..." if len(high_risk) > 3 else ""),
+            }
+        )
+
+    if no_start_eq_count > 0:
+        insights.append(
+            {
+                "nivel": "info",
+                "titulo": "Frotas sem início",
+                "texto": f"{no_start_eq_count} frota(s) ainda estão em 0% nesta revisão.",
+            }
+        )
+
+    if critical_eq_count > 0:
+        insights.append(
+            {
+                "nivel": "warning",
+                "titulo": "Equipamentos críticos",
+                "texto": f"{critical_eq_count} frota(s) estão abaixo de 50% de conclusão.",
+            }
+        )
+
+    return insights
+
+
+def _df_to_csv_bytes(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False).encode("utf-8")
+
+
+def _compute_setor_ok_counts(eqs, setor_to_services, task_map):
+    rows = []
+    for setor, services in setor_to_services.items():
+        svc_ids = [s.get("id") for s in services if s.get("id")]
+        if not svc_ids:
+            continue
+        total_per = len(svc_ids) * 3
+        ok_eq = pct_sum = 0
+        for e in eqs:
+            done = sum(
+                int(bool((task_map.get((e["id"], sid)) or {}).get(f)))
+                for sid in svc_ids for f in ("etapa_d", "etapa_r", "etapa_m")
+            )
+            pct_sum += round((done / max(total_per, 1)) * 100)
+            if done >= total_per:
+                ok_eq += 1
+        rows.append({"setor": setor, "ok_eq": ok_eq, "total_eq": len(eqs),
+                     "pct_med": round(pct_sum / max(len(eqs), 1))})
+    rows.sort(key=lambda r: (r["ok_eq"] / max(r["total_eq"], 1), r["pct_med"]))
+    return rows
+
+
+# Melhoria 6: definida fora do loop
+def _style_heatmap(df_: pd.DataFrame) -> pd.DataFrame:
+    s = pd.DataFrame("", index=df_.index, columns=df_.columns)
+    for col in df_.columns:
+        if col in ("Status", "%", "Equipamento"):
+            continue
+        s.loc[df_[col] == "OK", col] = "background-color:rgba(46,204,113,.18);"
+        s.loc[df_[col] == "!", col] = "background-color:rgba(231,76,60,.20);"
+    return s
+
+
+def _reportlab_available() -> bool:
+    try:
+        return True
+    except Exception:
+        return False
+
+
+def _build_pdf_tables(
+    *,
+    titulo,
+    grupo_nome,
+    resumo_df,
+        sector_tables) -> bytes:
+    from reportlab.lib import colors
+    from src.utils.timezone import fmt_brt as _fmt_brt
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import cm
+    from reportlab.platypus import (
+        HRFlowable,
+        PageBreak,
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+
+    PAGE = landscape(A4)
+    LMARGIN = RMARGIN = 1.25 * cm
+    TMARGIN = 1.15 * cm
+    BMARGIN = 1.20 * cm
+    pw = PAGE[0] - LMARGIN - RMARGIN
+
+    sty = getSampleStyleSheet()
+    palette = {
+        "ink": colors.HexColor("#111827"),
+        "muted": colors.HexColor("#6B7280"),
+        "soft": colors.HexColor("#374151"),
+        "line": colors.HexColor("#E5E7EB"),
+        "line_dark": colors.HexColor("#CBD5E1"),
+        "panel": colors.HexColor("#F8FAFC"),
+        "header": colors.HexColor("#0F172A"),
+        "header_2": colors.HexColor("#1E293B"),
+        "ok": colors.HexColor("#15803D"),
+        "ok_fill": colors.HexColor("#DCFCE7"),
+        "warn": colors.HexColor("#D97706"),
+        "warn_fill": colors.HexColor("#FEF3C7"),
+        "bad": colors.HexColor("#DC2626"),
+        "bad_fill": colors.HexColor("#FEE2E2"),
+        "empty_fill": colors.HexColor("#F8FAFC"),
+    }
+
+    def _pct_color(value: int):
+        if value >= 80:
+            return palette["ok"]
+        if value >= 50:
+            return palette["warn"]
+        return palette["bad"]
+
+    def _pct_fill(value: int):
+        if value >= 80:
+            return palette["ok_fill"]
+        if value >= 50:
+            return palette["warn_fill"]
+        return palette["bad_fill"]
+
+    def _int_pct(value) -> int:
+        try:
+            return int(round(float(value or 0)))
+        except Exception:
+            return 0
+
+    def _safe_int(value) -> int:
+        try:
+            return int(value or 0)
+        except Exception:
+            return 0
+
+    title_style = ParagraphStyle(
+        "pdf_title",
+        parent=sty["Heading1"],
+        fontSize=16,
+        leading=18,
+        alignment=TA_LEFT,
+        textColor=palette["ink"],
+        fontName="Helvetica-Bold",
+        spaceAfter=0,
+    )
+    section_style = ParagraphStyle(
+        "pdf_section",
+        parent=sty["Heading2"],
+        fontSize=11.2,
+        leading=13,
+        alignment=TA_LEFT,
+        textColor=palette["ink"],
+        fontName="Helvetica-Bold",
+        spaceBefore=0,
+        spaceAfter=1,
+    )
+    body_style = ParagraphStyle(
+        "pdf_body",
+        parent=sty["BodyText"],
+        fontSize=8.3,
+        leading=10,
+        alignment=TA_LEFT,
+        textColor=palette["soft"],
+    )
+    small_style = ParagraphStyle(
+        "pdf_small",
+        parent=sty["BodyText"],
+        fontSize=7.3,
+        leading=8.5,
+        alignment=TA_LEFT,
+        textColor=palette["muted"],
+    )
+    meta_label = ParagraphStyle(
+        "meta_label",
+        parent=small_style,
+        fontSize=7.5,
+        textColor=palette["muted"],
+    )
+    meta_value = ParagraphStyle(
+        "meta_value",
+        parent=body_style,
+        fontSize=9.2,
+        leading=10.8,
+        textColor=palette["ink"],
+        fontName="Helvetica-Bold",
+    )
+    card_label = ParagraphStyle(
+        "card_label",
+        parent=small_style,
+        fontSize=7.8,
+        leading=9.2,
+        alignment=TA_CENTER,
+        textColor=palette["muted"],
+    )
+    card_value = ParagraphStyle(
+        "card_value",
+        parent=body_style,
+        fontSize=14,
+        leading=15,
+        alignment=TA_CENTER,
+        textColor=palette["ink"],
+        fontName="Helvetica-Bold",
+    )
+    issued_style = ParagraphStyle(
+        "issued_style",
+        parent=small_style,
+        alignment=TA_RIGHT,
+        fontSize=7.8,
+        leading=9.5,
+        textColor=palette["ink"],
+    )
+    sector_meta_style = ParagraphStyle(
+        "sector_meta_style",
+        parent=body_style,
+        fontSize=8.5,
+        leading=9.5,
+        textColor=palette["soft"],
+    )
+    head_top = ParagraphStyle(
+        "head_top",
+        parent=small_style,
+        alignment=TA_CENTER,
+        fontSize=7.7,
+        leading=8.4,
+        textColor=colors.white,
+        fontName="Helvetica-Bold",
+    )
+    head_sub = ParagraphStyle(
+        "head_sub",
+        parent=small_style,
+        alignment=TA_CENTER,
+        fontSize=6.8,
+        leading=7.4,
+        textColor=colors.HexColor("#CBD5E1"),
+        fontName="Helvetica-Bold",
+    )
+    cell_left = ParagraphStyle(
+        "cell_left",
+        parent=body_style,
+        fontSize=8,
+        leading=8.9,
+        alignment=TA_LEFT,
+        textColor=palette["ink"],
+    )
+    cell_center = ParagraphStyle(
+        "cell_center",
+        parent=body_style,
+        fontSize=7.8,
+        leading=8.6,
+        alignment=TA_CENTER,
+        textColor=palette["soft"],
+    )
+
+    def _base_left_table_style(*, header_rows=0, zebra_from=1):
+        cmds = [
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("GRID", (0, 0), (-1, -1), 0.32, palette["line"]),
+            ("BOX", (0, 0), (-1, -1), 0.45, palette["line_dark"]),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]
+        if header_rows:
+            cmds.extend([
+                ("BACKGROUND", (0, 0), (-1, 0), palette["header"]),
+                ("TEXTCOLOR", (0, 0), (-1, header_rows - 1), colors.white),
+                ("FONTNAME", (0, 0), (-1, header_rows - 1), "Helvetica-Bold"),
+            ])
+        cmds.append(("ROWBACKGROUNDS", (0, zebra_from),
+                    (-1, -1), [colors.white, palette["panel"]]))
+        return cmds
+
+    def _kpi_card(title: str, value_markup: str):
+        card = Table(
+            [[Paragraph(title, card_label)], [Paragraph(value_markup, card_value)]],
+            colWidths=[pw / 4.0],
+            rowHeights=[0.50 * cm, 0.80 * cm],
+        )
+        card.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+            ("BOX", (0, 0), (-1, -1), 0.55, palette["line"]),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        return card
+
+    def _summary_table(df: pd.DataFrame):
+        cols = ["Equipamento", "Concluidos", "Total", "%"]
+        if not isinstance(
+                df, pd.DataFrame) or not all(
+                c in df.columns for c in cols):
+            return Paragraph("Sem dados.", small_style)
+
+        view = df[cols].copy()
+        view["Concluidos"] = view["Concluidos"].map(_safe_int)
+        view["Total"] = view["Total"].map(_safe_int)
+        view["%"] = view["%"].map(_int_pct)
+        view = view.sort_values(["%", "Concluidos", "Equipamento"], ascending=[
+                                False, False, True]).reset_index(drop=True)
+
+        rows = [[
+            Paragraph("<b>Equipamento</b>", cell_left),
+            Paragraph("<b>Concluídos</b>", cell_left),
+            Paragraph("<b>Total</b>", cell_left),
+            Paragraph("<b>%</b>", cell_left),
+        ]]
+        for _, row in view.iterrows():
+            pct = _int_pct(row["%"])
+            rows.append([
+                Paragraph(str(row["Equipamento"]), cell_left),
+                Paragraph(str(_safe_int(row["Concluidos"])), cell_left),
+                Paragraph(str(_safe_int(row["Total"])), cell_left),
+                Paragraph(f"<b>{pct}%</b>", cell_left),
+            ])
+
+        table = Table(
+            rows,
+            colWidths=[
+                pw * 0.57,
+                pw * 0.14,
+                pw * 0.11,
+                pw * 0.18],
+            repeatRows=1)
+        table.hAlign = "LEFT"
+        style_cmds = _base_left_table_style(header_rows=1, zebra_from=1) + [
+            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ]
+        for row_idx, pct in enumerate(view["%"].tolist(), start=1):
+            style_cmds.extend([
+                ("BACKGROUND", (3, row_idx), (3, row_idx), _pct_fill(_int_pct(pct))),
+                ("TEXTCOLOR", (3, row_idx), (3, row_idx), _pct_color(_int_pct(pct))),
+            ])
+        table.setStyle(TableStyle(style_cmds))
+        return table
+
+    def _split_service_columns(df: pd.DataFrame):
+        svc_cols = [
+            c for c in df.columns if c not in (
+                "Equipamento", "%", "Status")]
+        groups = []
+        order_map = {"D": 0, "R": 1, "M": 2}
+        by_service = {}
+        service_order = []
+        for col in svc_cols:
+            label = str(col)
+            service_name = label
+            suffix = None
+            try:
+                left, right = label.rsplit(" ", 1)
+                if right in order_map:
+                    service_name, suffix = left, right
+            except Exception:
+                pass
+            if service_name not in by_service:
+                by_service[service_name] = {
+                    "name": service_name, "cols": [
+                        None, None, None], "extras": []}
+                service_order.append(service_name)
+            if suffix is None:
+                by_service[service_name]["extras"].append(col)
+            else:
+                by_service[service_name]["cols"][order_map[suffix]] = col
+        for name in service_order:
+            item = by_service[name]
+            ordered = [c for c in item["cols"] if c] or item["extras"]
+            groups.append((item["name"], ordered))
+        return groups
+
+    def _cell_heat_style(raw: str):
+        val = str(raw or "").strip().upper()
+        if val == "OK":
+            return palette["ok_fill"], palette["ok"], "OK"
+        if val in {"!", "PEND", "PENDENTE", "NOK", "NÃO", "NAO", "X"}:
+            return palette["bad_fill"], palette["bad"], val
+        return palette["empty_fill"], palette["muted"], ""
+
+    def _build_sector_block(df: pd.DataFrame):
+        groups = _split_service_columns(df)
+        if not groups:
+            return [Paragraph("Sem dados deste setor.", small_style)]
+
+        equip_w = 5.2 * cm
+        trio_w = 0.88 * cm
+        max_groups = max(1, min(len(groups), int(
+            (pw - equip_w) // (trio_w * 3)) or 1))
+        chunks = [groups[i:i + max_groups]
+                  for i in range(0, len(groups), max_groups)]
+        blocks = []
+
+        for chunk_idx, chunk in enumerate(chunks, start=1):
+            data = []
+            top = [Paragraph("<b>Equipamento</b>", head_top)]
+            sub = [""]
+            spans = [(0, 0, 0, 1)]
+            cols_meta = [("Equipamento", None)]
+            separators = []
+            cur_col = 1
+
+            for service_name, ordered_cols in chunk:
+                normalized = list(ordered_cols)
+                if len(normalized) == 3:
+                    top.extend(
+                        [Paragraph(f"<b>{service_name}</b>", head_top), "", ""])
+                    sub.extend([
+                        Paragraph("<b>D</b>", head_sub),
+                        Paragraph("<b>R</b>", head_sub),
+                        Paragraph("<b>M</b>", head_sub),
+                    ])
+                    spans.append((cur_col, 0, cur_col + 2, 0))
+                    separators.append(cur_col + 2)
+                    for col_name in normalized:
+                        cols_meta.append((col_name, True))
+                    cur_col += 3
+                else:
+                    top.append(Paragraph(f"<b>{service_name}</b>", head_top))
+                    sub.append("")
+                    for col_name in normalized:
+                        cols_meta.append((col_name, True))
+                    if len(normalized) == 1:
+                        spans.append((cur_col, 0, cur_col, 1))
+                    cur_col += len(normalized)
+
+            data.extend([top, sub])
+            view_cols = [name for name, _ in cols_meta]
+            view = df[view_cols].copy().fillna("")
+
+            for _, src in view.iterrows():
+                row = [Paragraph(str(src["Equipamento"]), cell_left)]
+                for col_name, _ in cols_meta[1:]:
+                    _, _, text = _cell_heat_style(src[col_name])
+                    row.append(Paragraph(text, cell_center))
+                data.append(row)
+
+            remaining = pw - equip_w
+            matrix_cols = len(cols_meta) - 1
+            matrix_w = max(
+                0.82 * cm, min(0.94 * cm, remaining / max(matrix_cols, 1)))
+            col_widths = [equip_w] + [matrix_w] * matrix_cols
+            table = Table(data, colWidths=col_widths, repeatRows=2)
+            table.hAlign = "LEFT"
+
+            style_cmds = _base_left_table_style(header_rows=2, zebra_from=2) + [
+                ("BACKGROUND", (0, 1), (-1, 1), palette["header_2"]),
+                ("TEXTCOLOR", (0, 1), (-1, 1), colors.HexColor("#CBD5E1")),
+                ("ALIGN", (0, 0), (-1, 1), "CENTER"),
+                ("ALIGN", (0, 2), (0, -1), "LEFT"),
+                ("ALIGN", (1, 2), (-1, -1), "CENTER"),
+                ("SPAN", (0, 0), (0, 1)),
+                ("LEFTPADDING", (1, 2), (-1, -1), 0),
+                ("RIGHTPADDING", (1, 2), (-1, -1), 0),
+                ("TOPPADDING", (1, 2), (-1, -1), 1),
+                ("BOTTOMPADDING", (1, 2), (-1, -1), 1),
+            ]
+            for c1, r1, c2, r2 in spans[1:]:
+                style_cmds.append(("SPAN", (c1, r1), (c2, r2)))
+            for col in separators[:-1]:
+                style_cmds.append(
+                    ("LINEAFTER", (col, 0), (col, -1), 0.7, colors.HexColor("#94A3B8")))
+
+            for row_i in range(2, len(data)):
+                for col_i in range(1, len(cols_meta)):
+                    bg, fg, text = _cell_heat_style(
+                        view.iloc[row_i - 2, col_i])
+                    style_cmds.extend([
+                        ("BACKGROUND", (col_i, row_i), (col_i, row_i), bg),
+                        ("TEXTCOLOR", (col_i, row_i), (col_i, row_i), fg),
+                    ])
+                    if text:
+                        style_cmds.extend([
+                            ("FONTNAME", (col_i, row_i), (col_i, row_i), "Helvetica-Bold"),
+                            ("BOX", (col_i, row_i), (col_i, row_i), 0.35, fg),
+                        ])
+
+            table.setStyle(TableStyle(style_cmds))
+            if len(chunks) > 1:
+                blocks.append(
+                    Paragraph(f"Bloco {chunk_idx}/{len(chunks)}", small_style))
+                blocks.append(Spacer(1, 0.10 * cm))
+            blocks.append(table)
+            if chunk_idx < len(chunks):
+                blocks.append(Spacer(1, 0.22 * cm))
+        return blocks
+
+    resumo_cols = ["Equipamento", "Concluidos", "Total", "%"]
+    if isinstance(resumo_df, pd.DataFrame) and all(
+            c in resumo_df.columns for c in resumo_cols):
+        rv = resumo_df[resumo_cols].copy()
+        rv["Concluidos"] = rv["Concluidos"].map(_safe_int)
+        rv["Total"] = rv["Total"].map(_safe_int)
+        rv["%"] = rv["%"].map(_int_pct)
+    else:
+        rv = pd.DataFrame(columns=resumo_cols)
+
+    total_eq = len(rv)
+    eq_100 = int((rv["%"] >= 100).sum()) if not rv.empty else 0
+    avg_pct = int(round(rv["%"].mean())) if not rv.empty else 0
+    eq_zero = int((rv["%"] <= 0).sum()) if not rv.empty else 0
+    emitido = _fmt_brt("%d/%m/%Y %H:%M")
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=PAGE,
+        leftMargin=LMARGIN,
+        rightMargin=RMARGIN,
+        topMargin=TMARGIN,
+        bottomMargin=BMARGIN,
+    )
+
+    story = []
+
+    header = Table(
+        [
+            [
+                Paragraph(
+                    "Relatório Operacional — Matriz",
+                    title_style),
+                Paragraph(
+                    f'<font color="#6B7280">Data de emissão</font><br/><b>{emitido}</b>',
+                    issued_style),
+            ]],
+        colWidths=[
+            pw *
+            0.76,
+            pw *
+            0.24],
+    )
+    header.hAlign = "LEFT"
+    header.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    story.append(header)
+    story.append(
+        HRFlowable(
+            width="100%",
+            thickness=0.75,
+            color=palette["line"],
+            spaceAfter=5,
+            spaceBefore=1))
+
+    meta = Table(
+        [
+            [
+                Paragraph(
+                    "Revisão", meta_label), Paragraph(
+                    "Grupo", meta_label)], [
+                        Paragraph(
+                            titulo or "—", meta_value), Paragraph(
+                                grupo_nome or "—", meta_value)], ], colWidths=[
+                                    pw * 0.38, pw * 0.62], )
+    meta.hAlign = "LEFT"
+    meta.setStyle(TableStyle([
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 1),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LINEBELOW", (0, 1), (-1, 1), 0.45, palette["line"]),
+    ]))
+    story.append(meta)
+    story.append(Spacer(1, 0.24 * cm))
+
+    cards = Table([[_kpi_card("Equipamentos",
+                              str(total_eq)),
+                    _kpi_card("Concluídos (100%)",
+                  f'<font color="#16A34A">{eq_100}</font>'),
+                    _kpi_card("Progresso médio",
+                  f"{avg_pct}%"),
+        _kpi_card("Sem início (0%)",
+                  f'<font color="#EF4444">{eq_zero}</font>'),
+    ]],
+        colWidths=[pw / 4.0] * 4,
+    )
+    cards.hAlign = "LEFT"
+    cards.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.append(cards)
+    story.append(Spacer(1, 0.24 * cm))
+
+    story.append(Paragraph("Resumo por equipamento", section_style))
+    story.append(Spacer(1, 0.05 * cm))
+    story.append(_summary_table(rv))
+
+    for sector_name, sector_df in sector_tables:
+        story.append(PageBreak())
+        service_cols = [
+            c for c in sector_df.columns if c not in (
+                "Equipamento", "%", "Status")]
+        ok_count = int(
+            (sector_df[service_cols] == "OK").sum().sum()) if service_cols else 0
+        total_cells = int(
+            len(sector_df) *
+            len(service_cols)) if service_cols else 0
+        pct_general = int(
+            round((ok_count / max(total_cells, 1)) * 100)) if total_cells else 0
+
+        story.append(
+            Paragraph(
+                f"Detalhamento por setor — {sector_name}",
+                section_style))
+        story.append(
+            Paragraph(
+                f"Geral: <b>{pct_general}%</b> | Concluídos: <b>{ok_count}/{total_cells}</b>",
+                sector_meta_style))
+        story.append(Spacer(1, 0.16 * cm))
+        for block in _build_sector_block(sector_df):
+            story.append(block)
+
+    def _footer(canvas, _doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(palette["muted"])
+        canvas.drawString(
+            LMARGIN,
+            0.58 * cm,
+            "D = desmontou   R = revisou   M = montou")
+        canvas.drawRightString(
+            PAGE[0] - RMARGIN,
+            0.58 * cm,
+            f"Página {
+                canvas.getPageNumber()}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
+    return buf.getvalue()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _group_kpis(_tid, _rev_id, _ver="0"):
+    _sb = sb_for_user()
+    _gids = [
+        g.get("id") for g in (
+            _sb.table("equip_grupos").select("id").eq(
+                "tenant_id",
+                _tid).eq(
+                "ativo",
+                True).execute().data or []) if g.get("id")]
+    if not _gids:
+        return {}
+    eq_rows = (
+        _sb.table("equipamentos").select("id,grupo_id").eq(
+            "tenant_id",
+            _tid).eq(
+            "ativo",
+            True).in_(
+                "grupo_id",
+            _gids).execute().data) or []
+    grp_eq = defaultdict(list)
+    for r in eq_rows:
+        if r.get("grupo_id") and r.get("id"):
+            grp_eq[r["grupo_id"]].append(r["id"])
+    tpl_rows = (
+        _sb.table("grupo_servicos").select("grupo_id,servico_id").eq(
+            "tenant_id",
+            _tid).in_(
+            "grupo_id",
+            _gids).execute().data) or []
+    grp_svc = defaultdict(set)
+    for r in tpl_rows:
+        if r.get("grupo_id") and r.get("servico_id"):
+            grp_svc[r["grupo_id"]].add(r["servico_id"])
+    all_eq = [eid for eids in grp_eq.values() for eid in eids]
+    done = defaultdict(int)
+    eq2g = {eid: gid for gid, eids in grp_eq.items() for eid in eids}
+    for i in range(0, len(all_eq), 500):
+        for t in ((_sb.table("tarefas_servico").select("equipamento_id,etapa_d,etapa_r,etapa_m")
+                   .eq("tenant_id", _tid).eq("revisao_id", _rev_id).in_("equipamento_id", all_eq[i:i + 500])
+                   .execute().data) or []):
+            gid = eq2g.get(t.get("equipamento_id"))
+            if gid:
+                done[gid] += int(bool(t.get("etapa_d"))) + \
+                    int(bool(t.get("etapa_r"))) + int(bool(t.get("etapa_m")))
+    out = {}
+    for gid in _gids:
+        eqc = len(grp_eq.get(gid) or [])
+        svc = len(grp_svc.get(gid) or set())
+        pct = int(round((done.get(gid, 0) / max(eqc * svc * 3, 1))
+                  * 100)) if (eqc > 0 and svc > 0) else 0
+        out[gid] = {
+            "eq_count": eqc, "svc_count": svc, "pct": max(
+                0, min(
+                    100, pct))}
+    return out
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_payload(_tid, _gid, _rid, _lim, _ver="0"):
+    _sb = sb_for_user()
+    _eqs = (
+        _sb.table("equipamentos").select("id,frota,modelo").eq(
+            "tenant_id",
+            _tid) .eq(
+            "grupo_id",
+            _gid).eq(
+                "ativo",
+                True).order("frota").limit(
+                    int(_lim)).execute().data) or []
+    if not _eqs:
+        return {"eqs": [], "s2s": {}, "all_s": [], "tarefas": []}
+    _s2s, _all_s = _fetch_template(_sb, _tid, _gid)
+    if not _all_s:
+        return {"eqs": _eqs, "s2s": {}, "all_s": [], "tarefas": []}
+    _tarefas = (
+        _sb.table("tarefas_servico") .select(
+            "id,equipamento_id,servico_id,status,semana,observacao,"
+            "etapa_d,etapa_r,etapa_m,dt_inicio,dt_etapa_d,dt_etapa_r,dt_etapa_m") .eq(
+            "tenant_id", _tid).eq(
+                "revisao_id", _rid) .in_(
+                    "equipamento_id", [
+                        e["id"] for e in _eqs]).execute().data) or []
+    return {"eqs": _eqs, "s2s": _s2s, "all_s": _all_s, "tarefas": _tarefas}
+
+
+def _fetch_template(sb, tenant_id, grupo_id):
+    for select, setor_fn in [
+        ("servico_id, servicos(id,nome,setor_id,setores(nome))",
+         lambda sv: (sv.get("setores") or {}).get("nome") or "Setor"),
+        ("servico_id, servicos(id,nome,setor)",
+         lambda sv: sv.get("setor") or "Setor"),
+    ]:
+        try:
+            tpl = (
+                sb.table("grupo_servicos").select(select) .eq(
+                    "tenant_id",
+                    tenant_id).eq(
+                    "grupo_id",
+                    grupo_id).execute().data) or []
+            s2s = defaultdict(list)
+            all_s = []
+            for r in tpl:
+                sv = r.get("servicos") or {}
+                sid = sv.get("id")
+                if not sid:
+                    continue
+                s2s[setor_fn(sv)].append(sv)
+                all_s.append(sv)
+            if all_s:
+                return s2s, all_s
+        except Exception:
+            pass
+    tpl = (
+        sb.table("grupo_servicos").select("servico_id") .eq(
+            "tenant_id",
+            tenant_id).eq(
+            "grupo_id",
+            grupo_id).execute().data) or []
+    ids = [r.get("servico_id") for r in tpl if r.get("servico_id")]
+    if not ids:
+        return defaultdict(list), []
+    svs = (sb.table("servicos").select("id,nome,setor")
+           .eq("tenant_id", tenant_id).in_("id", ids).execute().data) or []
+    s2s = defaultdict(list)
+    all_s = []
+    for sv in svs:
+        sn = sv.get("setor") or "Setor"
+        item = {"id": sv.get("id"), "nome": sv.get("nome")}
+        s2s[sn].append(item)
+        all_s.append(item)
+    return s2s, all_s
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _dept_name(_tid, _did, _ver="0"):
+    if not _did:
+        return ""
+    try:
+        row = (
+            sb_for_user().table("departamentos").select("nome").eq(
+                "tenant_id", _tid).eq(
+                "id", _did).limit(1).execute().data)
+        return (row[0].get("nome") or "") if row else ""
+    except BaseException:
+        return ""
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _all_dept_names(_tid, _ver="0"):
+    try:
+        rows = sb_for_user().table("departamentos").select(
+            "id,nome").eq("tenant_id", _tid).execute().data or []
+        return {r["id"]: r.get("nome", "") for r in rows}
+    except BaseException:
+        return {}
+
 
 def render_matriz():
     try:
@@ -72,9 +1456,6 @@ def render_matriz():
         dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id)
         can_view_all = can_view_all_data(role)
         can_edit = can_edit_matriz(role)
-        if not can_view_all and dep_scope_ids == [] and grp_scope_ids == []:
-            st.warning("Você não possui departamentos ou grupos vinculados para visualizar a matriz.")
-            return
 
         st.session_state.setdefault("data_version", "0")
         st.session_state.setdefault("matriz_view", "select")
@@ -223,15 +1604,124 @@ def render_matriz():
             st.markdown('</div></div>', unsafe_allow_html=True)
 
         # Tela de selecao — cards com barra de progresso (Melhoria 3)
-        if render_selection_screen(
-            tenant_id=tenant_id,
-            revisao_id=st.session_state.get("matriz_revisao_id"),
-            grupos=grupos,
-            search=search,
-            status_filter=_status_filter,
-            sort_by=_sort_by,
-            data_version=st.session_state.get("data_version", "0"),
-        ):
+        if st.session_state.get("matriz_view") != "group":
+            revisao_id = st.session_state.get("matriz_revisao_id")
+            kpis = _group_kpis(
+                tenant_id, revisao_id, st.session_state.get(
+                    "data_version", "0")) if revisao_id else {}
+
+            # filtros da seleção já renderizados na toolbar compacta
+
+            q = (search or "").strip().lower()
+            dep_id = st.session_state.get("matriz_departamento_id")
+
+            dept_names = _all_dept_names(
+                tenant_id, st.session_state.get(
+                    "data_version", "0"))
+
+            show_groups = [
+                g for g in grupos if (
+                    not dep_id or g.get("departamento_id") == dep_id) and (
+                    (not q) or (
+                        q in (
+                            g.get("nome") or "").lower()) or (
+                        q in (
+                            dept_names.get(
+                                g.get("departamento_id"),
+                                "")).lower()))]
+
+            # Filtro de status
+            if _status_filter != "Todos":
+                def _status_match(g):
+                    p = int(kpis.get(g.get("id"), {}).get("pct", 0))
+                    eq = int(kpis.get(g.get("id"), {}).get("eq_count", 0))
+                    if _status_filter.startswith("🔴"):
+                        return p < 50 and eq > 0
+                    if _status_filter.startswith("🟡"):
+                        return 50 <= p < 80
+                    if _status_filter.startswith("🟢"):
+                        return p >= 80
+                    if _status_filter.startswith("⬜"):
+                        return eq == 0
+                    return True
+                show_groups = [g for g in show_groups if _status_match(g)]
+
+            # Ordenação
+            if _sort_by.startswith("% ↑"):
+                show_groups = sorted(
+                    show_groups, key=lambda g: kpis.get(
+                        g.get("id"), {}).get(
+                        "pct", 0))
+            elif _sort_by.startswith("% ↓"):
+                show_groups = sorted(
+                    show_groups,
+                    key=lambda g: -
+                    kpis.get(
+                        g.get("id"),
+                        {}).get(
+                        "pct",
+                        0))
+            else:
+                show_groups = sorted(
+                    show_groups, key=lambda g: (
+                        g.get("nome") or "").lower())
+
+            if not show_groups:
+                st.info("Nenhum grupo encontrado para os filtros selecionados.")
+
+            st.markdown('<div class="mtz-card-grid">', unsafe_allow_html=True)
+            for row_start in range(0, len(show_groups), 3):
+                row_groups = show_groups[row_start:row_start + 3]
+                cols = st.columns(3)
+                for col_idx, g in enumerate(row_groups):
+                    gid = g.get("id")
+                    nome = g.get("nome") or str(gid)
+                    info = kpis.get(gid, {})
+                    pct = int(info.get("pct", 0))
+                    eqc = int(info.get("eq_count", 0))
+                    svc = int(info.get("svc_count", 0))
+                    dept_lbl = dept_names.get(g.get("departamento_id"), "")
+                    _icon = "🟢" if pct >= 80 else (
+                        "🟡" if pct >= 50 else (
+                            "🔴" if eqc > 0 else "⬜"))
+                    _sub = f"{dept_lbl} · " if dept_lbl else ""
+                    with cols[col_idx]:
+                        _status_txt, _status_cls = _card_status_badge(pct, eqc, svc)
+                        _ring_cls = (
+                            "high" if _status_cls == "critico"
+                            else "medium" if _status_cls == "atencao"
+                            else "low" if _status_cls == "avancado"
+                            else "neutral"
+                        )
+                        with st.container(border=True):
+                            st.markdown(f'<div class="mtz-select-card {_ring_cls}">', unsafe_allow_html=True)
+                            st.markdown(
+                                f'<div class="mtz-card-title">{_truncate_card_title(nome, 22)}</div>',
+                                unsafe_allow_html=True,
+                            )
+                            st.markdown(
+                                f'<div class="mtz-card-subtitle">{_truncate_card_subtitle(dept_lbl, 20)}</div>',
+                                unsafe_allow_html=True,
+                            )
+                            st.markdown(
+                                f'<div class="mtz-card-metrics">{pct}% · {eqc} eq · {svc} svc</div>',
+                                unsafe_allow_html=True,
+                            )
+                            st.markdown(
+                                f'<div class="mtz-card-status {_status_cls}">{_status_txt}</div>',
+                                unsafe_allow_html=True,
+                            )
+                            if st.button(
+                                "Abrir",
+                                key=f"mtz_card_{gid}",
+                                use_container_width=True,
+                                help=f"{nome} · {dept_lbl or 'Sem departamento'} · {pct}% concluído · {eqc} equipamentos · {svc} serviços",
+                            ):
+                                st.session_state["matriz_grupo_id"] = gid
+                                st.session_state["matriz_view"] = "group"
+                                st.rerun()
+                            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
             return
 
         # ── Visao do grupo ──
@@ -382,17 +1872,55 @@ def render_matriz():
             (tok_g / max(len(eqs) * len(all_services) * 3, 1)) * 100)
         setor_rows = _compute_setor_ok_counts(eqs, setor_to_services, task_map)
         # Header com barra de progresso
-        render_group_header(
-            placeholder=hph,
-            grupo_nome=grupo_nome,
-            titulo=titulo,
-            eqs=eqs,
-            pct_geral=pct_geral,
-            eq100_g=eq100_g,
-            setor_rows=setor_rows,
-            revisao_id=revisao_id,
-            grupo_id=grupo_id,
-        )
+        with hph.container():
+            st.markdown(
+                '<div class="enterprise-sticky">',
+                unsafe_allow_html=True)
+            cL, cR = st.columns([6, 1], vertical_alignment="center")
+            with cL:
+                st.markdown(
+                    f'<div class="enterprise-title">{grupo_nome}</div>',
+                    unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="enterprise-sub">Revisão: <b>{titulo}</b>  ·  Equip.: <b>{
+                        len(eqs)}</b>  ·  Geral: <b>{pct_geral}%</b>  ·  100%: <b>{eq100_g}/{
+                        len(eqs)}</b></div>', unsafe_allow_html=True)
+                st.markdown(
+                    _pct_bar_html(
+                        pct_geral,
+                        height=8),
+                    unsafe_allow_html=True)
+            with cR:
+                if st.button(
+                    "← Voltar",
+                    key="mtz_back_hdr",
+                    use_container_width=True,
+                ):
+                    st.session_state["matriz_view"] = "select"
+                    st.rerun()
+            # FIX #6: chips clicáveis — cada um é um botão que pula para o
+            # setor na aba Matriz
+            if setor_rows:
+                st.markdown(
+                    '<div class="enterprise-divider"></div>',
+                    unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="enterprise-chip-row" style="flex-wrap:wrap;gap:6px;display:flex;margin-top:6px">',
+                    unsafe_allow_html=True)
+                chip_cols = st.columns(min(len(setor_rows[:12]), 6))
+                for ci, r in enumerate(setor_rows[:12]):
+                    ratio = r["ok_eq"] / max(r["total_eq"], 1)
+                    icon = "🟢" if ratio >= 0.8 else (
+                        "🟡" if ratio >= 0.5 else "🔴")
+                    lbl = f"{icon} {r['setor']} {r['ok_eq']}/{r['total_eq']}"
+                    with chip_cols[ci % len(chip_cols)]:
+                        if st.button(
+                                lbl, key=f"chip_setor_{ci}_{r['setor']}".replace(" ", "_"), use_container_width=True, help=f"{r['setor']}: {r['pct_med']}% médio · {r['ok_eq']}/{r['total_eq']} equip. 100%"):
+                            st.session_state["mtz_chip_jump"] = r["setor"]
+                            _sector_set_open(revisao_id, grupo_id, r["setor"], True)
+                            st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
 
         group_atraso_dias = int(st.session_state.get("matriz_atraso_dias", 7) or 7)
@@ -524,7 +2052,42 @@ def render_matriz():
 
         # ── TAB: RESUMO ──
         with tab_resumo:
-            render_summary_tab(resumo_df=resumo_df)
+            st.markdown("### Ranking de equipamentos por progresso")
+            st.caption("Ordenado do mais atrasado para o mais adiantado.")
+            if resumo_df.empty:
+                st.info("Sem dados de resumo para esta revisão.")
+            else:
+                # KPIs rápidos no topo
+                rk1, rk2, rk3, rk4 = st.columns(4)
+                rk1.metric("Total equip.", len(resumo_df))
+                rk2.metric(
+                    "100% concluídos", int(
+                        (resumo_df["%"] >= 100).sum()))
+                rk3.metric("Progresso médio", f"{int(resumo_df['%'].mean())}%")
+                rk4.metric("Sem início (0%)", int((resumo_df["%"] == 0).sum()))
+                st.markdown("---")
+                # Cards visuais — única representação, sem tabela duplicada
+                for _, row in resumo_df.iterrows():
+                    pct_r = int(row["%"])
+                    color = _risk_color(pct_r)
+                    c1r, c2r = st.columns([0.6, 0.4])
+                    with c1r:
+                        st.markdown(
+                            f'<div style="font-size:.88rem;font-weight:600;margin-bottom:3px">{row["Equipamento"]}</div>'
+                            f'<div style="background:rgba(255,255,255,.08);border-radius:4px;height:7px">'
+                            f'<div style="width:{pct_r}%;background:{color};height:7px;border-radius:4px;transition:width .4s"></div></div>',
+                            unsafe_allow_html=True)
+                    with c2r:
+                        _done_lbl = int(row["Concluidos"])
+                        _tot_lbl = int(row["Total"])
+                        _st_lbl = "✅ Concluído" if pct_r >= 100 else (
+                            "🔴 Sem início" if pct_r == 0 else f"🟡 {pct_r}%")
+                        st.markdown(
+                            f'<div style="font-size:.82rem;color:rgba(255,255,255,.65);padding-top:3px">'
+                            f'<span style="color:{color};font-weight:700">{pct_r}%</span>'
+                            f'  ·  {_done_lbl}/{_tot_lbl} etapas'
+                            f'  <span style="opacity:.6">{_st_lbl}</span></div>',
+                            unsafe_allow_html=True)
 
         # ── TAB: MATRIZ ──
         with tab_matriz:

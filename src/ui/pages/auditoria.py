@@ -128,7 +128,7 @@ def _fragment_auditoria(
 
         if scope_dept_ids and dep_id and dep_id not in scope_dept_ids:
             continue
-        if scope_grp_ids and grp_id and grp_id not in scope_grp_ids:
+        if scope_grp_ids is not None and grp_id and grp_id not in scope_grp_ids:
             continue
 
         svc = t.get("servicos") or {}
