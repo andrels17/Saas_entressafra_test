@@ -49,14 +49,13 @@ from .pdf_export import _build_pdf_tables, _compute_setor_ok_counts, _df_to_csv_
 from .styles import (
     _build_group_card_html,
     _build_group_card_label,
-    _card_status_badge,
     _card_status_meta,
     _compact_card_summary,
     _inject_css,
-    _pct_bar_html,
-    _truncate_card_subtitle,
-    _truncate_card_title,
 )
+from .selection import render_selection_screen
+from .header import render_group_header
+from .summary_tab import render_summary_tab
 
 def render_matriz():
     try:
@@ -219,124 +218,15 @@ def render_matriz():
             st.markdown('</div></div>', unsafe_allow_html=True)
 
         # Tela de selecao — cards com barra de progresso (Melhoria 3)
-        if st.session_state.get("matriz_view") != "group":
-            revisao_id = st.session_state.get("matriz_revisao_id")
-            kpis = _group_kpis(
-                tenant_id, revisao_id, st.session_state.get(
-                    "data_version", "0")) if revisao_id else {}
-
-            # filtros da seleção já renderizados na toolbar compacta
-
-            q = (search or "").strip().lower()
-            dep_id = st.session_state.get("matriz_departamento_id")
-
-            dept_names = _all_dept_names(
-                tenant_id, st.session_state.get(
-                    "data_version", "0"))
-
-            show_groups = [
-                g for g in grupos if (
-                    not dep_id or g.get("departamento_id") == dep_id) and (
-                    (not q) or (
-                        q in (
-                            g.get("nome") or "").lower()) or (
-                        q in (
-                            dept_names.get(
-                                g.get("departamento_id"),
-                                "")).lower()))]
-
-            # Filtro de status
-            if _status_filter != "Todos":
-                def _status_match(g):
-                    p = int(kpis.get(g.get("id"), {}).get("pct", 0))
-                    eq = int(kpis.get(g.get("id"), {}).get("eq_count", 0))
-                    if _status_filter.startswith("🔴"):
-                        return p < 50 and eq > 0
-                    if _status_filter.startswith("🟡"):
-                        return 50 <= p < 80
-                    if _status_filter.startswith("🟢"):
-                        return p >= 80
-                    if _status_filter.startswith("⬜"):
-                        return eq == 0
-                    return True
-                show_groups = [g for g in show_groups if _status_match(g)]
-
-            # Ordenação
-            if _sort_by.startswith("% ↑"):
-                show_groups = sorted(
-                    show_groups, key=lambda g: kpis.get(
-                        g.get("id"), {}).get(
-                        "pct", 0))
-            elif _sort_by.startswith("% ↓"):
-                show_groups = sorted(
-                    show_groups,
-                    key=lambda g: -
-                    kpis.get(
-                        g.get("id"),
-                        {}).get(
-                        "pct",
-                        0))
-            else:
-                show_groups = sorted(
-                    show_groups, key=lambda g: (
-                        g.get("nome") or "").lower())
-
-            if not show_groups:
-                st.info("Nenhum grupo encontrado para os filtros selecionados.")
-
-            st.markdown('<div class="mtz-card-grid">', unsafe_allow_html=True)
-            for row_start in range(0, len(show_groups), 3):
-                row_groups = show_groups[row_start:row_start + 3]
-                cols = st.columns(3)
-                for col_idx, g in enumerate(row_groups):
-                    gid = g.get("id")
-                    nome = g.get("nome") or str(gid)
-                    info = kpis.get(gid, {})
-                    pct = int(info.get("pct", 0))
-                    eqc = int(info.get("eq_count", 0))
-                    svc = int(info.get("svc_count", 0))
-                    dept_lbl = dept_names.get(g.get("departamento_id"), "")
-                    _icon = "🟢" if pct >= 80 else (
-                        "🟡" if pct >= 50 else (
-                            "🔴" if eqc > 0 else "⬜"))
-                    _sub = f"{dept_lbl} · " if dept_lbl else ""
-                    with cols[col_idx]:
-                        _status_txt, _status_cls = _card_status_badge(pct, eqc, svc)
-                        _ring_cls = (
-                            "high" if _status_cls == "critico"
-                            else "medium" if _status_cls == "atencao"
-                            else "low" if _status_cls == "avancado"
-                            else "neutral"
-                        )
-                        with st.container(border=True):
-                            st.markdown(f'<div class="mtz-select-card {_ring_cls}">', unsafe_allow_html=True)
-                            st.markdown(
-                                f'<div class="mtz-card-title">{_truncate_card_title(nome, 22)}</div>',
-                                unsafe_allow_html=True,
-                            )
-                            st.markdown(
-                                f'<div class="mtz-card-subtitle">{_truncate_card_subtitle(dept_lbl, 20)}</div>',
-                                unsafe_allow_html=True,
-                            )
-                            st.markdown(
-                                f'<div class="mtz-card-metrics">{pct}% · {eqc} eq · {svc} svc</div>',
-                                unsafe_allow_html=True,
-                            )
-                            st.markdown(
-                                f'<div class="mtz-card-status {_status_cls}">{_status_txt}</div>',
-                                unsafe_allow_html=True,
-                            )
-                            if st.button(
-                                "Abrir",
-                                key=f"mtz_card_{gid}",
-                                use_container_width=True,
-                                help=f"{nome} · {dept_lbl or 'Sem departamento'} · {pct}% concluído · {eqc} equipamentos · {svc} serviços",
-                            ):
-                                st.session_state["matriz_grupo_id"] = gid
-                                st.session_state["matriz_view"] = "group"
-                                st.rerun()
-                            st.markdown('</div>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+        if render_selection_screen(
+            tenant_id=tenant_id,
+            revisao_id=st.session_state.get("matriz_revisao_id"),
+            grupos=grupos,
+            search=search,
+            status_filter=_status_filter,
+            sort_by=_sort_by,
+            data_version=st.session_state.get("data_version", "0"),
+        ):
             return
 
         # ── Visao do grupo ──
@@ -487,55 +377,17 @@ def render_matriz():
             (tok_g / max(len(eqs) * len(all_services) * 3, 1)) * 100)
         setor_rows = _compute_setor_ok_counts(eqs, setor_to_services, task_map)
         # Header com barra de progresso
-        with hph.container():
-            st.markdown(
-                '<div class="enterprise-sticky">',
-                unsafe_allow_html=True)
-            cL, cR = st.columns([6, 1], vertical_alignment="center")
-            with cL:
-                st.markdown(
-                    f'<div class="enterprise-title">{grupo_nome}</div>',
-                    unsafe_allow_html=True)
-                st.markdown(
-                    f'<div class="enterprise-sub">Revisão: <b>{titulo}</b>  ·  Equip.: <b>{
-                        len(eqs)}</b>  ·  Geral: <b>{pct_geral}%</b>  ·  100%: <b>{eq100_g}/{
-                        len(eqs)}</b></div>', unsafe_allow_html=True)
-                st.markdown(
-                    _pct_bar_html(
-                        pct_geral,
-                        height=8),
-                    unsafe_allow_html=True)
-            with cR:
-                if st.button(
-                    "← Voltar",
-                    key="mtz_back_hdr",
-                    use_container_width=True,
-                ):
-                    st.session_state["matriz_view"] = "select"
-                    st.rerun()
-            # FIX #6: chips clicáveis — cada um é um botão que pula para o
-            # setor na aba Matriz
-            if setor_rows:
-                st.markdown(
-                    '<div class="enterprise-divider"></div>',
-                    unsafe_allow_html=True)
-                st.markdown(
-                    '<div class="enterprise-chip-row" style="flex-wrap:wrap;gap:6px;display:flex;margin-top:6px">',
-                    unsafe_allow_html=True)
-                chip_cols = st.columns(min(len(setor_rows[:12]), 6))
-                for ci, r in enumerate(setor_rows[:12]):
-                    ratio = r["ok_eq"] / max(r["total_eq"], 1)
-                    icon = "🟢" if ratio >= 0.8 else (
-                        "🟡" if ratio >= 0.5 else "🔴")
-                    lbl = f"{icon} {r['setor']} {r['ok_eq']}/{r['total_eq']}"
-                    with chip_cols[ci % len(chip_cols)]:
-                        if st.button(
-                                lbl, key=f"chip_setor_{ci}_{r['setor']}".replace(" ", "_"), use_container_width=True, help=f"{r['setor']}: {r['pct_med']}% médio · {r['ok_eq']}/{r['total_eq']} equip. 100%"):
-                            st.session_state["mtz_chip_jump"] = r["setor"]
-                            _sector_set_open(revisao_id, grupo_id, r["setor"], True)
-                            st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+        render_group_header(
+            placeholder=hph,
+            grupo_nome=grupo_nome,
+            titulo=titulo,
+            eqs=eqs,
+            pct_geral=pct_geral,
+            eq100_g=eq100_g,
+            setor_rows=setor_rows,
+            revisao_id=revisao_id,
+            grupo_id=grupo_id,
+        )
 
 
         group_atraso_dias = int(st.session_state.get("matriz_atraso_dias", 7) or 7)
@@ -659,42 +511,7 @@ def render_matriz():
 
         # ── TAB: RESUMO ──
         with tab_resumo:
-            st.markdown("### Ranking de equipamentos por progresso")
-            st.caption("Ordenado do mais atrasado para o mais adiantado.")
-            if resumo_df.empty:
-                st.info("Sem dados de resumo para esta revisão.")
-            else:
-                # KPIs rápidos no topo
-                rk1, rk2, rk3, rk4 = st.columns(4)
-                rk1.metric("Total equip.", len(resumo_df))
-                rk2.metric(
-                    "100% concluídos", int(
-                        (resumo_df["%"] >= 100).sum()))
-                rk3.metric("Progresso médio", f"{int(resumo_df['%'].mean())}%")
-                rk4.metric("Sem início (0%)", int((resumo_df["%"] == 0).sum()))
-                st.markdown("---")
-                # Cards visuais — única representação, sem tabela duplicada
-                for _, row in resumo_df.iterrows():
-                    pct_r = int(row["%"])
-                    color = _risk_color(pct_r)
-                    c1r, c2r = st.columns([0.6, 0.4])
-                    with c1r:
-                        st.markdown(
-                            f'<div style="font-size:.88rem;font-weight:600;margin-bottom:3px">{row["Equipamento"]}</div>'
-                            f'<div style="background:rgba(255,255,255,.08);border-radius:4px;height:7px">'
-                            f'<div style="width:{pct_r}%;background:{color};height:7px;border-radius:4px;transition:width .4s"></div></div>',
-                            unsafe_allow_html=True)
-                    with c2r:
-                        _done_lbl = int(row["Concluidos"])
-                        _tot_lbl = int(row["Total"])
-                        _st_lbl = "✅ Concluído" if pct_r >= 100 else (
-                            "🔴 Sem início" if pct_r == 0 else f"🟡 {pct_r}%")
-                        st.markdown(
-                            f'<div style="font-size:.82rem;color:rgba(255,255,255,.65);padding-top:3px">'
-                            f'<span style="color:{color};font-weight:700">{pct_r}%</span>'
-                            f'  ·  {_done_lbl}/{_tot_lbl} etapas'
-                            f'  <span style="opacity:.6">{_st_lbl}</span></div>',
-                            unsafe_allow_html=True)
+            render_summary_tab(resumo_df=resumo_df)
 
         # ── TAB: MATRIZ ──
         with tab_matriz:
