@@ -1450,7 +1450,8 @@ def render_matriz():
                             st.session_state["matriz_grupo_id"] = gid
                             st.session_state["matriz_view"] = "group"
                             st.rerun()
-                        st.markdown(_pct_bar_html(pct), unsafe_allow_html=True)
+                        # Barra removida nos cards da seleção para evitar ruído visual.
+                        pass
             st.markdown('</div>', unsafe_allow_html=True)
             return
 
