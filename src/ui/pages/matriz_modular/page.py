@@ -9,7 +9,6 @@ import streamlit as st
 
 from src.auth.roles import Role
 from src.auth.scope import get_my_scope
-from src.auth.permissions import can_edit_matriz, can_view_all_data
 from src.ui.core.styles import page_header as _ph
 from src.ui.core.cache import bump_data_version, clear_cached_functions
 from src.ui.components.forms import form_submit_button, validation_summary
@@ -47,16 +46,19 @@ from src.ui.pages.matriz_runtime import (
 from .data import _all_dept_names, _dept_name, _fetch_template, _group_kpis, _load_payload
 from .insights import _build_automation_insights, _build_group_sector_intelligence, _fmt_duration_from_hours, _sector_priority_sort_key
 from .pdf_export import _build_pdf_tables, _compute_setor_ok_counts, _df_to_csv_bytes, _reportlab_available, _style_heatmap
+from src.ui.pages.matriz_legacy_full import _pct_bar_html as _legacy_pct_bar_html
+
 from .styles import (
     _build_group_card_html,
     _build_group_card_label,
+    _card_status_badge,
     _card_status_meta,
     _compact_card_summary,
     _inject_css,
+    _pct_bar_html,
+    _truncate_card_subtitle,
+    _truncate_card_title,
 )
-from .selection import render_selection_screen
-from .header import render_group_header
-from .summary_tab import render_summary_tab
 
 def render_matriz():
     try:
@@ -70,11 +72,7 @@ def render_matriz():
 
         # Melhoria 1: scope
         dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id)
-        can_view_all = can_view_all_data(role)
-        can_edit = can_edit_matriz(role)
-        if not can_view_all and dep_scope_ids == [] and grp_scope_ids == []:
-            st.warning("Você não possui departamentos ou grupos vinculados para visualizar a matriz.")
-            return
+        is_admin = Role.is_admin(role)
 
         st.session_state.setdefault("data_version", "0")
         st.session_state.setdefault("matriz_view", "select")
@@ -92,7 +90,7 @@ def render_matriz():
 
         gq = sb.table("equip_grupos").select("id,nome,departamento_id").eq(
             "tenant_id", tenant_id).eq("ativo", True).order("nome")
-        if not can_view_all and dep_scope_ids is not None:
+        if not is_admin and dep_scope_ids:
             gq = (
                 gq.eq(
                     "departamento_id",
@@ -100,7 +98,7 @@ def render_matriz():
                     "departamento_id",
                     dep_scope_ids))
         grupos = gq.execute().data or []
-        if not can_view_all and grp_scope_ids is not None:
+        if not is_admin and grp_scope_ids:
             grupos = [g for g in grupos if g["id"] in grp_scope_ids]
         if not grupos:
             st.info("Nenhum grupo disponivel para o seu escopo.")
@@ -223,15 +221,124 @@ def render_matriz():
             st.markdown('</div></div>', unsafe_allow_html=True)
 
         # Tela de selecao — cards com barra de progresso (Melhoria 3)
-        if render_selection_screen(
-            tenant_id=tenant_id,
-            revisao_id=st.session_state.get("matriz_revisao_id"),
-            grupos=grupos,
-            search=search,
-            status_filter=_status_filter,
-            sort_by=_sort_by,
-            data_version=st.session_state.get("data_version", "0"),
-        ):
+        if st.session_state.get("matriz_view") != "group":
+            revisao_id = st.session_state.get("matriz_revisao_id")
+            kpis = _group_kpis(
+                tenant_id, revisao_id, st.session_state.get(
+                    "data_version", "0")) if revisao_id else {}
+
+            # filtros da seleção já renderizados na toolbar compacta
+
+            q = (search or "").strip().lower()
+            dep_id = st.session_state.get("matriz_departamento_id")
+
+            dept_names = _all_dept_names(
+                tenant_id, st.session_state.get(
+                    "data_version", "0"))
+
+            show_groups = [
+                g for g in grupos if (
+                    not dep_id or g.get("departamento_id") == dep_id) and (
+                    (not q) or (
+                        q in (
+                            g.get("nome") or "").lower()) or (
+                        q in (
+                            dept_names.get(
+                                g.get("departamento_id"),
+                                "")).lower()))]
+
+            # Filtro de status
+            if _status_filter != "Todos":
+                def _status_match(g):
+                    p = int(kpis.get(g.get("id"), {}).get("pct", 0))
+                    eq = int(kpis.get(g.get("id"), {}).get("eq_count", 0))
+                    if _status_filter.startswith("🔴"):
+                        return p < 50 and eq > 0
+                    if _status_filter.startswith("🟡"):
+                        return 50 <= p < 80
+                    if _status_filter.startswith("🟢"):
+                        return p >= 80
+                    if _status_filter.startswith("⬜"):
+                        return eq == 0
+                    return True
+                show_groups = [g for g in show_groups if _status_match(g)]
+
+            # Ordenação
+            if _sort_by.startswith("% ↑"):
+                show_groups = sorted(
+                    show_groups, key=lambda g: kpis.get(
+                        g.get("id"), {}).get(
+                        "pct", 0))
+            elif _sort_by.startswith("% ↓"):
+                show_groups = sorted(
+                    show_groups,
+                    key=lambda g: -
+                    kpis.get(
+                        g.get("id"),
+                        {}).get(
+                        "pct",
+                        0))
+            else:
+                show_groups = sorted(
+                    show_groups, key=lambda g: (
+                        g.get("nome") or "").lower())
+
+            if not show_groups:
+                st.info("Nenhum grupo encontrado para os filtros selecionados.")
+
+            st.markdown('<div class="mtz-card-grid">', unsafe_allow_html=True)
+            for row_start in range(0, len(show_groups), 3):
+                row_groups = show_groups[row_start:row_start + 3]
+                cols = st.columns(3)
+                for col_idx, g in enumerate(row_groups):
+                    gid = g.get("id")
+                    nome = g.get("nome") or str(gid)
+                    info = kpis.get(gid, {})
+                    pct = int(info.get("pct", 0))
+                    eqc = int(info.get("eq_count", 0))
+                    svc = int(info.get("svc_count", 0))
+                    dept_lbl = dept_names.get(g.get("departamento_id"), "")
+                    _icon = "🟢" if pct >= 80 else (
+                        "🟡" if pct >= 50 else (
+                            "🔴" if eqc > 0 else "⬜"))
+                    _sub = f"{dept_lbl} · " if dept_lbl else ""
+                    with cols[col_idx]:
+                        _status_txt, _status_cls = _card_status_badge(pct, eqc, svc)
+                        _ring_cls = (
+                            "high" if _status_cls == "critico"
+                            else "medium" if _status_cls == "atencao"
+                            else "low" if _status_cls == "avancado"
+                            else "neutral"
+                        )
+                        with st.container(border=True):
+                            st.markdown(f'<div class="mtz-select-card {_ring_cls}">', unsafe_allow_html=True)
+                            st.markdown(
+                                f'<div class="mtz-card-title">{_truncate_card_title(nome, 22)}</div>',
+                                unsafe_allow_html=True,
+                            )
+                            st.markdown(
+                                f'<div class="mtz-card-subtitle">{_truncate_card_subtitle(dept_lbl, 20)}</div>',
+                                unsafe_allow_html=True,
+                            )
+                            st.markdown(
+                                f'<div class="mtz-card-metrics">{pct}% · {eqc} eq · {svc} svc</div>',
+                                unsafe_allow_html=True,
+                            )
+                            st.markdown(
+                                f'<div class="mtz-card-status {_status_cls}">{_status_txt}</div>',
+                                unsafe_allow_html=True,
+                            )
+                            if st.button(
+                                "Abrir",
+                                key=f"mtz_card_{gid}",
+                                use_container_width=True,
+                                help=f"{nome} · {dept_lbl or 'Sem departamento'} · {pct}% concluído · {eqc} equipamentos · {svc} serviços",
+                            ):
+                                st.session_state["matriz_grupo_id"] = gid
+                                st.session_state["matriz_view"] = "group"
+                                st.rerun()
+                            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
             return
 
         # ── Visao do grupo ──
@@ -256,7 +363,7 @@ def render_matriz():
             # Limpa payload cacheado manualmente no session_state
             st.session_state.pop("_mtz_payload_cache", None)
 
-        if not can_view_all and grp_scope_ids is not None and grupo_id not in grp_scope_ids:
+        if not is_admin and grp_scope_ids and grupo_id not in grp_scope_ids:
             st.warning("Voce nao tem acesso a este grupo.")
             if st.button("Voltar", key="mtz_back_noaccess"):
                 st.session_state["matriz_view"] = "select"
@@ -382,17 +489,55 @@ def render_matriz():
             (tok_g / max(len(eqs) * len(all_services) * 3, 1)) * 100)
         setor_rows = _compute_setor_ok_counts(eqs, setor_to_services, task_map)
         # Header com barra de progresso
-        render_group_header(
-            placeholder=hph,
-            grupo_nome=grupo_nome,
-            titulo=titulo,
-            eqs=eqs,
-            pct_geral=pct_geral,
-            eq100_g=eq100_g,
-            setor_rows=setor_rows,
-            revisao_id=revisao_id,
-            grupo_id=grupo_id,
-        )
+        with hph.container():
+            st.markdown(
+                '<div class="enterprise-sticky">',
+                unsafe_allow_html=True)
+            cL, cR = st.columns([6, 1], vertical_alignment="center")
+            with cL:
+                st.markdown(
+                    f'<div class="enterprise-title">{grupo_nome}</div>',
+                    unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="enterprise-sub">Revisão: <b>{titulo}</b>  ·  Equip.: <b>{
+                        len(eqs)}</b>  ·  Geral: <b>{pct_geral}%</b>  ·  100%: <b>{eq100_g}/{
+                        len(eqs)}</b></div>', unsafe_allow_html=True)
+                st.markdown(
+                    _pct_bar_html(
+                        pct_geral,
+                        height=8),
+                    unsafe_allow_html=True)
+            with cR:
+                if st.button(
+                    "← Voltar",
+                    key="mtz_back_hdr",
+                    use_container_width=True,
+                ):
+                    st.session_state["matriz_view"] = "select"
+                    st.rerun()
+            # FIX #6: chips clicáveis — cada um é um botão que pula para o
+            # setor na aba Matriz
+            if setor_rows:
+                st.markdown(
+                    '<div class="enterprise-divider"></div>',
+                    unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="enterprise-chip-row" style="flex-wrap:wrap;gap:6px;display:flex;margin-top:6px">',
+                    unsafe_allow_html=True)
+                chip_cols = st.columns(min(len(setor_rows[:12]), 6))
+                for ci, r in enumerate(setor_rows[:12]):
+                    ratio = r["ok_eq"] / max(r["total_eq"], 1)
+                    icon = "🟢" if ratio >= 0.8 else (
+                        "🟡" if ratio >= 0.5 else "🔴")
+                    lbl = f"{icon} {r['setor']} {r['ok_eq']}/{r['total_eq']}"
+                    with chip_cols[ci % len(chip_cols)]:
+                        if st.button(
+                                lbl, key=f"chip_setor_{ci}_{r['setor']}".replace(" ", "_"), use_container_width=True, help=f"{r['setor']}: {r['pct_med']}% médio · {r['ok_eq']}/{r['total_eq']} equip. 100%"):
+                            st.session_state["mtz_chip_jump"] = r["setor"]
+                            _sector_set_open(revisao_id, grupo_id, r["setor"], True)
+                            st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
 
         group_atraso_dias = int(st.session_state.get("matriz_atraso_dias", 7) or 7)
@@ -441,16 +586,8 @@ def render_matriz():
             no_start_eq_count=no_start_eq_count,
         )
 
-        tab_labels = ["📊 Resumo", "⚙️ Matriz", "📈 Evolução", "🧠 Analytics", "⏱️ Tempos"]
-        if can_edit:
-            tab_labels.append("✏️ Editar célula")
-        tab_labels.append("⬇️ Exportar")
-        _tabs = st.tabs(tab_labels)
-        if can_edit:
-            tab_resumo, tab_matriz, tab_evolucao, tab_analytics, tab_tempos, tab_editor, tab_exportar = _tabs
-        else:
-            tab_resumo, tab_matriz, tab_evolucao, tab_analytics, tab_tempos, tab_exportar = _tabs
-            tab_editor = None
+        tab_resumo, tab_matriz, tab_evolucao, tab_analytics, tab_tempos, tab_editor, tab_exportar = st.tabs([
+            "📊 Resumo", "⚙️ Matriz", "📈 Evolução", "🧠 Analytics", "⏱️ Tempos", "✏️ Editar célula", "⬇️ Exportar"])
 
         # FIX #3 e #8: pré-computar dados de export ANTES das tabs
         # Assim Exportar funciona mesmo sem o usuário ter visitado Matriz ou
@@ -524,7 +661,42 @@ def render_matriz():
 
         # ── TAB: RESUMO ──
         with tab_resumo:
-            render_summary_tab(resumo_df=resumo_df)
+            st.markdown("### Ranking de equipamentos por progresso")
+            st.caption("Ordenado do mais atrasado para o mais adiantado.")
+            if resumo_df.empty:
+                st.info("Sem dados de resumo para esta revisão.")
+            else:
+                # KPIs rápidos no topo
+                rk1, rk2, rk3, rk4 = st.columns(4)
+                rk1.metric("Total equip.", len(resumo_df))
+                rk2.metric(
+                    "100% concluídos", int(
+                        (resumo_df["%"] >= 100).sum()))
+                rk3.metric("Progresso médio", f"{int(resumo_df['%'].mean())}%")
+                rk4.metric("Sem início (0%)", int((resumo_df["%"] == 0).sum()))
+                st.markdown("---")
+                # Cards visuais — única representação, sem tabela duplicada
+                for _, row in resumo_df.iterrows():
+                    pct_r = int(row["%"])
+                    color = _risk_color(pct_r)
+                    c1r, c2r = st.columns([0.6, 0.4])
+                    with c1r:
+                        st.markdown(
+                            f'<div style="font-size:.88rem;font-weight:600;margin-bottom:3px">{row["Equipamento"]}</div>'
+                            f'<div style="background:rgba(255,255,255,.08);border-radius:4px;height:7px">'
+                            f'<div style="width:{pct_r}%;background:{color};height:7px;border-radius:4px;transition:width .4s"></div></div>',
+                            unsafe_allow_html=True)
+                    with c2r:
+                        _done_lbl = int(row["Concluidos"])
+                        _tot_lbl = int(row["Total"])
+                        _st_lbl = "✅ Concluído" if pct_r >= 100 else (
+                            "🔴 Sem início" if pct_r == 0 else f"🟡 {pct_r}%")
+                        st.markdown(
+                            f'<div style="font-size:.82rem;color:rgba(255,255,255,.65);padding-top:3px">'
+                            f'<span style="color:{color};font-weight:700">{pct_r}%</span>'
+                            f'  ·  {_done_lbl}/{_tot_lbl} etapas'
+                            f'  <span style="opacity:.6">{_st_lbl}</span></div>',
+                            unsafe_allow_html=True)
 
         # ── TAB: MATRIZ ──
         with tab_matriz:
@@ -746,9 +918,9 @@ def render_matriz():
                     _svc_names = _svc_name_map(svs)
                     kb = f"mat_ed_{revisao_id}_{grupo_id}_{setor_nome}".replace(
                         " ", "_")
-                    mode_options = ["Editar", "Visual"] if can_edit else ["Visual"]
                     mode = st.radio(
-                        "Visualização", mode_options, horizontal=True, key=f"mtz_mode_{kb}")
+                        "Visualização", [
+                            "Editar", "Visual"], horizontal=True, key=f"mtz_mode_{kb}")
 
                     if mode == "Visual":
                         days_since = int(
@@ -787,11 +959,10 @@ def render_matriz():
                             "💾 Salvar alterações",
                             key=f"save_{kb}",
                             help="Valida e prepara as alterações feitas no grid deste setor antes da confirmação final.",
-                            disabled=not can_edit,
                         )
                     with sv2:
                         st.caption(
-                            "Marque/desmarque etapas acima e clique em Salvar." if can_edit else "Somente administradores e supervisores podem editar a matriz.")
+                            "Marque/desmarque etapas acima e clique em Salvar.")
 
                     _pending_changes_key = f"pending_changes_{kb}"
                     _pending_preview_key = f"pending_preview_{kb}"
@@ -1328,238 +1499,237 @@ def render_matriz():
                     "Sem dados de tempo ainda. Marque etapas D/R/M com timestamps para começar.")
 
         # ── TAB: EDITAR CÉLULA ──
-        if tab_editor is not None:
-            with tab_editor:
-                st.markdown("### ✏️ Edição rápida por célula")
-                st.caption(
-                    "Selecione frota, setor e serviço para atualizar etapas, status e observação.")
-    
-                # Seletores lado a lado
-                ed_c1, ed_c2, ed_c3 = st.columns([1, 1, 1])
-                with ed_c1:
-                    equip_choices_short = {
-                        eq_label_short[eid]: eid for eid in eq_label_short}
-                    esl = st.selectbox(
-                        "🚜 Frota",
-                        list(
-                            equip_choices_short.keys()),
-                        key="mat_eq_sel")
-                    equip_sel = equip_choices_short[esl]
-                with ed_c2:
-                    setores_ed = sorted(
-                        setor_to_services.keys(),
-                        key=lambda x: x.lower())
-                    if setores_ed:
-                        setor_ed = st.selectbox(
-                            "📂 Setor", setores_ed, key="mat_setor_sel")
+        with tab_editor:
+            st.markdown("### ✏️ Edição rápida por célula")
+            st.caption(
+                "Selecione frota, setor e serviço para atualizar etapas, status e observação.")
+
+            # Seletores lado a lado
+            ed_c1, ed_c2, ed_c3 = st.columns([1, 1, 1])
+            with ed_c1:
+                equip_choices_short = {
+                    eq_label_short[eid]: eid for eid in eq_label_short}
+                esl = st.selectbox(
+                    "🚜 Frota",
+                    list(
+                        equip_choices_short.keys()),
+                    key="mat_eq_sel")
+                equip_sel = equip_choices_short[esl]
+            with ed_c2:
+                setores_ed = sorted(
+                    setor_to_services.keys(),
+                    key=lambda x: x.lower())
+                if setores_ed:
+                    setor_ed = st.selectbox(
+                        "📂 Setor", setores_ed, key="mat_setor_sel")
+                else:
+                    st.info("Sem setores disponíveis neste grupo.")
+                    setor_ed = None
+            with ed_c3:
+                if setor_ed:
+                    svs_ed = sorted(
+                        setor_to_services[setor_ed], key=lambda x: (
+                            x.get("nome") or "").lower())
+                    svc_choices = {
+                        s.get("nome") or str(
+                            s.get("id")): s["id"] for s in svs_ed if s.get("id")}
+                    if svc_choices:
+                        svc_name = st.selectbox("🔧 Serviço", list(
+                            svc_choices.keys()), key="mat_srv_sel")
+                        svc_sel = svc_choices[svc_name]
                     else:
-                        st.info("Sem setores disponíveis neste grupo.")
-                        setor_ed = None
-                with ed_c3:
-                    if setor_ed:
-                        svs_ed = sorted(
-                            setor_to_services[setor_ed], key=lambda x: (
-                                x.get("nome") or "").lower())
-                        svc_choices = {
-                            s.get("nome") or str(
-                                s.get("id")): s["id"] for s in svs_ed if s.get("id")}
-                        if svc_choices:
-                            svc_name = st.selectbox("🔧 Serviço", list(
-                                svc_choices.keys()), key="mat_srv_sel")
-                            svc_sel = svc_choices[svc_name]
-                        else:
-                            st.info("Sem serviços neste setor.")
-                            svc_sel = None
-                    else:
+                        st.info("Sem serviços neste setor.")
                         svc_sel = None
-    
-                if not setor_ed or not svc_sel:
-                    st.info("Selecione um setor e serviço válidos para continuar.")
                 else:
-                    # Buscar tarefa
-                    task_rows_ed = (
-                        sb.table("tarefas_servico").select("id,status,semana,observacao,etapa_d,etapa_r,etapa_m") .eq(
-                            "tenant_id", tenant_id).eq(
-                            "revisao_id", revisao_id) .eq(
-                            "equipamento_id", equip_sel).eq(
-                            "servico_id", svc_sel).limit(1).execute().data) or []
-                    task_ed = task_rows_ed[0] if task_rows_ed else None
-    
-                if not task_ed:
-                    st.warning("⚠️ Tarefa não encontrada para esta combinação.")
-                else:
-                    st.divider()
-                    # Info da tarefa atual em destaque
-                    cur_d = bool(task_ed.get("etapa_d"))
-                    cur_r = bool(task_ed.get("etapa_r"))
-                    cur_m = bool(task_ed.get("etapa_m"))
-                    cur_pct = round(
-                        ((int(cur_d) + int(cur_r) + int(cur_m)) / 3) * 100)
-                    _ed_color = _risk_color(cur_pct)
-    
-                    def _badge(label, done):
-                        if done:
-                            return (f'<span style="padding:3px 10px;border-radius:999px;'
-                                    f'background:rgba(18,183,106,.2);color:#12B76A;font-size:.8rem">✓ {label}</span>')
+                    svc_sel = None
+
+            if not setor_ed or not svc_sel:
+                st.info("Selecione um setor e serviço válidos para continuar.")
+            else:
+                # Buscar tarefa
+                task_rows_ed = (
+                    sb.table("tarefas_servico").select("id,status,semana,observacao,etapa_d,etapa_r,etapa_m") .eq(
+                        "tenant_id", tenant_id).eq(
+                        "revisao_id", revisao_id) .eq(
+                        "equipamento_id", equip_sel).eq(
+                        "servico_id", svc_sel).limit(1).execute().data) or []
+                task_ed = task_rows_ed[0] if task_rows_ed else None
+
+            if not task_ed:
+                st.warning("⚠️ Tarefa não encontrada para esta combinação.")
+            else:
+                st.divider()
+                # Info da tarefa atual em destaque
+                cur_d = bool(task_ed.get("etapa_d"))
+                cur_r = bool(task_ed.get("etapa_r"))
+                cur_m = bool(task_ed.get("etapa_m"))
+                cur_pct = round(
+                    ((int(cur_d) + int(cur_r) + int(cur_m)) / 3) * 100)
+                _ed_color = _risk_color(cur_pct)
+
+                def _badge(label, done):
+                    if done:
                         return (f'<span style="padding:3px 10px;border-radius:999px;'
-                                f'background:rgba(255,255,255,.06);color:rgba(255,255,255,.4);font-size:.8rem">✗ {label}</span>')
-    
-                    badge_d = _badge("D", cur_d)
-                    badge_r = _badge("R", cur_r)
-                    badge_m = _badge("M", cur_m)
-                    _status_label = "Concluído" if cur_pct == 100 else (
-                        "Pendente" if cur_pct == 0 else "Em andamento")
-    
-                    info_col1, info_col2 = st.columns([2, 1])
-                    with info_col1:
-                        st.markdown(
-                            f'<div style="padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.1);'
-                            f'background:rgba(255,255,255,.04);margin-bottom:8px">'
-                            f'<div style="font-size:.8rem;color:rgba(255,255,255,.5);margin-bottom:4px">Estado atual</div>'
-                            f'<div style="display:flex;gap:12px;align-items:center">'
-                            f'<span style="font-size:.9rem">Frota <b>{esl}</b></span>'
-                            f'<span style="color:rgba(255,255,255,.4)">·</span>'
-                            f'<span style="font-size:.9rem">{setor_ed}</span>'
-                            f'<span style="color:rgba(255,255,255,.4)">·</span>'
-                            f'<span style="font-size:.9rem">{svc_name}</span>'
-                            f'</div>'
-                            f'<div style="margin-top:6px;display:flex;gap:6px">'
-                            f'{badge_d}{badge_r}{badge_m}'
-                            f'</div></div>',
-                            unsafe_allow_html=True)
-                    with info_col2:
-                        st.metric(
-                            "Progresso atual",
-                            f"{cur_pct}%",
-                            delta=_status_label)
-    
-                    st.markdown("#### Atualizar etapas")
-                    cD, cR, cM, cSem = st.columns([1, 1, 1, 1])
-                    with cD:
-                        etapa_d = st.checkbox(
-                            "✅ Desmontou (D)", value=cur_d, key="mat_ed_d")
-                    with cR:
-                        etapa_r = st.checkbox(
-                            "✅ Revisou (R)", value=cur_r, key="mat_ed_r")
-                    with cM:
-                        etapa_m = st.checkbox(
-                            "✅ Montou (M)", value=cur_m, key="mat_ed_m")
-                    with cSem:
-                        _semana_ed_default = int(
-                            task_ed.get("semana") or _semana_sugerida)
-                        nsem = st.number_input("📅 Semana", min_value=0,
-                                               value=_semana_ed_default, step=1, key="mat_sem",
-                                               help=f"Semana sugerida automaticamente: {_semana_sugerida}. "
-                                               "Altere se precisar registrar em outra semana.")
-    
-                    st.caption(
-                        "Marcar D+R+M atualiza o status para Concluído automaticamente.")
-    
-                    SO = [
-                        ("pendente",
-                         "⏳ Pendente"),
-                        ("em_andamento",
-                         "🔄 Em andamento"),
-                        ("concluido",
-                         "✅ Concluído"),
-                        ("travado",
-                         "🚫 Travado"),
-                        ("nao_aplica",
-                         "➖ Não aplica")]
-                    kl = [k for k, _ in SO]
-                    ll = [v for _, v in SO]
-                    ist = kl.index(task_ed["status"]) if task_ed.get(
-                        "status") in kl else 0
-                    st_col1, st_col2 = st.columns([1, 2])
-                    with st_col1:
-                        nlbl = st.selectbox(
-                            "📌 Status", ll, index=ist, key="mat_st_sel")
-                        nst = kl[ll.index(nlbl)]
-                    with st_col2:
-                        nobs = st.text_area(
-                            "💬 Observação",
-                            value=task_ed.get("observacao") or "",
-                            key="mat_obs_ed",
-                            height=80,
-                            placeholder="Descreva impedimentos, peças aguardadas, ocorrências...")
-    
-                    sv_a, sv_b, _ = st.columns([1, 1, 2])
-                    with sv_a:
-                        save_quick = form_submit_button(
-                            "💾 Salvar",
-                            key="mat_save_ed",
-                            help="Salva as etapas, semana, status e observação da tarefa selecionada.",
-                        )
-                        if save_quick:
-                            new_status = nst
-                            if etapa_d and etapa_r and etapa_m:
-                                new_status = "concluido"
-    
-                            quick_errors = []
-                            if new_status == "travado" and not (nobs or "").strip():
-                                quick_errors.append("Preencha a observação antes de salvar uma tarefa como Travado.")
-    
-                            if quick_errors:
-                                validation_summary(quick_errors, title="Corrija o formulário da tarefa")
-                            else:
+                                f'background:rgba(18,183,106,.2);color:#12B76A;font-size:.8rem">✓ {label}</span>')
+                    return (f'<span style="padding:3px 10px;border-radius:999px;'
+                            f'background:rgba(255,255,255,.06);color:rgba(255,255,255,.4);font-size:.8rem">✗ {label}</span>')
+
+                badge_d = _badge("D", cur_d)
+                badge_r = _badge("R", cur_r)
+                badge_m = _badge("M", cur_m)
+                _status_label = "Concluído" if cur_pct == 100 else (
+                    "Pendente" if cur_pct == 0 else "Em andamento")
+
+                info_col1, info_col2 = st.columns([2, 1])
+                with info_col1:
+                    st.markdown(
+                        f'<div style="padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.1);'
+                        f'background:rgba(255,255,255,.04);margin-bottom:8px">'
+                        f'<div style="font-size:.8rem;color:rgba(255,255,255,.5);margin-bottom:4px">Estado atual</div>'
+                        f'<div style="display:flex;gap:12px;align-items:center">'
+                        f'<span style="font-size:.9rem">Frota <b>{esl}</b></span>'
+                        f'<span style="color:rgba(255,255,255,.4)">·</span>'
+                        f'<span style="font-size:.9rem">{setor_ed}</span>'
+                        f'<span style="color:rgba(255,255,255,.4)">·</span>'
+                        f'<span style="font-size:.9rem">{svc_name}</span>'
+                        f'</div>'
+                        f'<div style="margin-top:6px;display:flex;gap:6px">'
+                        f'{badge_d}{badge_r}{badge_m}'
+                        f'</div></div>',
+                        unsafe_allow_html=True)
+                with info_col2:
+                    st.metric(
+                        "Progresso atual",
+                        f"{cur_pct}%",
+                        delta=_status_label)
+
+                st.markdown("#### Atualizar etapas")
+                cD, cR, cM, cSem = st.columns([1, 1, 1, 1])
+                with cD:
+                    etapa_d = st.checkbox(
+                        "✅ Desmontou (D)", value=cur_d, key="mat_ed_d")
+                with cR:
+                    etapa_r = st.checkbox(
+                        "✅ Revisou (R)", value=cur_r, key="mat_ed_r")
+                with cM:
+                    etapa_m = st.checkbox(
+                        "✅ Montou (M)", value=cur_m, key="mat_ed_m")
+                with cSem:
+                    _semana_ed_default = int(
+                        task_ed.get("semana") or _semana_sugerida)
+                    nsem = st.number_input("📅 Semana", min_value=0,
+                                           value=_semana_ed_default, step=1, key="mat_sem",
+                                           help=f"Semana sugerida automaticamente: {_semana_sugerida}. "
+                                           "Altere se precisar registrar em outra semana.")
+
+                st.caption(
+                    "Marcar D+R+M atualiza o status para Concluído automaticamente.")
+
+                SO = [
+                    ("pendente",
+                     "⏳ Pendente"),
+                    ("em_andamento",
+                     "🔄 Em andamento"),
+                    ("concluido",
+                     "✅ Concluído"),
+                    ("travado",
+                     "🚫 Travado"),
+                    ("nao_aplica",
+                     "➖ Não aplica")]
+                kl = [k for k, _ in SO]
+                ll = [v for _, v in SO]
+                ist = kl.index(task_ed["status"]) if task_ed.get(
+                    "status") in kl else 0
+                st_col1, st_col2 = st.columns([1, 2])
+                with st_col1:
+                    nlbl = st.selectbox(
+                        "📌 Status", ll, index=ist, key="mat_st_sel")
+                    nst = kl[ll.index(nlbl)]
+                with st_col2:
+                    nobs = st.text_area(
+                        "💬 Observação",
+                        value=task_ed.get("observacao") or "",
+                        key="mat_obs_ed",
+                        height=80,
+                        placeholder="Descreva impedimentos, peças aguardadas, ocorrências...")
+
+                sv_a, sv_b, _ = st.columns([1, 1, 2])
+                with sv_a:
+                    save_quick = form_submit_button(
+                        "💾 Salvar",
+                        key="mat_save_ed",
+                        help="Salva as etapas, semana, status e observação da tarefa selecionada.",
+                    )
+                    if save_quick:
+                        new_status = nst
+                        if etapa_d and etapa_r and etapa_m:
+                            new_status = "concluido"
+
+                        quick_errors = []
+                        if new_status == "travado" and not (nobs or "").strip():
+                            quick_errors.append("Preencha a observação antes de salvar uma tarefa como Travado.")
+
+                        if quick_errors:
+                            validation_summary(quick_errors, title="Corrija o formulário da tarefa")
+                        else:
+                            try:
+                                sb.table("tarefas_servico").update({
+                                    "etapa_d": bool(etapa_d), "etapa_r": bool(etapa_r), "etapa_m": bool(etapa_m),
+                                    "status": new_status, "semana": int(nsem) if int(nsem) > 0 else None,
+                                    "observacao": nobs.strip() or None, "updated_by": current_user_id() or None
+                                }).eq("id", task_ed["id"]).execute()
+                                st.success(
+                                    f"✅ Frota {esl} · {svc_name} atualizado!")
+                                bump_data_version()
                                 try:
-                                    sb.table("tarefas_servico").update({
-                                        "etapa_d": bool(etapa_d), "etapa_r": bool(etapa_r), "etapa_m": bool(etapa_m),
-                                        "status": new_status, "semana": int(nsem) if int(nsem) > 0 else None,
-                                        "observacao": nobs.strip() or None, "updated_by": current_user_id() or None
-                                    }).eq("id", task_ed["id"]).execute()
-                                    st.success(
-                                        f"✅ Frota {esl} · {svc_name} atualizado!")
-                                    bump_data_version()
-                                    try:
-                                        nav.rerun_keep_menu()
-                                    except Exception:
-                                        st.rerun()
-                                except Exception as e:
-                                    st.error(f"Erro: {e}")
-                    with sv_b:
-                        # Limpar observação rapidamente
-                        if (task_ed.get("observacao") or "").strip():
-                            if st.button(
-                                "🗑️ Limpar obs.",
-                                use_container_width=True,
-                                key="mat_clear_obs",
-                            ):
-                                st.session_state["confirm_clear_obs_matriz"] = True
-                                st.rerun()
-    
-                            if confirmation_panel(
-                                state_key="confirm_clear_obs_matriz",
-                                title="Confirma limpar a observação desta tarefa?",
-                                body="A observação atual será removida imediatamente da tarefa selecionada.",
-                                confirm_label="Limpar observação",
-                            ):
+                                    nav.rerun_keep_menu()
+                                except Exception:
+                                    st.rerun()
+                            except Exception as e:
+                                st.error(f"Erro: {e}")
+                with sv_b:
+                    # Limpar observação rapidamente
+                    if (task_ed.get("observacao") or "").strip():
+                        if st.button(
+                            "🗑️ Limpar obs.",
+                            use_container_width=True,
+                            key="mat_clear_obs",
+                        ):
+                            st.session_state["confirm_clear_obs_matriz"] = True
+                            st.rerun()
+
+                        if confirmation_panel(
+                            state_key="confirm_clear_obs_matriz",
+                            title="Confirma limpar a observação desta tarefa?",
+                            body="A observação atual será removida imediatamente da tarefa selecionada.",
+                            confirm_label="Limpar observação",
+                        ):
+                            try:
+                                sb.table("tarefas_servico").update(
+                                    {"observacao": None}).eq("id", task_ed["id"]).execute()
+                                st.toast("Observação removida.")
+                                bump_data_version()
                                 try:
-                                    sb.table("tarefas_servico").update(
-                                        {"observacao": None}).eq("id", task_ed["id"]).execute()
-                                    st.toast("Observação removida.")
-                                    bump_data_version()
-                                    try:
-                                        nav.rerun_keep_menu()
-                                    except Exception:
-                                        st.rerun()
-                                except Exception as e:
-                                    st.error(f"Erro: {e}")
-    
-                    # ── Histórico de comentários ─────────────────────────────────
-                    st.markdown("---")
-                    try:
-                        from src.ui.components.comentarios import render_comentarios
-                        _u_id = current_user_id() or ""
-                        _u_nome = st.session_state.get("sb_user_nome") or "Usuário"
-                        render_comentarios(
-                            tenant_id, task_ed["id"],
-                            user_nome=_u_nome,
-                            key_prefix=f"mtz_{equip_sel}_{svc_sel}_",
-                        )
-                    except Exception:
-                        pass  # comentários são opcionais — tabela pode não existir ainda
-    
+                                    nav.rerun_keep_menu()
+                                except Exception:
+                                    st.rerun()
+                            except Exception as e:
+                                st.error(f"Erro: {e}")
+
+                # ── Histórico de comentários ─────────────────────────────────
+                st.markdown("---")
+                try:
+                    from src.ui.components.comentarios import render_comentarios
+                    _u_id = current_user_id() or ""
+                    _u_nome = st.session_state.get("sb_user_nome") or "Usuário"
+                    render_comentarios(
+                        tenant_id, task_ed["id"],
+                        user_nome=_u_nome,
+                        key_prefix=f"mtz_{equip_sel}_{svc_sel}_",
+                    )
+                except Exception:
+                    pass  # comentários são opcionais — tabela pode não existir ainda
+
         # ── TAB: EXPORTAR ──
         with tab_exportar:
             st.markdown("### Exportações")
