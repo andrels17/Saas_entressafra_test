@@ -578,7 +578,7 @@ def render_dashboard() -> None:
         return
 
     sb = sb_for_user()
-    dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id)
+    dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id, sb)
     role = st.session_state.get("current_role") or ""
     if not can_view_all_data(role) and dep_scope_ids == [] and grp_scope_ids == []:
         st.warning("Você não possui departamentos ou grupos vinculados para visualizar o dashboard.")
@@ -620,10 +620,19 @@ def render_dashboard() -> None:
         departamentos = _load_departamentos(tenant_id, ver)
         grupos = _load_grupos(tenant_id, ver)
 
+    if dep_scope_ids in (None, [] ) and grp_scope_ids not in (None, []):
+        dep_scope_ids = sorted({str(g.get("departamento_id")) for g in grupos if g.get("id") in set(grp_scope_ids) and g.get("departamento_id")})
+
+    if dep_scope_ids == [] and grp_scope_ids not in (None, []):
+        grp_set = {str(x) for x in grp_scope_ids}
+        departamentos = [d for d in departamentos if any(str(g.get("id")) in grp_set and str(g.get("departamento_id")) == str(d.get("id")) for g in grupos)]
+
     if dep_scope_ids is not None:
-        departamentos = [d for d in departamentos if d.get("id") in dep_scope_ids]
+        dep_scope_set = {str(x) for x in dep_scope_ids}
+        departamentos = [d for d in departamentos if str(d.get("id")) in dep_scope_set]
     if grp_scope_ids is not None:
-        scoped_grupos = [g for g in grupos if g.get("id") in grp_scope_ids]
+        grp_scope_set = {str(x) for x in grp_scope_ids}
+        scoped_grupos = [g for g in grupos if str(g.get("id")) in grp_scope_set]
         if scoped_grupos or dep_scope_ids in (None, []):
             grupos = scoped_grupos
         else:

@@ -41,8 +41,28 @@ def validation_summary(errors: list[str], *, title: str = "Corrija antes de cont
         st.markdown(f"<ul>{bullets}</ul>", unsafe_allow_html=True)
 
 
-def form_submit_button(label: str, *, key: str, help: str | None = None, use_container_width: bool = True) -> bool:
-    return st.button(label, key=key, type="primary", help=help, use_container_width=use_container_width)
+def form_submit_button(
+    label: str,
+    *,
+    key: str,
+    help: str | None = None,
+    use_container_width: bool = True,
+    disabled: bool = False,
+) -> bool:
+    kwargs = dict(
+        key=key,
+        type="primary",
+        help=help,
+        use_container_width=use_container_width,
+    )
+    try:
+        return st.button(label, disabled=disabled, **kwargs)
+    except TypeError:
+        # Compatibilidade com versões mais antigas do Streamlit.
+        if disabled:
+            st.button(label, **kwargs)
+            return False
+        return st.button(label, **kwargs)
 
 
 def validate_time_hhmm(value: str, *, label: str = "o horário") -> list[str]:

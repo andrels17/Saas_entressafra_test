@@ -793,12 +793,21 @@ def render_matriz():
 
                     sv1, sv2, _ = st.columns([1.2, 1.8, 1])
                     with sv1:
-                        save_now = form_submit_button(
-                            "💾 Salvar alterações",
-                            key=f"save_{kb}",
-                            help="Valida e prepara as alterações feitas no grid deste setor antes da confirmação final.",
-                            disabled=not can_edit,
-                        )
+                        if can_edit:
+                            save_now = form_submit_button(
+                                "💾 Salvar alterações",
+                                key=f"save_{kb}",
+                                help="Valida e prepara as alterações feitas no grid deste setor antes da confirmação final.",
+                            )
+                        else:
+                            st.button(
+                                "💾 Salvar alterações",
+                                key=f"save_{kb}_disabled",
+                                disabled=True,
+                                use_container_width=True,
+                                help="Somente administradores e supervisores podem editar a matriz.",
+                            )
+                            save_now = False
                     with sv2:
                         st.caption(
                             "Marque/desmarque etapas acima e clique em Salvar." if can_edit else "Somente administradores e supervisores podem editar a matriz.")
