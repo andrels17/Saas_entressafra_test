@@ -193,12 +193,12 @@ def __render_selection_context(
 
 def _inject_css():
     st.markdown("""<style>
-.enterprise-sticky{position:sticky;top:0;z-index:999;padding:12px 12px 10px 12px;
+.enterprise-sticky{position:sticky;top:0;z-index:999;padding:10px 12px 8px 12px;
 margin:0 0 12px 0;border-radius:18px;background:linear-gradient(180deg, rgba(18,18,18,.92), rgba(10,18,14,.88));
 backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.08);
-box-shadow:0 10px 28px rgba(0,0,0,.35);}
-.enterprise-title{font-size:1.1rem;font-weight:700;letter-spacing:.2px;margin:0}
-.enterprise-sub{color:rgba(255,255,255,.68);font-size:.85rem;margin-top:2px}
+box-shadow:0 8px 22px rgba(0,0,0,.28);}
+.enterprise-title{font-size:1.02rem;font-weight:700;letter-spacing:.15px;margin:0}
+.enterprise-sub{color:rgba(255,255,255,.66);font-size:.80rem;margin-top:2px}
 .enterprise-chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .enterprise-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;
 border-radius:999px;border:1px solid rgba(255,255,255,.10);
@@ -296,6 +296,7 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 .mtz-priority-panel{padding:12px 14px;border-radius:18px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);margin:6px 0 14px 0;box-shadow:0 8px 20px rgba(0,0,0,.16)}
 .mtz-priority-item{padding:8px 10px;border-radius:12px;margin:6px 0;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}
 .mtz-kpi-panel{border-radius:16px;padding:10px 12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03)}
+.header-action-row{margin-top:2px}
 </style>""", unsafe_allow_html=True)
 
 
@@ -1351,34 +1352,53 @@ def render_matriz():
             st.session_state["matriz_grupo_id"] = grupos[0]["id"]
 
         hph = st.empty()
-
         # Header sticky inicial (tela de selecao)
         with hph.container():
             st.markdown(
                 '<div class="enterprise-sticky">',
                 unsafe_allow_html=True)
-            c1, c2, c3, c4 = st.columns(
-                [2.7, 1.1, 1.7, 1.5], vertical_alignment="bottom")
-            with c1:
+
+            top_l, top_r = st.columns([2.15, 1.85], vertical_alignment="bottom")
+            with top_l:
                 st.markdown(
                     '<div class="enterprise-title">Matriz Operacional</div>',
                     unsafe_allow_html=True)
                 st.markdown(
-                    '<div class="enterprise-sub">Etapas D/R/M · Setores · Evolucao semanal · Tempos</div>',
+                    '<div class="enterprise-sub">Etapas D/R/M · Setores · Evolução semanal · Tempos</div>',
                     unsafe_allow_html=True)
-            with c2:
-                _clear_dept, _show_all = _render_selection_context(
-                    is_group_view=st.session_state.get("matriz_view") == "group",
-                    grupos=grupos,
-                    grupo_id=st.session_state.get("matriz_grupo_id"),
-                    departamento_id=st.session_state.get("matriz_departamento_id"),
-                    is_admin=is_admin,
-                    dept_name_fn=lambda dep_id: _dept_name(
-                        tenant_id,
-                        dep_id,
-                        st.session_state.get("data_version", "0"),
-                    ),
-                )
+            with top_r:
+                st.markdown('<div class="header-action-row">', unsafe_allow_html=True)
+                a1, a2 = st.columns([1, 1], gap="small")
+                with a1:
+                    _clear_dept, _show_all = _render_selection_context(
+                        is_group_view=st.session_state.get("matriz_view") == "group",
+                        grupos=grupos,
+                        grupo_id=st.session_state.get("matriz_grupo_id"),
+                        departamento_id=st.session_state.get("matriz_departamento_id"),
+                        is_admin=is_admin,
+                        dept_name_fn=lambda dep_id: _dept_name(
+                            tenant_id,
+                            dep_id,
+                            st.session_state.get("data_version", "0"),
+                        ),
+                    )
+                with a2:
+                    if st.button(
+                        "Recarregar",
+                        key="mtz_reload",
+                        use_container_width=True,
+                    ):
+                        bump_data_version()
+                        clear_cached_functions(
+                            _load_payload,
+                            _group_kpis,
+                            _all_dept_names,
+                            _build_task_maps,
+                            _filter_obs_map_for_sector,
+                            _normalize_service_ids,
+                        )
+                        st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
                 if _clear_dept:
                     st.session_state["matriz_departamento_id"] = None
                     st.rerun()
@@ -1386,11 +1406,12 @@ def render_matriz():
                     st.session_state["matriz_grp_search"] = ""
                     st.session_state["matriz_departamento_id"] = None
                     st.rerun()
-            with c3:
+
+            row1_c1, row1_c2, row1_c3 = st.columns([2.1, 1.0, 0.9], vertical_alignment="bottom")
+            with row1_c1:
                 rev_opts = [
-                    (r.get("titulo") or f"Revisao {
-                        r['id']}",
-                        r["id"]) for r in revisoes if r.get("id")]
+                    (r.get("titulo") or f"Revisao {r['id']}", r["id"])
+                    for r in revisoes if r.get("id")]
                 if not rev_opts:
                     st.selectbox(
                         "Revisao",
@@ -1408,27 +1429,14 @@ def render_matriz():
                         index=rlbls.index(cur),
                         key="mtz_rev_pick")
                     st.session_state["matriz_revisao_id"] = rmap[pick]
-            with c4:
+            with row1_c2:
                 st.session_state["matriz_limit_eq"] = st.number_input(
                     "Limite eq.", min_value=20, max_value=500, value=int(
                         st.session_state["matriz_limit_eq"]), step=20, key="mtz_lim_pick")
+            with row1_c3:
                 st.session_state["matriz_show_legend"] = st.toggle(
                     "Legenda", value=bool(st.session_state["matriz_show_legend"]), key="mtz_leg")
-                if st.button(
-                    "Recarregar",
-                    key="mtz_reload",
-                    use_container_width=True,
-                ):
-                    bump_data_version()
-                    clear_cached_functions(
-                        _load_payload,
-                        _group_kpis,
-                        _all_dept_names,
-                        _build_task_maps,
-                        _filter_obs_map_for_sector,
-                        _normalize_service_ids,
-                    )
-                    st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
         # Tela de selecao — cards com barra de progresso (Melhoria 3)
