@@ -57,6 +57,19 @@ def get_user_scope(sb, tenant_id: str, user_id: str | None, role: str | None = N
         if rows:
             dept_ids = _uniq([r.get("departamento_id") for r in rows])
             grp_ids = _uniq([r.get("grupo_id") for r in rows])
+            if dept_ids and not grp_ids:
+                try:
+                    grp_rows = (
+                        sb.table("equip_grupos")
+                        .select("id,departamento_id")
+                        .eq("tenant_id", tenant_id)
+                        .in_("departamento_id", dept_ids)
+                        .execute()
+                        .data
+                    ) or []
+                    grp_ids = _uniq([r.get("id") for r in grp_rows])
+                except Exception:
+                    pass
             return dept_ids, grp_ids
     except Exception:
         pass
@@ -74,7 +87,22 @@ def get_user_scope(sb, tenant_id: str, user_id: str | None, role: str | None = N
         if rows:
             dept_id = rows[0].get("departamento_id")
             grp_id = rows[0].get("grupo_id")
-            return ([dept_id] if dept_id else []), ([grp_id] if grp_id else [])
+            dept_ids = [dept_id] if dept_id else []
+            grp_ids = [grp_id] if grp_id else []
+            if dept_ids and not grp_ids:
+                try:
+                    grp_rows = (
+                        sb.table("equip_grupos")
+                        .select("id,departamento_id")
+                        .eq("tenant_id", tenant_id)
+                        .in_("departamento_id", dept_ids)
+                        .execute()
+                        .data
+                    ) or []
+                    grp_ids = _uniq([r.get("id") for r in grp_rows])
+                except Exception:
+                    pass
+            return dept_ids, grp_ids
     except Exception:
         pass
 
