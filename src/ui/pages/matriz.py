@@ -217,20 +217,20 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
   flex-direction:column;
   align-items:center;
   justify-content:center;
-  height:110px;
-  font-size:14px;
-  line-height:1.22;
+  height:96px;
+  font-size:13px;
+  line-height:1.15;
   overflow:hidden;
   text-overflow:ellipsis;
 }
   display:flex;
   align-items:center;
   justify-content:center;
-  height:110px;
+  height:96px;
 
   width:100%;
   min-height:88px;
-  padding:10px 12px;
+  padding:8px 10px;
   border-radius:14px;
   border:1px solid rgba(84,255,165,.14);
   background:linear-gradient(180deg, rgba(10,72,48,.52), rgba(7,40,28,.88));
@@ -285,7 +285,7 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 
 
 
-def _truncate_card_title(value: str, limit: int = 22) -> str:
+def _truncate_card_title(value: str, limit: int = 18) -> str:
     value = (value or "").strip()
     if len(value) <= limit:
         return value
@@ -293,7 +293,7 @@ def _truncate_card_title(value: str, limit: int = 22) -> str:
 
 
 def _compact_card_summary(pct: int, eqc: int, svc: int) -> str:
-    return f"{int(pct)}% · {int(eqc)} eq · {int(svc)} svc"
+    return f"{int(eqc)} eq · {int(svc)} svc"
 
 
 def _pct_bar_html(pct: int, height: int = 6) -> str:
@@ -1469,12 +1469,12 @@ def render_matriz():
                             "🔴" if eqc > 0 else "⬜"))
                     _sub = f"{dept_lbl} · " if dept_lbl else ""
                     with cols[col_idx]:
-                        _title_card = _truncate_card_title(nome, 24)
+                        _title_card = _truncate_card_title(nome, 18)
                         _summary_card = _compact_card_summary(pct, eqc, svc)
                         if st.button(
                             f"{_icon} {_title_card}\n{_summary_card}",
                             key=f"mtz_card_{gid}",
-                            help=f"{nome} · {dept_lbl or 'Sem departamento'} · {pct}% · {eqc} equipamentos · {svc} serviços",
+                            help=f"{nome} · {dept_lbl or 'Sem departamento'} · {pct}% concluído · {eqc} equipamentos · {svc} serviços",
                         ):
                             st.session_state["matriz_grupo_id"] = gid
                             st.session_state["matriz_view"] = "group"
