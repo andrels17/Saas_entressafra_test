@@ -920,9 +920,18 @@ def render_matriz():
                             now_iso = datetime.now(timezone.utc).isoformat()
                             missing = 0
                             payload_updates = []
+                            _tm_keys_sample = list(task_map.keys())[:3]
 
                             for eid, sid, field, nv in pending_changes:
-                                t = task_map.get((str(eid), str(sid))) or {}
+                                t = (
+                                    task_map.get((str(eid), str(sid)))
+                                    or task_map.get((eid, sid))
+                                    or task_map.get((
+                                        int(eid) if str(eid).isdigit() else eid,
+                                        int(sid) if str(sid).isdigit() else sid,
+                                    ))
+                                    or {}
+                                )
                                 tid = t.get("id")
                                 if not tid:
                                     missing += 1
@@ -945,39 +954,41 @@ def render_matriz():
 
                                 payload_updates.append(upd)
 
-                            if not payload_updates:
-                                st.warning(
-                                    f"⚠️ Nenhuma tarefa encontrada para salvar "
-                                    f"({missing} não encontradas). Recarregue a página e tente novamente."
-                                )
-                                st.session_state.pop(_pending_changes_key, None)
-                                st.session_state.pop(_pending_preview_key, None)
-                            else:
-                              pb = st.empty()
-                              with st.spinner(f"Aplicando {len(payload_updates)} alterações em lote..."):
-                                ok, failed = _bulk_update_tasks(sb, payload_updates)
-
                             st.session_state.pop(_pending_changes_key, None)
                             st.session_state.pop(_pending_preview_key, None)
-                            pb.success(
-                                f"✅ {ok} etapas salvas"
-                                + (f"  ·  {failed} falharam" if failed else "")
-                                + (f"  ·  {missing} não encontradas" if missing else "")
-                            )
-                            st.toast("✅ Alterações aplicadas com sucesso!")
-                            bump_data_version()
-                            try:
-                                _load_payload.clear()
-                            except Exception:
-                                pass
-                            try:
-                                _group_kpis.clear()
-                            except Exception:
-                                pass
-                            try:
-                                nav.rerun_keep_menu()
-                            except Exception:
-                                st.rerun()
+
+                            if not payload_updates:
+                                _ex = pending_changes[0] if pending_changes else ("?", "?", "?", "?")
+                                st.error(
+                                    f"❌ Nenhuma tarefa encontrada para salvar "
+                                    f"({missing} não encontradas). "
+                                    f"Chave buscada: ({_ex[0]!r}, {_ex[1]!r}) | "
+                                    f"Exemplo de chaves no mapa: {_tm_keys_sample}"
+                                )
+                            else:
+                                pb = st.empty()
+                                with st.spinner(f"Aplicando {len(payload_updates)} alterações em lote..."):
+                                    ok, failed = _bulk_update_tasks(sb, payload_updates)
+                                pb.success(
+                                    f"✅ {ok} etapas salvas"
+                                    + (f"  ·  {failed} falharam" if failed else "")
+                                    + (f"  ·  {missing} não encontradas" if missing else "")
+                                )
+                                st.toast("✅ Alterações aplicadas com sucesso!")
+                                bump_data_version()
+                                try:
+                                    _load_payload.clear()
+                                except Exception:
+                                    pass
+                                try:
+                                    _group_kpis.clear()
+                                except Exception:
+                                    pass
+                                st.session_state.pop("_mtz_payload_cache", None)
+                                try:
+                                    nav.rerun_keep_menu()
+                                except Exception:
+                                    st.rerun()
 
                     exp_df = df_display.reset_index(drop=True).copy()
                     for c in [
