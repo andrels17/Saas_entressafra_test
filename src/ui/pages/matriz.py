@@ -211,7 +211,7 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 
 /* Cards de grupos — versão estável */
 .mtz-card-grid{margin-top:8px}
-.mtz-card-grid [data-testid="stButton"]{margin-bottom:2px}
+.mtz-card-grid [data-testid="stButton"]{margin-bottom:10px}
 .mtz-card-grid [data-testid="stButton"] button{
   display:flex;
   flex-direction:column;
@@ -294,6 +294,33 @@ def _truncate_card_title(value: str, limit: int = 18) -> str:
 
 def _compact_card_summary(pct: int, eqc: int, svc: int) -> str:
     return f"{int(eqc)} eq · {int(svc)} svc"
+
+
+def _truncate_card_subtitle(value: str, limit: int = 18) -> str:
+    value = (value or "").strip()
+    if not value:
+        return "Sem departamento"
+    if len(value) <= limit:
+        return value
+    return value[: max(limit - 1, 1)].rstrip() + "…"
+
+
+def _card_status_meta(pct: int, eqc: int, svc: int) -> tuple[str, str]:
+    if eqc == 0 or svc == 0:
+        return "⬜ Sem dados", "sem-dados"
+    if pct < 50:
+        return "🔴 Crítico", "critico"
+    if pct < 80:
+        return "🟡 Atenção", "atencao"
+    return "🟢 Avançado", "avancado"
+
+
+def _build_group_card_label(nome: str, dept_lbl: str, pct: int, eqc: int, svc: int) -> str:
+    title = _truncate_card_title(nome, 20)
+    subtitle = _truncate_card_subtitle(dept_lbl, 18)
+    status_txt, _ = _card_status_meta(pct, eqc, svc)
+    metrics = f"{int(pct)}% · {int(eqc)} eq · {int(svc)} svc"
+    return f"{title}\n{subtitle}\n{metrics}\n{status_txt}  ↗ Abrir matriz"
 
 
 def _pct_bar_html(pct: int, height: int = 6) -> str:
@@ -1469,10 +1496,9 @@ def render_matriz():
                             "🔴" if eqc > 0 else "⬜"))
                     _sub = f"{dept_lbl} · " if dept_lbl else ""
                     with cols[col_idx]:
-                        _title_card = _truncate_card_title(nome, 18)
-                        _summary_card = _compact_card_summary(pct, eqc, svc)
+                        _card_label = _build_group_card_label(nome, dept_lbl, pct, eqc, svc)
                         if st.button(
-                            f"{_icon} {_title_card}\n{_summary_card}",
+                            _card_label,
                             key=f"mtz_card_{gid}",
                             help=f"{nome} · {dept_lbl or 'Sem departamento'} · {pct}% concluído · {eqc} equipamentos · {svc} serviços",
                         ):
