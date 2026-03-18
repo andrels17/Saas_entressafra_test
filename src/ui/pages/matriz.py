@@ -277,7 +277,33 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
   background:rgba(229,231,235,.08);
   border-color:rgba(229,231,235,.16);
 }
-.mtz-select-card [data-testid="stButton"] button{
+.mtz-select-card .mtz-toolbar-actions [data-testid="stButton"] button{
+  min-height:36px;
+  padding:0 12px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.10);
+  background:rgba(255,255,255,.03);
+  color:rgba(255,255,255,.92);
+  box-shadow:none;
+  font-weight:600;
+  font-size:.92rem;
+}
+.mtz-toolbar-actions [data-testid="stButton"] button:hover{
+  border-color:rgba(255,255,255,.18);
+  background:rgba(255,255,255,.06);
+  transform:none;
+  box-shadow:none;
+}
+.mtz-toolbar-actions .mtz-btn-primary [data-testid="stButton"] button{
+  background:rgba(16,185,129,.10);
+  border-color:rgba(16,185,129,.22);
+}
+.mtz-toolbar-actions .mtz-btn-primary [data-testid="stButton"] button:hover{
+  background:rgba(16,185,129,.16);
+  border-color:rgba(16,185,129,.30);
+}
+
+[data-testid="stButton"] button{
   width:100%;
   border-radius:12px;
   min-height:40px;
@@ -1395,6 +1421,7 @@ def render_matriz():
                             _normalize_service_ids,
                         )
                         st.rerun()
+                    st.markdown('</div>', unsafe_allow_html=True)
                 if _clear_dept:
                     st.session_state["matriz_departamento_id"] = None
                     st.rerun()
@@ -1443,7 +1470,7 @@ def render_matriz():
             with row2_c3:
                 st.session_state["matriz_show_legend"] = st.toggle(
                     "Legenda", value=bool(st.session_state["matriz_show_legend"]), key="mtz_leg")
-            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('</div></div>', unsafe_allow_html=True)
 
         # Tela de selecao — cards com barra de progresso (Melhoria 3)
         if st.session_state.get("matriz_view") != "group":
