@@ -213,15 +213,15 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 .mtz-card-grid{margin-top:8px}
 .mtz-card-grid [data-testid="stButton"]{margin-bottom:10px}
 .mtz-card-grid{margin-top:10px}
-.mtz-card-grid .mtz-card-wrap{position:relative;margin-bottom:12px}
+.mtz-card-grid .mtz-card-wrap{position:relative;margin-bottom:12px;padding:2px;border-radius:20px;background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.01));}
 .mtz-card-grid .mtz-group-card{
   min-height:136px;
   padding:14px 16px;
   border-radius:18px;
-  border:1px solid rgba(84,255,165,.16);
-  background:linear-gradient(180deg, rgba(9,70,47,.72), rgba(6,34,24,.96));
+  border:1px solid rgba(110,255,180,.20);
+  background:linear-gradient(180deg, rgba(10,68,48,.88), rgba(7,35,26,.98));
   color:rgba(255,255,255,.97);
-  box-shadow:0 10px 22px rgba(0,0,0,.20), inset 0 1px 0 rgba(255,255,255,.04);
+  box-shadow:0 10px 22px rgba(0,0,0,.20), inset 0 0 0 1px rgba(255,255,255,.03), inset 0 1px 0 rgba(255,255,255,.05);
   transition:transform .14s ease, border-color .14s ease, box-shadow .14s ease, background .14s ease;
   display:flex;
   flex-direction:column;
@@ -265,6 +265,7 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
   align-items:center;
   justify-content:space-between;
   gap:10px;
+  margin-top:8px;
 }
 .mtz-card-grid .mtz-group-card__status{
   font-size:.78rem;
@@ -275,6 +276,7 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
   font-size:.78rem;
   font-weight:700;
   color:rgba(167,243,208,.95);
+  opacity:.95;
 }
 .mtz-card-grid .mtz-card-hit [data-testid="stButton"] button{
   position:absolute;
@@ -360,7 +362,7 @@ def _build_group_card_html(nome: str, dept_lbl: str, pct: int, eqc: int, svc: in
         <div class="mtz-group-card__metrics">{metrics}</div>
         <div class="mtz-group-card__footer">
             <span class="mtz-group-card__status">{status_txt}</span>
-            <span class="mtz-group-card__cta">Abrir matriz ↗</span>
+            <span class="mtz-group-card__cta">↗ Abrir</span>
         </div>
     </div>
     """
