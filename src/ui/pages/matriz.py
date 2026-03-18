@@ -213,86 +213,75 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 .mtz-card-grid{margin-top:8px}
 .mtz-card-grid [data-testid="stButton"]{margin-bottom:10px}
 .mtz-card-grid{margin-top:10px}
-.mtz-card-grid .mtz-card-wrap{position:relative;margin-bottom:12px;padding:2px;border-radius:20px;background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.01));}
-.mtz-card-grid .mtz-group-card{
-  min-height:136px;
-  padding:14px 16px;
+.mtz-select-card{
   border-radius:18px;
-  border:1px solid rgba(110,255,180,.20);
-  background:linear-gradient(180deg, rgba(10,68,48,.88), rgba(7,35,26,.98));
-  color:rgba(255,255,255,.97);
-  box-shadow:0 10px 22px rgba(0,0,0,.20), inset 0 0 0 1px rgba(255,255,255,.03), inset 0 1px 0 rgba(255,255,255,.05);
-  transition:transform .14s ease, border-color .14s ease, box-shadow .14s ease, background .14s ease;
-  display:flex;
-  flex-direction:column;
-  justify-content:space-between;
+  padding:4px 4px 2px 4px;
+  background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
 }
-.mtz-card-grid .mtz-group-card:hover{
-  transform:translateY(-2px);
-  border-color:rgba(110,255,180,.30);
-  background:linear-gradient(180deg, rgba(12,86,58,.78), rgba(8,42,29,.98));
-  box-shadow:0 14px 28px rgba(0,0,0,.24);
+.mtz-select-card.high{
+  box-shadow:0 0 0 1px rgba(239,68,68,.28) inset;
 }
-.mtz-card-grid .mtz-group-card.sem-dados{border-color:rgba(229,231,235,.20)}
-.mtz-card-grid .mtz-group-card.critico{border-color:rgba(239,68,68,.35)}
-.mtz-card-grid .mtz-group-card.atencao{border-color:rgba(245,158,11,.30)}
-.mtz-card-grid .mtz-group-card.avancado{border-color:rgba(34,197,94,.28)}
-.mtz-card-grid .mtz-group-card__title{
+.mtz-select-card.medium{
+  box-shadow:0 0 0 1px rgba(245,158,11,.24) inset;
+}
+.mtz-select-card.low{
+  box-shadow:0 0 0 1px rgba(34,197,94,.20) inset;
+}
+.mtz-select-card.neutral{
+  box-shadow:0 0 0 1px rgba(229,231,235,.14) inset;
+}
+.mtz-select-card .mtz-card-title{
   font-size:1rem;
   font-weight:700;
   line-height:1.15;
-  margin-bottom:6px;
-  color:#ffffff;
+  color:#fff;
+  margin-bottom:4px;
 }
-.mtz-card-grid .mtz-group-card__subtitle{
-  font-size:.82rem;
+.mtz-select-card .mtz-card-subtitle{
+  font-size:.83rem;
+  line-height:1.1;
   color:rgba(255,255,255,.68);
   margin-bottom:10px;
-  line-height:1.1;
 }
-.mtz-card-grid .mtz-group-card__metrics{
-  font-size:.86rem;
+.mtz-select-card .mtz-card-metrics{
+  font-size:.88rem;
   font-weight:600;
-  color:rgba(255,255,255,.92);
-  margin-bottom:12px;
+  color:rgba(255,255,255,.94);
+  margin-bottom:10px;
 }
-.mtz-card-grid .mtz-group-card__metrics span{
-  color:rgba(255,255,255,.35);
-  padding:0 4px;
-}
-.mtz-card-grid .mtz-group-card__footer{
-  display:flex;
+.mtz-select-card .mtz-card-status{
+  display:inline-flex;
   align-items:center;
-  justify-content:space-between;
-  gap:10px;
-  margin-top:8px;
-}
-.mtz-card-grid .mtz-group-card__status{
+  gap:6px;
   font-size:.78rem;
   font-weight:700;
   color:rgba(255,255,255,.92);
+  padding:4px 8px;
+  border-radius:999px;
+  background:rgba(255,255,255,.05);
+  border:1px solid rgba(255,255,255,.08);
 }
-.mtz-card-grid .mtz-group-card__cta{
-  font-size:.78rem;
-  font-weight:700;
-  color:rgba(167,243,208,.95);
-  opacity:.95;
+.mtz-select-card .mtz-card-status.critico{
+  background:rgba(239,68,68,.12);
+  border-color:rgba(239,68,68,.28);
 }
-.mtz-card-grid .mtz-card-hit [data-testid="stButton"] button{
-  position:absolute;
-  inset:0;
+.mtz-select-card .mtz-card-status.atencao{
+  background:rgba(245,158,11,.12);
+  border-color:rgba(245,158,11,.26);
+}
+.mtz-select-card .mtz-card-status.avancado{
+  background:rgba(34,197,94,.12);
+  border-color:rgba(34,197,94,.24);
+}
+.mtz-select-card .mtz-card-status.sem-dados{
+  background:rgba(229,231,235,.08);
+  border-color:rgba(229,231,235,.16);
+}
+.mtz-select-card [data-testid="stButton"] button{
   width:100%;
-  height:100%;
-  opacity:0;
-  border:none;
-  background:transparent;
-  min-height:136px;
-  z-index:5;
-}
-.mtz-card-grid .mtz-card-hit [data-testid="stButton"]{
-  position:absolute;
-  inset:0;
-  margin:0;
+  border-radius:12px;
+  min-height:40px;
+  font-weight:700;
 }
 /* Painéis e inteligência */
 .mtz-risk-badges{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 8px 0}
@@ -348,6 +337,16 @@ def _build_group_card_label(nome: str, dept_lbl: str, pct: int, eqc: int, svc: i
     status_txt, _ = _card_status_meta(pct, eqc, svc)
     metrics = f"{int(pct)}%  •  {int(eqc)} eq  •  {int(svc)} svc"
     return f"{title}\n{subtitle}\n{metrics}\n{status_txt}   ↗ Abrir"
+
+
+def _card_status_badge(pct: int, eqc: int, svc: int) -> tuple[str, str]:
+    if eqc == 0 or svc == 0:
+        return "⬜ Sem dados", "sem-dados"
+    if pct < 50:
+        return "🔴 Crítico", "critico"
+    if pct < 80:
+        return "🟡 Atenção", "atencao"
+    return "🟢 Avançado", "avancado"
 
 
 def _build_group_card_html(nome: str, dept_lbl: str, pct: int, eqc: int, svc: int) -> str:
@@ -1542,21 +1541,41 @@ def render_matriz():
                             "🔴" if eqc > 0 else "⬜"))
                     _sub = f"{dept_lbl} · " if dept_lbl else ""
                     with cols[col_idx]:
-                        st.markdown('<div class="mtz-card-wrap">', unsafe_allow_html=True)
-                        st.markdown(
-                            _build_group_card_html(nome, dept_lbl, pct, eqc, svc),
-                            unsafe_allow_html=True,
+                        _status_txt, _status_cls = _card_status_badge(pct, eqc, svc)
+                        _ring_cls = (
+                            "high" if _status_cls == "critico"
+                            else "medium" if _status_cls == "atencao"
+                            else "low" if _status_cls == "avancado"
+                            else "neutral"
                         )
-                        st.markdown('<div class="mtz-card-hit">', unsafe_allow_html=True)
-                        if st.button(
-                            "Abrir",
-                            key=f"mtz_card_{gid}",
-                            help=f"{nome} · {dept_lbl or 'Sem departamento'} · {pct}% concluído · {eqc} equipamentos · {svc} serviços",
-                        ):
-                            st.session_state["matriz_grupo_id"] = gid
-                            st.session_state["matriz_view"] = "group"
-                            st.rerun()
-                        st.markdown('</div></div>', unsafe_allow_html=True)
+                        with st.container(border=True):
+                            st.markdown(f'<div class="mtz-select-card {_ring_cls}">', unsafe_allow_html=True)
+                            st.markdown(
+                                f'<div class="mtz-card-title">{_truncate_card_title(nome, 22)}</div>',
+                                unsafe_allow_html=True,
+                            )
+                            st.markdown(
+                                f'<div class="mtz-card-subtitle">{_truncate_card_subtitle(dept_lbl, 20)}</div>',
+                                unsafe_allow_html=True,
+                            )
+                            st.markdown(
+                                f'<div class="mtz-card-metrics">{pct}% · {eqc} eq · {svc} svc</div>',
+                                unsafe_allow_html=True,
+                            )
+                            st.markdown(
+                                f'<div class="mtz-card-status {_status_cls}">{_status_txt}</div>',
+                                unsafe_allow_html=True,
+                            )
+                            if st.button(
+                                "Abrir",
+                                key=f"mtz_card_{gid}",
+                                use_container_width=True,
+                                help=f"{nome} · {dept_lbl or 'Sem departamento'} · {pct}% concluído · {eqc} equipamentos · {svc} serviços",
+                            ):
+                                st.session_state["matriz_grupo_id"] = gid
+                                st.session_state["matriz_view"] = "group"
+                                st.rerun()
+                            st.markdown('</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
             return
 
