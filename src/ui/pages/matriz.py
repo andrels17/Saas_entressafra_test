@@ -211,7 +211,7 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 
 /* Cards de grupos — versão estável */
 .mtz-card-grid{margin-top:8px}
-.mtz-card-grid [data-testid="stButton"]{margin-bottom:8px}
+.mtz-card-grid [data-testid="stButton"]{margin-bottom:2px}
 .mtz-card-grid [data-testid="stButton"] button{
   width:100%;
   min-height:88px;
@@ -233,9 +233,9 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
   box-shadow:0 10px 20px rgba(0,0,0,.22);
 }
 .mtz-card-grid .mtz-pct-outer{
-  margin:4px 14px 18px 14px;
+  margin:-6px 14px 12px 14px;
   height:8px !important;
-  border-radius:999px;
+  border-radius:0 0 999px 999px;
   background:rgba(255,255,255,.07);
   overflow:hidden;
   border:1px solid rgba(255,255,255,.05);
@@ -272,11 +272,11 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 def _pct_bar_html(pct: int, height: int = 6) -> str:
     color = _risk_color(pct)
     w = max(0, min(100, pct))
+    h = max(height, 8)
     return (
-        f'<div class="mtz-pct-outer" style="height:{max(height, 8)}px">'
-        f'<div class="mtz-pct-inner" style="width:{w}%;background:{color};height:{max(height, 8)}px;transition:width .25s ease"></div>'
+        f'<div class="mtz-pct-outer" style="height:{h}px">'
+        f'<div class="mtz-pct-inner" style="width:{w}%;background:{color};height:{h}px;transition:width .25s ease"></div>'
         f'</div>'
-        f'<div class="mtz-pct-caption">{w}% concluído</div>'
     )
 
 
