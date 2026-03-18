@@ -213,6 +213,19 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 .mtz-card-grid{margin-top:8px}
 .mtz-card-grid [data-testid="stButton"]{margin-bottom:2px}
 .mtz-card-grid [data-testid="stButton"] button{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  height:110px;
+  font-size:14px;
+  line-height:1.3;
+}
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  height:110px;
+
   width:100%;
   min-height:88px;
   padding:12px 14px;
