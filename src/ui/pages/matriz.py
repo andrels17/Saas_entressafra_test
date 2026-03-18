@@ -1387,48 +1387,42 @@ def render_matriz():
 
         # Toolbar compacta inicial (tela de seleção)
         with hph.container():
-            st.markdown('<div class="enterprise-sticky mtz-toolbar-inline">', unsafe_allow_html=True)
-            top_l, top_r = st.columns([1.45, 1.55], vertical_alignment="center")
+            st.markdown('<div class="enterprise-sticky">', unsafe_allow_html=True)
+            top_l, top_r = st.columns([1.8, 1.2], vertical_alignment="center")
             with top_l:
                 st.markdown('<div class="enterprise-title">Matriz Operacional</div>', unsafe_allow_html=True)
                 st.markdown('<div class="enterprise-sub">Filtros, revisão e acesso rápido aos grupos</div>', unsafe_allow_html=True)
             with top_r:
-                a1, a2, a3 = st.columns([1, 1, 1], gap="small")
-                with a1:
-                    _clear_dept, _show_all = _render_selection_context(
-                        is_group_view=st.session_state.get("matriz_view") == "group",
-                        grupos=grupos,
-                        grupo_id=st.session_state.get("matriz_grupo_id"),
-                        departamento_id=st.session_state.get("matriz_departamento_id"),
-                        is_admin=is_admin,
-                        dept_name_fn=lambda dep_id: _dept_name(
-                            tenant_id,
-                            dep_id,
-                            st.session_state.get("data_version", "0"),
-                        ),
-                    )
-                with a2:
-                    pass
-                with a3:
-                    if st.button("Recarregar", key="mtz_reload", use_container_width=True):
-                        bump_data_version()
-                        clear_cached_functions(
-                            _load_payload,
-                            _group_kpis,
-                            _all_dept_names,
-                            _build_task_maps,
-                            _filter_obs_map_for_sector,
-                            _normalize_service_ids,
-                        )
-                        st.rerun()
+                st.markdown('<div class="mtz-header-actions">', unsafe_allow_html=True)
+                b1, b2, b3 = st.columns([1, 1, 1], gap="small")
+                with b1:
+                    _clear_dept = st.button("Limpar depto", key="mtz_clear_dept", use_container_width=True)
+                with b2:
+                    _show_all = st.button("Ver todos", key="mtz_show_all", use_container_width=True)
+                with b3:
+                    st.markdown('<div class="mtz-btn-primary">', unsafe_allow_html=True)
+                    _reload = st.button("Recarregar", key="mtz_reload", use_container_width=True)
                     st.markdown('</div>', unsafe_allow_html=True)
-                if _clear_dept:
-                    st.session_state["matriz_departamento_id"] = None
-                    st.rerun()
-                if _show_all:
-                    st.session_state["matriz_grp_search"] = ""
-                    st.session_state["matriz_departamento_id"] = None
-                    st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
+
+            if _clear_dept:
+                st.session_state["matriz_departamento_id"] = None
+                st.rerun()
+            if _show_all:
+                st.session_state["matriz_grp_search"] = ""
+                st.session_state["matriz_departamento_id"] = None
+                st.rerun()
+            if _reload:
+                bump_data_version()
+                clear_cached_functions(
+                    _load_payload,
+                    _group_kpis,
+                    _all_dept_names,
+                    _build_task_maps,
+                    _filter_obs_map_for_sector,
+                    _normalize_service_ids,
+                )
+                st.rerun()
 
             row1_c1, row1_c2, row1_c3 = st.columns([1.8, 1.2, 0.9], vertical_alignment="bottom")
             with row1_c1:
