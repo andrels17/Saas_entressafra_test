@@ -1442,181 +1442,190 @@ def render_matriz():
                             "equipamento_id", equip_sel).eq(
                             "servico_id", svc_sel).limit(1).execute().data) or []
                     task_ed = task_rows_ed[0] if task_rows_ed else None
+
+                    if not task_ed:
+                        st.warning("⚠️ Tarefa não encontrada para esta combinação.")
+                    else:
+                        st.divider()
+                        # Info da tarefa atual em destaque
+                        cur_d = bool(task_ed.get("etapa_d"))
+                        cur_r = bool(task_ed.get("etapa_r"))
+                        cur_m = bool(task_ed.get("etapa_m"))
+                        cur_pct = round(
+                            ((int(cur_d) + int(cur_r) + int(cur_m)) / 3) * 100)
+                        _ed_color = _risk_color(cur_pct)
     
-                if not task_ed:
-                    st.warning("⚠️ Tarefa não encontrada para esta combinação.")
-                else:
-                    st.divider()
-                    # Info da tarefa atual em destaque
-                    cur_d = bool(task_ed.get("etapa_d"))
-                    cur_r = bool(task_ed.get("etapa_r"))
-                    cur_m = bool(task_ed.get("etapa_m"))
-                    cur_pct = round(
-                        ((int(cur_d) + int(cur_r) + int(cur_m)) / 3) * 100)
-                    _ed_color = _risk_color(cur_pct)
-    
-                    def _badge(label, done):
-                        if done:
+                        def _badge(label, done):
+                            if done:
+                                return (f'<span style="padding:3px 10px;border-radius:999px;'
+                                        f'background:rgba(18,183,106,.2);color:#12B76A;font-size:.8rem">✓ {label}</span>')
                             return (f'<span style="padding:3px 10px;border-radius:999px;'
-                                    f'background:rgba(18,183,106,.2);color:#12B76A;font-size:.8rem">✓ {label}</span>')
-                        return (f'<span style="padding:3px 10px;border-radius:999px;'
-                                f'background:rgba(255,255,255,.06);color:rgba(255,255,255,.4);font-size:.8rem">✗ {label}</span>')
+                                    f'background:rgba(255,255,255,.06);color:rgba(255,255,255,.4);font-size:.8rem">✗ {label}</span>')
     
-                    badge_d = _badge("D", cur_d)
-                    badge_r = _badge("R", cur_r)
-                    badge_m = _badge("M", cur_m)
-                    _status_label = "Concluído" if cur_pct == 100 else (
-                        "Pendente" if cur_pct == 0 else "Em andamento")
+                        badge_d = _badge("D", cur_d)
+                        badge_r = _badge("R", cur_r)
+                        badge_m = _badge("M", cur_m)
+                        _status_label = "Concluído" if cur_pct == 100 else (
+                            "Pendente" if cur_pct == 0 else "Em andamento")
     
-                    info_col1, info_col2 = st.columns([2, 1])
-                    with info_col1:
-                        st.markdown(
-                            f'<div style="padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.1);'
-                            f'background:rgba(255,255,255,.04);margin-bottom:8px">'
-                            f'<div style="font-size:.8rem;color:rgba(255,255,255,.5);margin-bottom:4px">Estado atual</div>'
-                            f'<div style="display:flex;gap:12px;align-items:center">'
-                            f'<span style="font-size:.9rem">Frota <b>{esl}</b></span>'
-                            f'<span style="color:rgba(255,255,255,.4)">·</span>'
-                            f'<span style="font-size:.9rem">{setor_ed}</span>'
-                            f'<span style="color:rgba(255,255,255,.4)">·</span>'
-                            f'<span style="font-size:.9rem">{svc_name}</span>'
-                            f'</div>'
-                            f'<div style="margin-top:6px;display:flex;gap:6px">'
-                            f'{badge_d}{badge_r}{badge_m}'
-                            f'</div></div>',
-                            unsafe_allow_html=True)
-                    with info_col2:
-                        st.metric(
-                            "Progresso atual",
-                            f"{cur_pct}%",
-                            delta=_status_label)
+                        info_col1, info_col2 = st.columns([2, 1])
+                        with info_col1:
+                            st.markdown(
+                                f'<div style="padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.1);'
+                                f'background:rgba(255,255,255,.04);margin-bottom:8px">'
+                                f'<div style="font-size:.8rem;color:rgba(255,255,255,.5);margin-bottom:4px">Estado atual</div>'
+                                f'<div style="display:flex;gap:12px;align-items:center">'
+                                f'<span style="font-size:.9rem">Frota <b>{esl}</b></span>'
+                                f'<span style="color:rgba(255,255,255,.4)">·</span>'
+                                f'<span style="font-size:.9rem">{setor_ed}</span>'
+                                f'<span style="color:rgba(255,255,255,.4)">·</span>'
+                                f'<span style="font-size:.9rem">{svc_name}</span>'
+                                f'</div>'
+                                f'<div style="margin-top:6px;display:flex;gap:6px">'
+                                f'{badge_d}{badge_r}{badge_m}'
+                                f'</div></div>',
+                                unsafe_allow_html=True)
+                        with info_col2:
+                            st.metric(
+                                "Progresso atual",
+                                f"{cur_pct}%",
+                                delta=_status_label)
     
-                    st.markdown("#### Atualizar etapas")
-                    cD, cR, cM, cSem = st.columns([1, 1, 1, 1])
-                    with cD:
-                        etapa_d = st.checkbox(
-                            "✅ Desmontou (D)", value=cur_d, key="mat_ed_d")
-                    with cR:
-                        etapa_r = st.checkbox(
-                            "✅ Revisou (R)", value=cur_r, key="mat_ed_r")
-                    with cM:
-                        etapa_m = st.checkbox(
-                            "✅ Montou (M)", value=cur_m, key="mat_ed_m")
-                    with cSem:
-                        _semana_ed_default = int(
-                            task_ed.get("semana") or _semana_sugerida)
-                        nsem = st.number_input("📅 Semana", min_value=0,
-                                               value=_semana_ed_default, step=1, key="mat_sem",
-                                               help=f"Semana sugerida automaticamente: {_semana_sugerida}. "
-                                               "Altere se precisar registrar em outra semana.")
+                        st.markdown("#### Atualizar etapas")
+                        cD, cR, cM, cSem = st.columns([1, 1, 1, 1])
+                        with cD:
+                            etapa_d = st.checkbox(
+                                "✅ Desmontou (D)", value=cur_d, key="mat_ed_d")
+                        with cR:
+                            etapa_r = st.checkbox(
+                                "✅ Revisou (R)", value=cur_r, key="mat_ed_r")
+                        with cM:
+                            etapa_m = st.checkbox(
+                                "✅ Montou (M)", value=cur_m, key="mat_ed_m")
+                        with cSem:
+                            _semana_ed_default = int(
+                                task_ed.get("semana") or _semana_sugerida)
+                            nsem = st.number_input("📅 Semana", min_value=0,
+                                                   value=_semana_ed_default, step=1, key="mat_sem",
+                                                   help=f"Semana sugerida automaticamente: {_semana_sugerida}. "
+                                                   "Altere se precisar registrar em outra semana.")
     
-                    st.caption(
-                        "Marcar D+R+M atualiza o status para Concluído automaticamente.")
+                        st.caption(
+                            "Marcar D+R+M atualiza o status para Concluído automaticamente.")
     
-                    SO = [
-                        ("pendente",
-                         "⏳ Pendente"),
-                        ("em_andamento",
-                         "🔄 Em andamento"),
-                        ("concluido",
-                         "✅ Concluído"),
-                        ("travado",
-                         "🚫 Travado"),
-                        ("nao_aplica",
-                         "➖ Não aplica")]
-                    kl = [k for k, _ in SO]
-                    ll = [v for _, v in SO]
-                    ist = kl.index(task_ed["status"]) if task_ed.get(
-                        "status") in kl else 0
-                    st_col1, st_col2 = st.columns([1, 2])
-                    with st_col1:
-                        nlbl = st.selectbox(
-                            "📌 Status", ll, index=ist, key="mat_st_sel")
-                        nst = kl[ll.index(nlbl)]
-                    with st_col2:
-                        nobs = st.text_area(
-                            "💬 Observação",
-                            value=task_ed.get("observacao") or "",
-                            key="mat_obs_ed",
-                            height=80,
-                            placeholder="Descreva impedimentos, peças aguardadas, ocorrências...")
+                        SO = [
+                            ("pendente",
+                             "⏳ Pendente"),
+                            ("em_andamento",
+                             "🔄 Em andamento"),
+                            ("concluido",
+                             "✅ Concluído"),
+                            ("travado",
+                             "🚫 Travado"),
+                            ("nao_aplica",
+                             "➖ Não aplica")]
+                        kl = [k for k, _ in SO]
+                        ll = [v for _, v in SO]
+                        ist = kl.index(task_ed["status"]) if task_ed.get(
+                            "status") in kl else 0
+                        st_col1, st_col2 = st.columns([1, 2])
+                        with st_col1:
+                            nlbl = st.selectbox(
+                                "📌 Status", ll, index=ist, key="mat_st_sel")
+                            nst = kl[ll.index(nlbl)]
+                        with st_col2:
+                            nobs = st.text_area(
+                                "💬 Observação",
+                                value=task_ed.get("observacao") or "",
+                                key="mat_obs_ed",
+                                height=80,
+                                placeholder="Descreva impedimentos, peças aguardadas, ocorrências...")
     
-                    sv_a, sv_b, _ = st.columns([1, 1, 2])
-                    with sv_a:
-                        save_quick = form_submit_button(
-                            "💾 Salvar",
-                            key="mat_save_ed",
-                            help="Salva as etapas, semana, status e observação da tarefa selecionada.",
-                        )
-                        if save_quick:
-                            new_status = nst
-                            if etapa_d and etapa_r and etapa_m:
-                                new_status = "concluido"
+                        sv_a, sv_b, _ = st.columns([1, 1, 2])
+                        with sv_a:
+                            save_quick = form_submit_button(
+                                "💾 Salvar",
+                                key="mat_save_ed",
+                                help="Salva as etapas, semana, status e observação da tarefa selecionada.",
+                            )
+                            if save_quick:
+                                new_status = nst
+                                if etapa_d and etapa_r and etapa_m:
+                                    new_status = "concluido"
     
-                            quick_errors = []
-                            if new_status == "travado" and not (nobs or "").strip():
-                                quick_errors.append("Preencha a observação antes de salvar uma tarefa como Travado.")
+                                quick_errors = []
+                                if new_status == "travado" and not (nobs or "").strip():
+                                    quick_errors.append("Preencha a observação antes de salvar uma tarefa como Travado.")
     
-                            if quick_errors:
-                                validation_summary(quick_errors, title="Corrija o formulário da tarefa")
-                            else:
-                                try:
-                                    sb.table("tarefas_servico").update({
-                                        "etapa_d": bool(etapa_d), "etapa_r": bool(etapa_r), "etapa_m": bool(etapa_m),
-                                        "status": new_status, "semana": int(nsem) if int(nsem) > 0 else None,
-                                        "observacao": nobs.strip() or None, "updated_by": current_user_id() or None
-                                    }).eq("id", task_ed["id"]).execute()
-                                    st.success(
-                                        f"✅ Frota {esl} · {svc_name} atualizado!")
-                                    bump_data_version()
+                                if quick_errors:
+                                    validation_summary(quick_errors, title="Corrija o formulário da tarefa")
+                                else:
                                     try:
-                                        nav.rerun_keep_menu()
-                                    except Exception:
-                                        st.rerun()
-                                except Exception as e:
-                                    st.error(f"Erro: {e}")
-                    with sv_b:
-                        # Limpar observação rapidamente
-                        if (task_ed.get("observacao") or "").strip():
-                            if st.button(
-                                "🗑️ Limpar obs.",
-                                use_container_width=True,
-                                key="mat_clear_obs",
-                            ):
-                                st.session_state["confirm_clear_obs_matriz"] = True
-                                st.rerun()
+                                        sb.table("tarefas_servico").update({
+                                            "etapa_d": bool(etapa_d), "etapa_r": bool(etapa_r), "etapa_m": bool(etapa_m),
+                                            "status": new_status, "semana": int(nsem) if int(nsem) > 0 else None,
+                                            "observacao": nobs.strip() or None, "updated_by": current_user_id() or None
+                                        }).eq("id", task_ed["id"]).execute()
+                                        st.success(
+                                            f"✅ Frota {esl} · {svc_name} atualizado!")
+                                        bump_data_version()
+                                        try:
+                                            _load_payload.clear()
+                                        except Exception:
+                                            pass
+                                        try:
+                                            _group_kpis.clear()
+                                        except Exception:
+                                            pass
+                                        st.session_state.pop("_mtz_payload_cache", None)
+                                        try:
+                                            nav.rerun_keep_menu()
+                                        except Exception:
+                                            st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Erro: {e}")
+                        with sv_b:
+                            # Limpar observação rapidamente
+                            if (task_ed.get("observacao") or "").strip():
+                                if st.button(
+                                    "🗑️ Limpar obs.",
+                                    use_container_width=True,
+                                    key="mat_clear_obs",
+                                ):
+                                    st.session_state["confirm_clear_obs_matriz"] = True
+                                    st.rerun()
     
-                            if confirmation_panel(
-                                state_key="confirm_clear_obs_matriz",
-                                title="Confirma limpar a observação desta tarefa?",
-                                body="A observação atual será removida imediatamente da tarefa selecionada.",
-                                confirm_label="Limpar observação",
-                            ):
-                                try:
-                                    sb.table("tarefas_servico").update(
-                                        {"observacao": None}).eq("id", task_ed["id"]).execute()
-                                    st.toast("Observação removida.")
-                                    bump_data_version()
+                                if confirmation_panel(
+                                    state_key="confirm_clear_obs_matriz",
+                                    title="Confirma limpar a observação desta tarefa?",
+                                    body="A observação atual será removida imediatamente da tarefa selecionada.",
+                                    confirm_label="Limpar observação",
+                                ):
                                     try:
-                                        nav.rerun_keep_menu()
-                                    except Exception:
-                                        st.rerun()
-                                except Exception as e:
-                                    st.error(f"Erro: {e}")
+                                        sb.table("tarefas_servico").update(
+                                            {"observacao": None}).eq("id", task_ed["id"]).execute()
+                                        st.toast("Observação removida.")
+                                        bump_data_version()
+                                        try:
+                                            nav.rerun_keep_menu()
+                                        except Exception:
+                                            st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Erro: {e}")
     
-                    # ── Histórico de comentários ─────────────────────────────────
-                    st.markdown("---")
-                    try:
-                        from src.ui.components.comentarios import render_comentarios
-                        _u_id = current_user_id() or ""
-                        _u_nome = st.session_state.get("sb_user_nome") or "Usuário"
-                        render_comentarios(
-                            tenant_id, task_ed["id"],
-                            user_nome=_u_nome,
-                            key_prefix=f"mtz_{equip_sel}_{svc_sel}_",
-                        )
-                    except Exception:
-                        pass  # comentários são opcionais — tabela pode não existir ainda
+                        # ── Histórico de comentários ─────────────────────────────────
+                        st.markdown("---")
+                        try:
+                            from src.ui.components.comentarios import render_comentarios
+                            _u_id = current_user_id() or ""
+                            _u_nome = st.session_state.get("sb_user_nome") or "Usuário"
+                            render_comentarios(
+                                tenant_id, task_ed["id"],
+                                user_nome=_u_nome,
+                                key_prefix=f"mtz_{equip_sel}_{svc_sel}_",
+                            )
+                        except Exception:
+                            pass  # comentários são opcionais — tabela pode não existir ainda
     
         # ── TAB: EXPORTAR ──
         with tab_exportar:
