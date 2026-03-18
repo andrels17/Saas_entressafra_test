@@ -918,11 +918,12 @@ def render_matriz():
 
                         if confirm_now:
                             now_iso = datetime.now(timezone.utc).isoformat()
-                            missing = 0
-                            payload_updates = []
-                            inserts = []
+                            ok = 0
+                            failed = 0
+                            upsert_rows = []
 
                             for eid, sid, field, nv in pending_changes:
+                                # Tenta achar tarefa existente no task_map
                                 t = (
                                     task_map.get((str(eid), str(sid)))
                                     or task_map.get((eid, sid))
@@ -930,61 +931,73 @@ def render_matriz():
                                 )
                                 tid = t.get("id")
 
-                                if not tid:
-                                    # Tarefa não existe no banco — criar antes de atualizar
-                                    inserts.append({
+                                if tid:
+                                    # Tarefa existe: monta update normal
+                                    upd = {
+                                        "id": tid,
+                                        field: bool(nv),
+                                        "updated_by": current_user_id() or None,
+                                    }
+                                    dtf = {
+                                        "etapa_d": "dt_etapa_d",
+                                        "etapa_r": "dt_etapa_r",
+                                        "etapa_m": "dt_etapa_m",
+                                    }.get(field)
+                                    if dtf:
+                                        upd[dtf] = now_iso if nv else None
+                                    if nv and not t.get("semana") and int(semana_lote) > 0:
+                                        upd["semana"] = int(semana_lote)
+                                    upsert_rows.append(upd)
+                                else:
+                                    # Tarefa não existe: cria com todos os campos NOT NULL explícitos
+                                    # Coleta todas as mudanças deste mesmo par (eid, sid) de uma vez
+                                    _pair_fields = {
+                                        f2: bool(nv2)
+                                        for eid2, sid2, f2, nv2 in pending_changes
+                                        if str(eid2) == str(eid) and str(sid2) == str(sid)
+                                    }
+                                    row = {
                                         "tenant_id": tenant_id,
                                         "revisao_id": revisao_id,
                                         "equipamento_id": eid,
                                         "servico_id": sid,
-                                        field: bool(nv),
-                                        "status": "em_andamento" if nv else "pendente",
-                                        "semana": int(semana_lote) if int(semana_lote) > 0 else None,
+                                        "etapa_d": bool(_pair_fields.get("etapa_d", False)),
+                                        "etapa_r": bool(_pair_fields.get("etapa_r", False)),
+                                        "etapa_m": bool(_pair_fields.get("etapa_m", False)),
+                                        "status": "pendente",
                                         "updated_by": current_user_id() or None,
-                                    })
-                                    continue
-
-                                upd = {
-                                    "id": tid,
-                                    field: bool(nv),
-                                    "updated_by": current_user_id() or None,
-                                }
-                                dtf = {
-                                    "etapa_d": "dt_etapa_d",
-                                    "etapa_r": "dt_etapa_r",
-                                    "etapa_m": "dt_etapa_m",
-                                }.get(field)
-                                if dtf:
-                                    upd[dtf] = now_iso if nv else None
-                                if nv and not t.get("semana") and int(semana_lote) > 0:
-                                    upd["semana"] = int(semana_lote)
-
-                                payload_updates.append(upd)
+                                    }
+                                    if int(semana_lote) > 0:
+                                        row["semana"] = int(semana_lote)
+                                    try:
+                                        sb.table("tarefas_servico").insert(row).execute()
+                                        ok += 1
+                                    except Exception as _ins_err:
+                                        # Tarefa já existe mas não estava no cache — atualiza por chave natural
+                                        try:
+                                            sb.table("tarefas_servico").update({
+                                                field: bool(nv),
+                                                "updated_by": current_user_id() or None,
+                                            }).eq("tenant_id", tenant_id).eq(
+                                                "revisao_id", revisao_id
+                                            ).eq("equipamento_id", eid).eq(
+                                                "servico_id", sid
+                                            ).execute()
+                                            ok += 1
+                                        except Exception as _upd_err:
+                                            st.warning(f"Falha ao salvar eq={eid} svc={sid}: {_upd_err}")
+                                            failed += 1
 
                             st.session_state.pop(_pending_changes_key, None)
                             st.session_state.pop(_pending_preview_key, None)
 
-                            ok = 0
-                            failed = 0
-
-                            # Inserir tarefas que ainda não existiam
-                            if inserts:
-                                try:
-                                    sb.table("tarefas_servico").insert(inserts).execute()
-                                    ok += len(inserts)
-                                except Exception as _ins_err:
-                                    st.error(f"Erro ao criar tarefas: {_ins_err}")
-                                    failed += len(inserts)
-
-                            # Atualizar tarefas existentes
-                            if payload_updates:
-                                _ok, _fail = _bulk_update_tasks(sb, payload_updates)
+                            # Aplica updates em lote para tarefas existentes
+                            if upsert_rows:
+                                _ok, _fail = _bulk_update_tasks(sb, upsert_rows)
                                 ok += _ok
                                 failed += _fail
 
-                            if ok == 0 and failed == 0:
-                                st.warning("Nenhuma alteração para aplicar.")
-                            else:
+                            if ok > 0 or failed == 0:
                                 st.success(
                                     f"✅ {ok} etapas salvas"
                                     + (f"  ·  {failed} falharam" if failed else "")
@@ -1004,6 +1017,8 @@ def render_matriz():
                                     nav.rerun_keep_menu()
                                 except Exception:
                                     st.rerun()
+                            else:
+                                st.error(f"❌ Todas as {failed} alterações falharam.")
 
                     exp_df = df_display.reset_index(drop=True).copy()
                     for c in [
