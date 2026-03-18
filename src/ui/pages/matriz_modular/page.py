@@ -68,6 +68,49 @@ except Exception:
             pct = 0.0
         return f"<div style=\"width:100%;height:{int(height)}px;background:rgba(255,255,255,.08);border-radius:999px;overflow:hidden;\"><div style=\"width:{pct:.1f}%;height:100%;background:linear-gradient(90deg,#22c55e,#eab308,#ef4444);\"></div></div>"
 
+
+
+def _collect_matrix_changes(df_display, edited, svc_bool, col_meta):
+    """Coleta mudanças do data editor de forma compatível com índices ocultos/RangeIndex."""
+    if edited is None:
+        return []
+
+    changes = []
+    source_ids = list(df_display.index)
+
+    def _row_value(row, col):
+        try:
+            return bool(row[col])
+        except Exception:
+            try:
+                return bool(getattr(row, col))
+            except Exception:
+                return False
+
+    try:
+        edited_rows = list(edited.iterrows())
+    except Exception:
+        edited_rows = []
+
+    if not edited_rows:
+        return []
+
+    for pos, (row_idx, row) in enumerate(edited_rows):
+        equip_id = row_idx if row_idx in df_display.index else None
+        if equip_id is None and pos < len(source_ids):
+            equip_id = source_ids[pos]
+        if equip_id is None or equip_id not in df_display.index:
+            continue
+
+        for col in svc_bool:
+            ov = bool(df_display.loc[equip_id, col])
+            nv = _row_value(row, col)
+            if ov != nv:
+                sid, field = col_meta[col]
+                changes.append((equip_id, sid, field, nv))
+
+    return changes
+
 def render_matriz():
     try:
         _inject_css()
@@ -824,16 +867,12 @@ def render_matriz():
                             st.warning(
                                 "Troque para o modo **Editar** para poder salvar alterações.")
                         else:
-                            changes = []
-                            for equip_id, row in edited.iterrows():
-                                if equip_id not in df_display.index:
-                                    continue
-                                for col in svc_bool:
-                                    ov = bool(df_display.loc[equip_id, col])
-                                    nv = bool(row[col])
-                                    if ov != nv:
-                                        sid, field = col_meta[col]
-                                        changes.append((equip_id, sid, field, nv))
+                            changes = _collect_matrix_changes(
+                                df_display=df_display,
+                                edited=edited,
+                                svc_bool=svc_bool,
+                                col_meta=col_meta,
+                            )
                             if not changes:
                                 st.session_state.pop(
                                     _pending_changes_key, None)
