@@ -623,7 +623,11 @@ def render_dashboard() -> None:
     if dep_scope_ids is not None:
         departamentos = [d for d in departamentos if d.get("id") in dep_scope_ids]
     if grp_scope_ids is not None:
-        grupos = [g for g in grupos if g.get("id") in grp_scope_ids]
+        scoped_grupos = [g for g in grupos if g.get("id") in grp_scope_ids]
+        if scoped_grupos or dep_scope_ids in (None, []):
+            grupos = scoped_grupos
+        else:
+            grupos = [g for g in grupos if g.get("departamento_id") in dep_scope_ids]
 
     dept_map = {d["id"]: d.get("nome", "—")
                 for d in departamentos if d.get("id")}
@@ -641,15 +645,19 @@ def render_dashboard() -> None:
         return
 
     base = apply_filters(base, dep_scope_ids, grp_scope_ids)
+    if base.empty and dep_scope_ids not in (None, []):
+        # fallback defensivo: quando o vínculo vier por departamento e a lista de grupos
+        # estiver desatualizada, mantém o filtro por departamento em vez de zerar o dashboard.
+        base = apply_filters(base=normalize_matriz_base(raw, eq_meta), departamento_ids=dep_scope_ids, grupo_ids=None)
 
     group_kpis_df = get_group_kpis(tenant_id, revisao_id, ver)
     if group_kpis_df is not None and not group_kpis_df.empty:
-        if grp_scope_ids is not None:
-            group_kpis_df = group_kpis_df[group_kpis_df["grupo_id"].isin(
-                grp_scope_ids)]
+        if grp_scope_ids not in (None, []):
+            scoped_group_kpis = group_kpis_df[group_kpis_df["grupo_id"].isin(grp_scope_ids)]
+            if not scoped_group_kpis.empty or dep_scope_ids in (None, []):
+                group_kpis_df = scoped_group_kpis
         if dep_scope_ids is not None:
-            group_kpis_df = group_kpis_df[group_kpis_df["grupo_id"].map(
-                gid_to_dept).isin(dep_scope_ids)]
+            group_kpis_df = group_kpis_df[group_kpis_df["grupo_id"].map(gid_to_dept).isin(dep_scope_ids)]
         dashboard_groups = group_kpis_df.copy()
         dashboard_groups["grupo"] = dashboard_groups["grupo_id"].map(
             gid_to_name).fillna("—")
