@@ -705,6 +705,24 @@ def render_dashboard() -> None:
             index=1,
             key="dash_filter_top"))
 
+    # Sem seleção manual, o dashboard deve usar automaticamente todo o escopo disponível.
+    all_visible_dept_ids = [str(d.get("id")) for d in departamentos if d.get("id")]
+    all_visible_group_ids = [str(g.get("id")) for g in grupos if g.get("id")]
+
+    effective_dept_ids = dept_selected_ids or all_visible_dept_ids
+    if group_selected_ids:
+        effective_group_ids = group_selected_ids
+    else:
+        if dept_selected_ids:
+            dept_set = {str(x) for x in dept_selected_ids}
+            effective_group_ids = [
+                str(g.get("id"))
+                for g in grupos
+                if g.get("id") and str(g.get("departamento_id")) in dept_set
+            ]
+        else:
+            effective_group_ids = all_visible_group_ids
+
     selection_summary(
         "Filtro aplicado",
         {
@@ -714,14 +732,14 @@ def render_dashboard() -> None:
         },
     )
 
-    base_filtered = apply_filters(base, dept_selected_ids, group_selected_ids)
+    base_filtered = apply_filters(base, effective_dept_ids, effective_group_ids)
     dashboard_groups_filtered = dashboard_groups.copy()
-    if dept_selected_ids and "departamento_id" in dashboard_groups_filtered.columns:
+    if effective_dept_ids and "departamento_id" in dashboard_groups_filtered.columns:
         dashboard_groups_filtered = dashboard_groups_filtered[dashboard_groups_filtered["departamento_id"].isin(
-            dept_selected_ids)]
-    if group_selected_ids and "grupo_id" in dashboard_groups_filtered.columns:
+            effective_dept_ids)]
+    if effective_group_ids and "grupo_id" in dashboard_groups_filtered.columns:
         dashboard_groups_filtered = dashboard_groups_filtered[dashboard_groups_filtered["grupo_id"].isin(
-            group_selected_ids)]
+            effective_group_ids)]
 
     if base_filtered.empty:
         notice_card(
