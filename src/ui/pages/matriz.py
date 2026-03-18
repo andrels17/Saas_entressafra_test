@@ -329,6 +329,70 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 .mtz-toolbar-inline [data-testid="stNumberInput"] input{min-height:40px}
 .mtz-toolbar-inline [data-testid="stTextInput"] input{min-height:40px}
 .mtz-toolbar-inline [data-testid="stToggle"]{padding-top:24px}
+
+/* Toolbar actions premium */
+.mtz-inline-actions{
+  border:1px solid rgba(255,255,255,.08);
+  background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.015));
+  border-radius:16px;
+  padding:8px;
+  box-shadow:0 10px 24px rgba(0,0,0,.18);
+}
+.mtz-inline-actions [data-testid="column"]{display:flex;align-items:stretch}
+.mtz-inline-actions [data-testid="stButton"]{height:100%}
+.mtz-inline-actions [data-testid="stButton"] > div{height:100%}
+.mtz-inline-actions [data-testid="stButton"] button{
+  min-height:46px;
+  border-radius:12px;
+  font-size:.92rem;
+  font-weight:700;
+  letter-spacing:.01em;
+  border:1px solid rgba(255,255,255,.10);
+  background:rgba(255,255,255,.035);
+  color:rgba(255,255,255,.94);
+  transition:all .18s ease;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+}
+.mtz-inline-actions [data-testid="stButton"] button:hover{
+  transform:translateY(-1px);
+  border-color:rgba(255,255,255,.18);
+  background:rgba(255,255,255,.06);
+  box-shadow:0 10px 18px rgba(0,0,0,.16);
+}
+.mtz-inline-actions [data-testid="stButton"] button:focus:not(:active){
+  border-color:rgba(52,211,153,.38);
+  box-shadow:0 0 0 1px rgba(52,211,153,.22), 0 10px 18px rgba(0,0,0,.16);
+}
+.mtz-btn-ghost [data-testid="stButton"] button{
+  background:rgba(255,255,255,.018);
+  color:rgba(255,255,255,.80);
+}
+.mtz-btn-ghost [data-testid="stButton"] button:hover{
+  background:rgba(255,255,255,.045);
+  color:rgba(255,255,255,.94);
+}
+.mtz-btn-neutral [data-testid="stButton"] button{
+  background:linear-gradient(180deg, rgba(16,185,129,.08), rgba(255,255,255,.03));
+  border-color:rgba(16,185,129,.16);
+}
+.mtz-btn-neutral [data-testid="stButton"] button:hover{
+  border-color:rgba(16,185,129,.26);
+  background:linear-gradient(180deg, rgba(16,185,129,.12), rgba(255,255,255,.05));
+}
+.mtz-btn-primary [data-testid="stButton"] button{
+  background:linear-gradient(180deg, rgba(16,185,129,.28), rgba(5,150,105,.22));
+  border-color:rgba(52,211,153,.34);
+  color:#ecfdf5;
+  box-shadow:0 8px 18px rgba(6,95,70,.22), inset 0 1px 0 rgba(255,255,255,.08);
+}
+.mtz-btn-primary [data-testid="stButton"] button:hover{
+  background:linear-gradient(180deg, rgba(16,185,129,.36), rgba(5,150,105,.28));
+  border-color:rgba(52,211,153,.48);
+  box-shadow:0 12px 22px rgba(6,95,70,.28), inset 0 1px 0 rgba(255,255,255,.10);
+}
+.mtz-btn-primary [data-testid="stButton"] button p,
+.mtz-btn-neutral [data-testid="stButton"] button p,
+.mtz-btn-ghost [data-testid="stButton"] button p{font-weight:700}
 </style>""", unsafe_allow_html=True)
 
 
@@ -1437,18 +1501,33 @@ def render_matriz():
                     "Legenda", value=bool(st.session_state["matriz_show_legend"]), key="mtz_leg")
             with row2_c4:
                 st.markdown('<div class="mtz-inline-actions">', unsafe_allow_html=True)
-                a1, a2, a3 = st.columns([1.1, 1.0, 1.1], gap="small")
+                a1, a2, a3 = st.columns([1.0, 1.0, 1.25], gap="small")
                 with a1:
-                    st.markdown('<div class="mtz-btn-secondary">', unsafe_allow_html=True)
-                    _clear_dept = st.button("Limpar", key="mtz_clear_dept", use_container_width=True)
+                    st.markdown('<div class="mtz-btn-ghost">', unsafe_allow_html=True)
+                    _clear_dept = st.button(
+                        "🧹 Limpar",
+                        key="mtz_clear_dept",
+                        use_container_width=True,
+                        help="Remove o departamento selecionado e mantém os demais filtros.",
+                    )
                     st.markdown('</div>', unsafe_allow_html=True)
                 with a2:
-                    st.markdown('<div class="mtz-btn-secondary">', unsafe_allow_html=True)
-                    _show_all = st.button("Todos", key="mtz_show_all", use_container_width=True)
+                    st.markdown('<div class="mtz-btn-neutral">', unsafe_allow_html=True)
+                    _show_all = st.button(
+                        "▦ Ver todos",
+                        key="mtz_show_all",
+                        use_container_width=True,
+                        help="Exibe todos os grupos novamente e limpa a busca atual.",
+                    )
                     st.markdown('</div>', unsafe_allow_html=True)
                 with a3:
                     st.markdown('<div class="mtz-btn-primary">', unsafe_allow_html=True)
-                    _reload = st.button("↻ Atualizar", key="mtz_reload", use_container_width=True)
+                    _reload = st.button(
+                        "↻ Atualizar dados",
+                        key="mtz_reload",
+                        use_container_width=True,
+                        help="Recarrega os dados da matriz e atualiza os indicadores.",
+                    )
                     st.markdown('</div>', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
 
