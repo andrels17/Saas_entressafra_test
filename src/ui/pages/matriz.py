@@ -1388,43 +1388,14 @@ def render_matriz():
         # Toolbar compacta inicial (tela de seleção)
         with hph.container():
             st.markdown('<div class="enterprise-sticky">', unsafe_allow_html=True)
-            top_l, top_r = st.columns([1.8, 1.2], vertical_alignment="center")
-            with top_l:
-                st.markdown('<div class="enterprise-title">Matriz Operacional</div>', unsafe_allow_html=True)
-                st.markdown('<div class="enterprise-sub">Filtros, revisão e acesso rápido aos grupos</div>', unsafe_allow_html=True)
-            with top_r:
-                st.markdown('<div class="mtz-header-actions">', unsafe_allow_html=True)
-                b1, b2, b3 = st.columns([1, 1, 1], gap="small")
-                with b1:
-                    _clear_dept = st.button("Limpar depto", key="mtz_clear_dept", use_container_width=True)
-                with b2:
-                    _show_all = st.button("Ver todos", key="mtz_show_all", use_container_width=True)
-                with b3:
-                    st.markdown('<div class="mtz-btn-primary">', unsafe_allow_html=True)
-                    _reload = st.button("Recarregar", key="mtz_reload", use_container_width=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('<div class="enterprise-title">Matriz Operacional</div>', unsafe_allow_html=True)
+            st.markdown('<div class="enterprise-sub">Filtros, revisão e acesso rápido aos grupos</div>', unsafe_allow_html=True)
 
-            if _clear_dept:
-                st.session_state["matriz_departamento_id"] = None
-                st.rerun()
-            if _show_all:
-                st.session_state["matriz_grp_search"] = ""
-                st.session_state["matriz_departamento_id"] = None
-                st.rerun()
-            if _reload:
-                bump_data_version()
-                clear_cached_functions(
-                    _load_payload,
-                    _group_kpis,
-                    _all_dept_names,
-                    _build_task_maps,
-                    _filter_obs_map_for_sector,
-                    _normalize_service_ids,
-                )
-                st.rerun()
+            _clear_dept = False
+            _show_all = False
+            _reload = False
 
-            row1_c1, row1_c2, row1_c3 = st.columns([1.8, 1.2, 0.9], vertical_alignment="bottom")
+            row1_c1, row1_c2, row1_c3, row1_c4 = st.columns([1.65, 1.1, 0.8, 1.15], vertical_alignment="bottom")
             with row1_c1:
                 st.session_state.setdefault("matriz_grp_search", "")
                 search = st.text_input(
@@ -1449,6 +1420,22 @@ def render_matriz():
                 st.session_state["matriz_limit_eq"] = st.number_input(
                     "Limite eq.", min_value=20, max_value=500, value=int(
                         st.session_state["matriz_limit_eq"]), step=20, key="mtz_lim_pick")
+            with row1_c4:
+                st.markdown('<div class="mtz-inline-actions">', unsafe_allow_html=True)
+                a1, a2, a3 = st.columns([1, 1, 1], gap="small")
+                with a1:
+                    st.markdown('<div class="mtz-btn-secondary">', unsafe_allow_html=True)
+                    _clear_dept = st.button("Limpar depto", key="mtz_clear_dept", use_container_width=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                with a2:
+                    st.markdown('<div class="mtz-btn-secondary">', unsafe_allow_html=True)
+                    _show_all = st.button("Ver todos", key="mtz_show_all", use_container_width=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                with a3:
+                    st.markdown('<div class="mtz-btn-primary">', unsafe_allow_html=True)
+                    _reload = st.button("Recarregar", key="mtz_reload", use_container_width=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
 
             row2_c1, row2_c2, row2_c3 = st.columns([1.1, 1.1, 0.8], vertical_alignment="bottom")
             with row2_c1:
@@ -1464,6 +1451,26 @@ def render_matriz():
             with row2_c3:
                 st.session_state["matriz_show_legend"] = st.toggle(
                     "Legenda", value=bool(st.session_state["matriz_show_legend"]), key="mtz_leg")
+
+            if _clear_dept:
+                st.session_state["matriz_departamento_id"] = None
+                st.rerun()
+            if _show_all:
+                st.session_state["matriz_grp_search"] = ""
+                st.session_state["matriz_departamento_id"] = None
+                st.rerun()
+            if _reload:
+                bump_data_version()
+                clear_cached_functions(
+                    _load_payload,
+                    _group_kpis,
+                    _all_dept_names,
+                    _build_task_maps,
+                    _filter_obs_map_for_sector,
+                    _normalize_service_ids,
+                )
+                st.rerun()
+
             st.markdown('</div></div>', unsafe_allow_html=True)
 
         # Tela de selecao — cards com barra de progresso (Melhoria 3)
