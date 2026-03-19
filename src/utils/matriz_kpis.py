@@ -18,7 +18,7 @@ from src.utils.supabase_helpers import sb_for_user
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def group_kpis(tenant_id: str, revisao_id: str,
+def group_kpis(tenant_id: str, revisao_id: str, _token: str = "",
                ver: str = "0") -> dict[str, dict]:
     """Return dict keyed by grupo_id with eq_count, svc_count, pct.
 
