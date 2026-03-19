@@ -798,6 +798,9 @@ def render_admin_revisoes():
                             "equipamento_id": e["id"],
                             "servico_id": sid,
                             "status": "pendente",
+                            "etapa_d": False,
+                            "etapa_r": False,
+                            "etapa_m": False,
                         })
 
             st.info(f"Tarefas novas a inserir: **{len(payload):,}**")
@@ -855,6 +858,9 @@ def render_admin_revisoes():
                             "equipamento_id": e["id"],
                             "servico_id": sid,
                             "status": "pendente",
+                            "etapa_d": False,
+                            "etapa_r": False,
+                            "etapa_m": False,
                         })
 
                     for sid in (cur_servicos - desired):
