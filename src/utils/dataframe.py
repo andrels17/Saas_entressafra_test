@@ -81,9 +81,15 @@ def safe_numeric(series: pd.Series, fill: float = 0.0) -> pd.Series:
 
 def pct_series(done: pd.Series, total: pd.Series,
                scale: float = 100.0) -> pd.Series:
-    """Calcula percentual vetorizado, evitando divisão por zero."""
-    total_safe = total.clip(lower=1)
-    return (done / total_safe * scale).round(1).clip(0, scale)
+    """Calcula percentual vetorizado, evitando divisão por zero.
+
+    Retorna 0.0 onde total=0 (em vez de done/1, que produziria percentual
+    incorreto quando done > 0 e total = 0).
+    """
+    has_total = total > 0
+    result = pd.Series(0.0, index=done.index)
+    result[has_total] = (done[has_total] / total[has_total] * scale).round(1)
+    return result.clip(0, scale)
 
 
 def compact_top(
