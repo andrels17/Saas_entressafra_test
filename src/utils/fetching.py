@@ -37,9 +37,12 @@ def fetch_all(
 
     while True:
         end = start + page_size - 1
-        q = sb.table(table).select(select)
-        q = filters_fn(q)
-        batch = (q.range(start, end).execute().data) or []
+        try:
+            q = sb.table(table).select(select)
+            q = filters_fn(q)
+            batch = (q.range(start, end).execute().data) or []
+        except Exception:
+            break  # retorna o que foi coletado até agora
         rows.extend(batch)
 
         if len(batch) < page_size or len(rows) >= max_rows:
