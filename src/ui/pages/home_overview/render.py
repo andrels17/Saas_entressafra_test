@@ -427,7 +427,7 @@ def render_home_overview() -> None:
 
     # ── Carrega KPIs ────────────────────────────────────────────────────────
     with st.spinner("", show_time=False):
-        kdf = get_group_kpis(tenant_id, rev["id"], ver, prefer_mv=True)
+        kdf = get_group_kpis(tenant_id, rev["id"], ver, prefer_mv=True, _token=st.session_state.get("sb_access_token", ""))
 
     kdf = enforce_home_schema(kdf)
     if kdf is None or (hasattr(kdf, "empty") and kdf.empty):

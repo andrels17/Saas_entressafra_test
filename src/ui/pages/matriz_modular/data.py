@@ -64,7 +64,7 @@ def _group_kpis(_tid, _rev_id, _ver="0"):
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _load_payload(_tid, _gid, _rid, _lim, _ver="0"):
+def _load_payload(_tid, _gid, _rid, _lim, _ver="0", _token=""):
     _sb = sb_for_user()
     _eqs = (
         _sb.table("equipamentos").select("id,frota,modelo").eq(
@@ -140,7 +140,7 @@ def _fetch_template(sb, tenant_id, grupo_id):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _dept_name(_tid, _did, _ver="0"):
+def _dept_name(_tid, _did, _ver="0", _token=""):
     if not _did:
         return ""
     try:
@@ -154,7 +154,7 @@ def _dept_name(_tid, _did, _ver="0"):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _all_dept_names(_tid, _ver="0"):
+def _all_dept_names(_tid, _ver="0", _token=""):
     try:
         rows = sb_for_user().table("departamentos").select(
             "id,nome").eq("tenant_id", _tid).execute().data or []

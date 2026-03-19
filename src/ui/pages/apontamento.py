@@ -204,7 +204,7 @@ def _fragment_seletores(
         _now_brt().date(), data_inicio, semanas_total)
 
     # Grupo
-    grupos = _load_grupos(tenant_id, ver)
+    grupos = _load_grupos(tenant_id, ver, st.session_state.get("sb_access_token", ""))
     if not grupos:
         empty_state(
             icon="⊕",

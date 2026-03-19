@@ -1072,7 +1072,7 @@ def render_notificacoes() -> None:
 
     # ── Carregamento ─────────────────────────────────────────────────────────
     with st.spinner("", show_time=False):
-        raw = _load_data(tenant_id, revisao_id, ver)
+        raw = _load_data(tenant_id, revisao_id, ver, st.session_state.get("sb_access_token", ""))
 
     tarefas = raw["tarefas"]
     revisao = raw["revisao"]

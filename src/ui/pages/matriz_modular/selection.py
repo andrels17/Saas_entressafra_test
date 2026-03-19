@@ -19,10 +19,10 @@ def render_selection_screen(*, tenant_id, revisao_id, grupos, search, status_fil
     if st.session_state.get("matriz_view") == "group":
         return False
 
-    kpis = _group_kpis(tenant_id, revisao_id, data_version) if revisao_id else {}
+    kpis = _group_kpis(tenant_id, revisao_id, data_version, st.session_state.get("sb_access_token", "")) if revisao_id else {}
     q = (search or "").strip().lower()
     dep_id = st.session_state.get("matriz_departamento_id")
-    dept_names = _all_dept_names(tenant_id, data_version)
+    dept_names = _all_dept_names(tenant_id, data_version, st.session_state.get("sb_access_token", ""))
 
     show_groups = [
         g for g in grupos

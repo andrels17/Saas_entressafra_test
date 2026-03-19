@@ -24,7 +24,7 @@ def with_fallback(action, default, *, context: str):
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def load_data(_tid: str, _rev_id: str, _ver: str = "0") -> dict:
+def load_data(_tid: str, _rev_id: str, _ver: str = "0", _token: str = "") -> dict:
     """Carrega todos os dados necessários para os alertas em uma só query."""
     sb = sb_for_user()
     tarefas = with_fallback(

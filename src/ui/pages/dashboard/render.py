@@ -55,7 +55,7 @@ def _load_revisao(sb, tenant_id: str) -> dict | None:
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def _load_base_cached(_tenant_id: str, _revisao_id: str,
+def _load_base_cached(_tenant_id: str, _revisao_id: str, _token: str = "",
                       _ver: str = "0") -> tuple[list, list]:
     sb = sb_for_user()
     try:
@@ -76,7 +76,7 @@ def _load_base(sb,
                revisao_id: str) -> tuple[pd.DataFrame,
                                          pd.DataFrame]:
     ver = str(st.session_state.get("data_version", "0"))
-    raw_list, eq_list = _load_base_cached(tenant_id, revisao_id, ver)
+    raw_list, eq_list = _load_base_cached(tenant_id, revisao_id, ver, st.session_state.get("sb_access_token", ""))
     raw = pd.DataFrame(raw_list)
     eq_meta = pd.DataFrame(eq_list)
     if not eq_meta.empty and "id" in eq_meta.columns:
@@ -85,7 +85,7 @@ def _load_base(sb,
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _load_departamentos(_tenant_id: str, _ver: str = "0") -> list[dict]:
+def _load_departamentos(_tenant_id: str, _ver: str = "0", _token: str = "") -> list[dict]:
     sb = sb_for_user()
     try:
         return (
@@ -102,7 +102,7 @@ def _load_departamentos(_tenant_id: str, _ver: str = "0") -> list[dict]:
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _load_grupos(_tenant_id: str, _ver: str = "0") -> list[dict]:
+def _load_grupos(_tenant_id: str, _ver: str = "0", _token: str = "") -> list[dict]:
     sb = sb_for_user()
     try:
         return (
@@ -617,8 +617,8 @@ def render_dashboard() -> None:
     ver = str(st.session_state.get("data_version", "0"))
     with st.spinner("", show_time=False):
         raw, eq_meta = _load_base(sb, tenant_id, revisao_id)
-        departamentos = _load_departamentos(tenant_id, ver)
-        grupos = _load_grupos(tenant_id, ver)
+        departamentos = _load_departamentos(tenant_id, ver, st.session_state.get("sb_access_token", ""))
+        grupos = _load_grupos(tenant_id, ver, st.session_state.get("sb_access_token", ""))
 
     if dep_scope_ids in (None, [] ) and grp_scope_ids not in (None, []):
         dep_scope_ids = sorted({str(g.get("departamento_id")) for g in grupos if g.get("id") in set(grp_scope_ids) and g.get("departamento_id")})
@@ -659,7 +659,7 @@ def render_dashboard() -> None:
         # estiver desatualizada, mantém o filtro por departamento em vez de zerar o dashboard.
         base = apply_filters(base=normalize_matriz_base(raw, eq_meta), departamento_ids=dep_scope_ids, grupo_ids=None)
 
-    group_kpis_df = get_group_kpis(tenant_id, revisao_id, ver)
+    group_kpis_df = get_group_kpis(tenant_id, revisao_id, ver, _token=st.session_state.get("sb_access_token", ""))
     if group_kpis_df is not None and not group_kpis_df.empty:
         if grp_scope_ids not in (None, []):
             scoped_group_kpis = group_kpis_df[group_kpis_df["grupo_id"].isin(grp_scope_ids)]

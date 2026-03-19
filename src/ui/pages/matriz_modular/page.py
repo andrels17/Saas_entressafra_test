@@ -343,9 +343,9 @@ def render_matriz():
                     grupo_id,
                     revisao_id,
                     limit_eq,
-                    st.session_state.get(
-                        "data_version",
-                        "0")),
+                    st.session_state.get("data_version", "0"),
+                    st.session_state.get("sb_access_token", ""),
+                ),
             }
             st.session_state["_mtz_payload_cache"] = _payload_cache
         payload = _payload_cache["data"]
