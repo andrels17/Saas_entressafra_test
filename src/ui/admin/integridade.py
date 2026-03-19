@@ -30,7 +30,7 @@ def _safe_select_equipamentos(sb, tenant_id: str):
                     .execute().data) or []
 
 
-def render_admin_integridade():
+def render_admin_integridade() -> None:
     _ph("🧪", "Integridade",
         "Diagnóstico e correção rápida de inconsistências (órfãos, vazios e campos faltando).")
 

@@ -27,7 +27,7 @@ def safe_count_rows(client, table_name: str, tenant_id: str, revisao_id: str) ->
                 .select("id")
                 .eq("tenant_id", tenant_id)
                 .eq("revisao_id", revisao_id)
-                .limit(10000)
+                .limit(10_000)  # usar fetch_all() se exceder
                 .execute()
                 .data
             ) or []
@@ -69,7 +69,7 @@ def safe_distinct_task_summary(tenant_id: str, revisao_id: str) -> dict:
             .select("equipamento_id,status")
             .eq("tenant_id", tenant_id)
             .eq("revisao_id", revisao_id)
-            .limit(20000)
+            .limit(20_000)  # usar fetch_all() se exceder
             .execute()
             .data
         ) or []

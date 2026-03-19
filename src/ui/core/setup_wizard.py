@@ -25,7 +25,7 @@ def _count(sb, table, tenant_id, extra_filters=None):
         return 0
 
 
-def render_setup_wizard():
+def render_setup_wizard() -> None:
     _ph("⚙", "Configuração Guiada",
         "Checklist completo para deixar o sistema pronto rapidamente. Apenas Admin.")
 

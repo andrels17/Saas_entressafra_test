@@ -7,7 +7,7 @@ from src.utils import nav
 from src.ui.core.styles import page_header as _ph
 
 
-def render_admin_templates():
+def render_admin_templates() -> None:
     _ph("◪", "Templates",
         "Defina quais serviços se aplicam a cada grupo. Controla as colunas da Matriz.")
 
@@ -109,6 +109,7 @@ def render_admin_templates():
     cov_df = cov_rows
 
     covered = sum(1 for r in cov_rows if r["Coberto"])
+    # ── Seção: ações em massa ────────────────────────────────────────────────
     with st.expander("Cobertura + ações em massa (recomendado)", expanded=False):
         c1, c2, c3 = st.columns(3)
         c1.metric("Grupos ativos", f"{len(grupos)}")
@@ -244,6 +245,7 @@ def render_admin_templates():
     for sv in servicos:
         by_setor[sv["setor_id"]].append(sv)
 
+    # ── Seção: seleção de serviços por setor ────────────────────────────────
     st.markdown("### Seleção de serviços")
     st.caption(
         "Dica: expanda um setor e marque os serviços aplicáveis. Você pode salvar quantas vezes quiser.")

@@ -9,7 +9,7 @@ from src.ui.admin.equipamentos_helpers import (
 )
 
 
-def render_audit_tab(sb, tenant_id: str):
+def render_audit_tab(sb, tenant_id: str) -> None:
     st.markdown("### Histórico de mudanças (Audit)")
     st.caption(
         "Registra ações como importação, edição, mover, desativar, restaurar e apagar.")

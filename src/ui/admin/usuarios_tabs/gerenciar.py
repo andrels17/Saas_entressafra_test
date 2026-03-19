@@ -12,6 +12,9 @@ ROLE_ICONS = {
     "viewer": "⚪"}
 
 
+
+log = logging.getLogger("saas.admin.gerenciar")
+
 def _load_tenant_users(svc, tenant_id: str) -> list[dict]:
     try:
         rows = (
@@ -202,7 +205,7 @@ def _get_user_label(u: dict) -> str:
     return f"{icon} {nome} ({role})"
 
 
-def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn):
+def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn) -> None:
     users = _load_tenant_users(svc, tenant_id)
     if not users:
         st.info("Nenhum usuário no tenant.")

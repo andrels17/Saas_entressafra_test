@@ -94,7 +94,7 @@ def _call_rpc_with_fallback(sb, tenant_id: str, dt_ini: date, dt_fim: date,
     return None
 
 
-def render_tab_relatorio(sb, tenant_id: str, branding: Branding):
+def render_tab_relatorio(sb, tenant_id: str, branding: Branding) -> None:
     """Renderiza o painel de geração do PDF executivo."""
     st.subheader("📄 Relatório Executivo PDF")
 

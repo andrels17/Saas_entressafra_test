@@ -7,7 +7,7 @@ from src.ui.core.error_messages import show_error
 from src.utils import nav
 
 
-def render_login():
+def render_login() -> None:
     st.markdown(
         """
         <style>

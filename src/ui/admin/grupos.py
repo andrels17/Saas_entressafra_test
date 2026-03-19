@@ -376,7 +376,7 @@ def _render_limpeza_total_grupos(sb, tenant_id: str):
             safe_rerun()
 
 
-def render_admin_grupos():
+def render_admin_grupos() -> None:
     _ph("⊕", "Grupos de Equipamentos",
         "Crie e gerencie grupos. Mova equipamentos em lote para cada grupo.")
     inject_enterprise_css()

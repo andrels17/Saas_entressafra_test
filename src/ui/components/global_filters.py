@@ -2,7 +2,7 @@
 import streamlit as st
 
 
-def render_global_filters(revisoes, departamentos, grupos, equipamentos):
+def render_global_filters(revisoes, departamentos, grupos, equipamentos) -> None:
     """Barra de filtros global"""
 
     with st.container():

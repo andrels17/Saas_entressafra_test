@@ -17,7 +17,7 @@ def render_tab_permissoes(
         tenant_id: str,
         users: list[dict],
         rerun_fn,
-        safe_json_fn):
+        safe_json_fn) -> None:
     st.markdown("### Permissões por setor")
     st.caption(
         "Defina quais setores o usuário pode **ver** ou **editar**. Admin/gestor normalmente não precisam disso.")

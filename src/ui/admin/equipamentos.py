@@ -10,7 +10,7 @@ from src.ui.admin.equipamentos_tabs.organize import render_organize_tab
 from src.ui.admin.equipamentos_tabs.audit import render_audit_tab
 
 
-def render_admin_equipamentos():
+def render_admin_equipamentos() -> None:
     _ph("◫", "Equipamentos",
         "Importe frotas e organize em grupos. Remanejamento em lote suportado.")
     inject_design_system_css()

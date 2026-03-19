@@ -5,7 +5,7 @@ from src.auth.audit import audit_user_created
 ROLES = ["admin", "supervisor", "gestor", "executor", "viewer"]
 
 
-def render_tab_criar(svc, tenant_id: str, rerun_fn, safe_json_fn):
+def render_tab_criar(svc, tenant_id: str, rerun_fn, safe_json_fn) -> None:
     st.markdown("### Criar usuário manualmente")
     st.caption(
         "O admin define a senha (sem link de convite). O usuário já entra ativo no tenant.")

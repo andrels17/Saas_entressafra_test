@@ -165,7 +165,7 @@ def _safe_count_rows(
                 .select("id")
                 .eq("tenant_id", tenant_id)
                 .eq("revisao_id", revisao_id)
-                .limit(10000)
+                .limit(10_000)  # usar fetch_all() se exceder
                 .execute()
                 .data
             ) or []
@@ -216,7 +216,7 @@ def _safe_distinct_task_summary(tenant_id: str, revisao_id: str) -> dict:
             .select("equipamento_id,status")
             .eq("tenant_id", tenant_id)
             .eq("revisao_id", revisao_id)
-            .limit(20000)
+            .limit(20_000)  # usar fetch_all() se exceder
             .execute()
             .data
         ) or []
@@ -253,7 +253,7 @@ def _bulk_delete_test_revisions(
     return total_rev, total_tarefas, total_hist
 
 
-def render_admin_revisoes():
+def render_admin_revisoes() -> None:
     _ph("◑", "Revisões", "Gerencie revisões de entressafra e gere/sincronize a Matriz com base nos Templates de Grupo.")
 
     role = current_role()

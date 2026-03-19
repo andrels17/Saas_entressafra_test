@@ -4,7 +4,7 @@ from src.utils.supabase_helpers import current_user_id
 from src.utils import nav
 
 
-def render_setup_tenant():
+def render_setup_tenant() -> None:
     st.markdown("## Configuração inicial")
     st.caption("Crie sua primeira empresa (tenant) e vincule seu usuário como Admin. Isso é feito via Service Role (server-side).")
 

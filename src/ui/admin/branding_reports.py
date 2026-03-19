@@ -8,7 +8,7 @@ from src.ui.admin.branding_tabs.branding_panel import render_tab_branding
 from src.ui.admin.branding_tabs.relatorio_panel import render_tab_relatorio
 
 
-def render_admin_branding_reports():
+def render_admin_branding_reports() -> None:
     page_header(
         "Branding & Relatórios",
         "White-label do tenant e Relatório Executivo PDF (foco em evolução e % concluído)",

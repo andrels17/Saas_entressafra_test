@@ -7,7 +7,7 @@ from src.ui.admin.equipamentos_tabs.organize_sections.mover import render_mover_
 from src.ui.admin.equipamentos_tabs.organize_sections.limpeza import render_limpeza_section
 
 
-def render_organize_tab(sb, tenant_id: str):
+def render_organize_tab(sb, tenant_id: str) -> None:
     st.caption("Inclui edição inline, lixeira (restaurar) e auditoria.")
 
     subt1, subt2, subt3, subt4 = st.tabs([

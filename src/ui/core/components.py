@@ -31,7 +31,7 @@ def render_empty_state(title: str,
                        cta_label: str = "",
                        cta_key: str = "",
                        on_cta: Optional[Callable[[],
-                                                 Any]] = None):
+                                                 Any]] = None) -> None:
     st.markdown(
         f'''
         <div class="ea-empty">
@@ -73,7 +73,7 @@ def chip(status: str) -> None:
     render_status_chip(status)
 
 
-def render_tarefa_history(sb, tenant_id: str, tarefa_id: str, limit: int = 8):
+def render_tarefa_history(sb, tenant_id: str, tarefa_id: str, limit: int = 8) -> None:
     """Mostra histórico (auditoria) enxuto dentro do painel lateral.
 
     Mantém UX rápida: sem joins pesados, sem dataframe.

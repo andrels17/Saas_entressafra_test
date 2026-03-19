@@ -25,7 +25,7 @@ def _safe_json(e):
         return {"message": str(e)}
 
 
-def render_admin_usuarios():
+def render_admin_usuarios() -> None:
     _ph("⊹", "Usuários",
         "Crie e gerencie usuários (sem convite), roles e permissões por setor.")
 

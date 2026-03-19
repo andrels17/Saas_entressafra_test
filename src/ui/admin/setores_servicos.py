@@ -5,7 +5,7 @@ from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_r
 from src.ui.core.styles import page_header as _ph
 
 
-def render_admin_setores_servicos():
+def render_admin_setores_servicos() -> None:
     _ph("◧", "Setores & Serviços",
         "Cadastre setores e serviços — alimentam os Templates e a Matriz.")
 

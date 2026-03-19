@@ -19,7 +19,7 @@ from src.ui.admin.equipamentos_helpers import (
 )
 
 
-def render_import_csv_tab(sb, tenant_id: str):
+def render_import_csv_tab(sb, tenant_id: str) -> None:
     admin_block(
         "Importar equipamentos",
         "Envie o CSV e mapeie colunas com segurança.")

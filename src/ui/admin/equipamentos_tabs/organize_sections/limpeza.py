@@ -11,7 +11,7 @@ from src.ui.admin.equipamentos_helpers import (
 )
 
 
-def render_limpeza_section(sb, tenant_id: str):
+def render_limpeza_section(sb, tenant_id: str) -> None:
     st.markdown("### Limpeza da tabela de equipamentos")
     st.caption(
         "Ações de manutenção para **excluir em massa**. "
@@ -395,30 +395,18 @@ def render_limpeza_section(sb, tenant_id: str):
             dup_ids = [x for x in dup_ids if x]
             if not canon_id or not dup_ids:
                 continue
-            # Reaponta equipamentos.departamento_id
-            for did in dup_ids:
-                try:
-                    sb.table("equipamentos").update({"departamento_id": canon_id}).eq(
-                        "tenant_id", tenant_id).eq("departamento_id", did).execute()
-                except APIError as e:
-                    st.error(
-                        f"Falha ao reapontar equipamentos.departamento_id (de {did} -> {canon_id}): {
-                            getattr(
-                                e,
-                                'message',
-                                str(e))}")
-                    try:
-                        st.json(e.json())
-                    except Exception as _e:
-                        import logging; logging.getLogger("saas").warning("limpeza.py: %s", _e)
-                except Exception as e:
-                    st.error(
-                        f"Falha ao reapontar equipamentos.departamento_id (de {did} -> {canon_id}): {e}")
+            # Reaponta equipamentos.departamento_id (batch .in_() em vez de N+1)
+            try:
+                sb.table("equipamentos").update({"departamento_id": canon_id}).eq(
+                    "tenant_id", tenant_id).in_("departamento_id", dup_ids).execute()
+            except APIError as e:
+                st.error(f"Falha ao reapontar equipamentos.departamento_id -> {canon_id}: {getattr(e, 'message', str(e))}")
+            except Exception as e:
+                st.error(f"Falha ao reapontar equipamentos.departamento_id -> {canon_id}: {e}")
             # Reaponta equip_grupos.departamento_id (se existir)
             try:
-                for did in dup_ids:
-                    sb.table("equip_grupos").update({"departamento_id": canon_id}).eq(
-                        "tenant_id", tenant_id).eq("departamento_id", did).execute()
+                sb.table("equip_grupos").update({"departamento_id": canon_id}).eq(
+                    "tenant_id", tenant_id).in_("departamento_id", dup_ids).execute()
             except APIError:
                 # Se não existir coluna/perm, não para o fluxo; só registra
                 # para debug.
@@ -446,24 +434,14 @@ def render_limpeza_section(sb, tenant_id: str):
             dup_ids = [x for x in dup_ids if x]
             if not canon_id or not dup_ids:
                 continue
-            for gid in dup_ids:
-                try:
-                    sb.table("equipamentos").update({"grupo_id": canon_id}).eq(
-                        "tenant_id", tenant_id).eq("grupo_id", gid).execute()
-                except APIError as e:
-                    st.error(
-                        f"Falha ao reapontar equipamentos.grupo_id (de {gid} -> {canon_id}): {
-                            getattr(
-                                e,
-                                'message',
-                                str(e))}")
-                    try:
-                        st.json(e.json())
-                    except Exception as _e:
-                        import logging; logging.getLogger("saas").warning("limpeza.py: %s", _e)
-                except Exception as e:
-                    st.error(
-                        f"Falha ao reapontar equipamentos.grupo_id (de {gid} -> {canon_id}): {e}")
+            # Batch update em vez de N+1 loop
+            try:
+                sb.table("equipamentos").update({"grupo_id": canon_id}).eq(
+                    "tenant_id", tenant_id).in_("grupo_id", dup_ids).execute()
+            except APIError as e:
+                st.error(f"Falha ao reapontar equipamentos.grupo_id -> {canon_id}: {getattr(e, 'message', str(e))}")
+            except Exception as e:
+                st.error(f"Falha ao reapontar equipamentos.grupo_id -> {canon_id}: {e}")
             hard_deleted, failed = _try_hard_delete("equip_grupos", dup_ids)
             grp_report["hard_deleted"] += hard_deleted
             if failed:

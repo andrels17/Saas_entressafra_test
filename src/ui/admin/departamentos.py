@@ -329,7 +329,7 @@ def _render_limpeza_total_departamentos(sb, tenant_id: str):
             safe_rerun()
 
 
-def render_admin_departamentos():
+def render_admin_departamentos() -> None:
     _ph("◩", "Departamentos",
         "Nível acima de grupos — organize seus grupos por departamento (ex.: Tratores, Caminhões, Colhedoras).")
     inject_enterprise_css()
