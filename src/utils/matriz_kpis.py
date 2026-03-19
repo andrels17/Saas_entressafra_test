@@ -15,6 +15,15 @@ from collections import defaultdict
 import streamlit as st
 
 from src.utils.supabase_helpers import sb_for_user
+from src.db.supabase_client import get_supabase_anon
+
+
+def _sb_from_token(token: str = ""):
+    sb = get_supabase_anon()
+    if token:
+        sb.postgrest.auth(token)
+    return sb
+
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -25,7 +34,7 @@ def group_kpis(tenant_id: str, revisao_id: str, _token: str = "",
     Matches the logic used by the Matriz selection cards.
     """
 
-    sb = sb_for_user()
+    sb = _sb_from_token(_token)
 
     # grupos ativos
     grupos = (

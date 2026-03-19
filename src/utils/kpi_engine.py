@@ -25,6 +25,7 @@ from src.domain.kpi import (
 from src.repositories.base import safe_select
 from src.utils.observability import log_error
 from src.utils.supabase_helpers import sb_for_user
+from src.db.supabase_client import get_supabase_anon
 
 log = logging.getLogger("saas.kpi_engine")
 
@@ -37,13 +38,26 @@ _TTL_ACTIVE = 60    # revisão em andamento: dados mudam frequentemente
 _TTL_CONCLUDED = 3600  # revisão concluída: dados estáticos, cache longo
 
 
-def _get_revisao_status(tenant_id: str, revisao_id: str) -> str:
+
+def _sb_from_token(token: str = ""):
+    """Constrói cliente Supabase a partir de um token explícito.
+    
+    Usado dentro de funções @st.cache_data onde acessar st.session_state
+    diretamente causa TypeError em versões recentes do Streamlit.
+    """
+    sb = get_supabase_anon()
+    if token:
+        sb.postgrest.auth(token)
+    return sb
+
+
+def _get_revisao_status(tenant_id: str, revisao_id: str, _token: str = "") -> str:
     """Busca o status da revisão para decidir o TTL de cache.
 
     Retorna "ativa" (default seguro) ou "concluida".
     """
     try:
-        sb = sb_for_user()
+        sb = _sb_from_token(_token)
         rows = safe_select(
             sb, "revisoes", "status",
             tenant_id__eq=tenant_id, id__eq=revisao_id,
@@ -78,8 +92,8 @@ def invalidate_kpi_cache() -> None:
     log.info("Cache de KPIs invalidado (ver=%d)", ver + 1)
 
 
-def _fetch_mv(tenant_id: str, revisao_id: str) -> list[dict]:
-    sb = sb_for_user()
+def _fetch_mv(tenant_id: str, revisao_id: str, _token: str = "") -> list[dict]:
+    sb = _sb_from_token(_token)
     return safe_select(
         sb, "mv_revisao_grupo_kpis", "grupo_id,eq_count,svc_count,done_steps",
         tenant_id__eq=tenant_id, revisao_id__eq=revisao_id,
@@ -122,8 +136,8 @@ def _mv_to_df(mv_rows: list[dict]) -> pd.DataFrame:
                "done_steps", "expected_steps", "backlog_steps", "pct"]]
 
 
-def _compute_from_raw(tenant_id: str, revisao_id: str) -> pd.DataFrame:
-    sb = sb_for_user()
+def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.DataFrame:
+    sb = _sb_from_token(_token)
     EMPTY = pd.DataFrame(
         columns=[
             "grupo_id",
@@ -211,6 +225,7 @@ def get_group_kpis(
     revisao_id: str,
     ver: str = "0",
     prefer_mv: bool = True,
+    _token: str = "",
 ) -> pd.DataFrame:
     """Single source of truth para KPIs de grupo (Matriz & Home).
 
@@ -222,19 +237,17 @@ def get_group_kpis(
     """
     # Ajusta TTL dinamicamente consultando o status da revisão.
     # Revisões concluídas não mudam — podemos cache por muito mais tempo.
-    status = _get_revisao_status(tenant_id, revisao_id)
+    status = _get_revisao_status(tenant_id, revisao_id, _token)
     if status in ("concluida", "encerrada", "fechada"):
-        # Re-registra com TTL longo (st.cache_data não suporta TTL dinâmico,
-        # então usamos a estratégia de ver + chave única por status)
-        return _get_group_kpis_concluded(tenant_id, revisao_id, ver)
+        return _get_group_kpis_concluded(tenant_id, revisao_id, ver, _token)
 
     if prefer_mv:
-        mv_rows = _fetch_mv(tenant_id, revisao_id)
+        mv_rows = _fetch_mv(tenant_id, revisao_id, _token)
         if mv_rows:
             df = _mv_to_df(mv_rows)
             if not df.empty:
                 return df
-    return _compute_from_raw(tenant_id, revisao_id)
+    return _compute_from_raw(tenant_id, revisao_id, _token)
 
 
 @st.cache_data(ttl=_TTL_CONCLUDED, show_spinner=False)
@@ -242,9 +255,10 @@ def _get_group_kpis_concluded(
     tenant_id: str,
     revisao_id: str,
     ver: str = "0",
+    _token: str = "",
 ) -> pd.DataFrame:
     """Variante com TTL longo (1h) para revisões concluídas."""
-    mv_rows = _fetch_mv(tenant_id, revisao_id)
+    mv_rows = _fetch_mv(tenant_id, revisao_id, _token)
     if mv_rows:
         df = _mv_to_df(mv_rows)
         if not df.empty:
