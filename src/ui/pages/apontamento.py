@@ -126,13 +126,17 @@ def _df_to_changes(
     for idx in range(len(edited)):
         e = edited.iloc[idx]
         o = original.iloc[idx]
+        # Normaliza observação: None e "" são equivalentes
+        obs_e = (e["Observação"] or "").strip()
+        obs_o = (o["Observação"] or "").strip()
+
         # Detecta qualquer mudança nas colunas editáveis
         changed = (
             bool(e["D"]) != bool(o["D"])
             or bool(e["R"]) != bool(o["R"])
             or bool(e["M"]) != bool(o["M"])
             or int(e["Semana"]) != int(o["Semana"])
-            or str(e["Observação"]) != str(o["Observação"])
+            or obs_e != obs_o
         )
         if not changed:
             continue
@@ -154,7 +158,7 @@ def _df_to_changes(
             "etapa_m": m,
             "status": status,
             "semana": int(e["Semana"]) or None,
-            "observacao": str(e["Observação"]) or None,
+            "observacao": obs_e or None,
             "updated_by": user_id or None,
         })
     return changes
@@ -406,7 +410,7 @@ def _fragment_editor(
     changes = _df_to_changes(df_edited_full, df_orig, user_id)
 
     if not changes:
-        st.info("Nenhuma alteracao detectada.")
+        st.info("Nenhuma alteração detectada.")
         return
 
     # Validacao: travado exige observacao
@@ -424,7 +428,7 @@ def _fragment_editor(
         st.stop()
 
     st.metric(
-        "Alteracoes pendentes",
+        "Alterações pendentes",
         len(changes),
         delta=f"{'item' if len(changes) == 1 else 'itens'} a salvar",
     )
@@ -446,16 +450,16 @@ def _fragment_editor(
             pass  # openpyxl nao disponivel
 
     with _col_save:
-        if primary_action_button("Salvar alteracoes", key="apt_save_btn", help="Aplica as alterações pendentes nas tarefas exibidas."):
+        if primary_action_button("Salvar alterações", key="apt_save_btn", help="Aplica as alterações pendentes nas tarefas exibidas."):
             st.session_state["_apt_confirm_save"] = True
 
     # Dialogo de confirmacao
     n_changes = len(changes)
     confirmed = confirm_dialog(
         trigger_key="_apt_confirm_save",
-        title="Salvar alteracoes?",
-        body=f"Voce esta prestes a salvar **{n_changes} {
-            'alteracao' if n_changes == 1 else 'alteracoes'}**. Confirma?",
+        title="Salvar alterações?",
+        body=f"Você está prestes a salvar **{n_changes} {
+            'alteração' if n_changes == 1 else 'alterações'}**. Confirma?",
         confirm_label="Salvar",
     )
     if confirmed:
