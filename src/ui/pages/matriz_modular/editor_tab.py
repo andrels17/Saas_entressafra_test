@@ -55,6 +55,11 @@ def render_editor_tab(
         st.info("Selecione um setor e serviço válidos para continuar.")
         return
 
+    # Item 9: mostrar toast de confirmação após rerun pós-save
+    _saved_key = f"mat_just_saved_{equip_sel}_{svc_sel}"
+    if st.session_state.pop(_saved_key, False):
+        st.toast("✅ Alterações salvas com sucesso!", icon="✅")
+
     task_rows_ed = (
         sb.table("tarefas_servico")
         .select("id,status,semana,observacao,etapa_d,etapa_r,etapa_m")
@@ -195,8 +200,8 @@ def render_editor_tab(
                         .eq("id", task_ed["id"])
                         .execute()
                     )
-                    st.success(f"✅ Frota {esl} · {svc_name} atualizado!")
                     bump_data_version()
+                    st.session_state[f"mat_just_saved_{equip_sel}_{svc_sel}"] = True
                     try:
                         nav.rerun_keep_menu()
                     except Exception:

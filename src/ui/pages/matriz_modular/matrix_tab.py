@@ -21,7 +21,7 @@ from src.ui.pages.matriz_sector import (
     summarize_sector_intelligence,
 )
 from src.utils import nav
-from src.utils.supabase_helpers import current_user_id
+from src.utils.supabase_helpers import normalize_id, current_user_id
 from src.utils.timezone import now_utc as _now_utc
 
 from .data import _group_kpis, _load_payload

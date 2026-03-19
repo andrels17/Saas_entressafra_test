@@ -1,3 +1,8 @@
+# DEPRECATED — Este arquivo é a versão legada monolítica da Matriz Operacional.
+# A versão ativa está em src/ui/pages/matriz_modular/
+# Este arquivo não é mais importado pelo app e pode ser removido em uma próxima versão.
+# Mantido apenas como referência histórica.
+
 """Matriz Operacional — visao por grupo com drill-down por setor.
 
 Melhorias v2:
