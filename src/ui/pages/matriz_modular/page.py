@@ -813,7 +813,6 @@ def render_matriz() -> None:
                             pass  # ignorado — revisão pode não ter dados
 
                     if _comp_rows:
-                        import pandas as pd
                         _comp_df = pd.DataFrame(_comp_rows)
                         # Destaca revisão atual
                         _comp_df["Atual"] = _comp_df.apply(
