@@ -1,529 +1,486 @@
-"""Apontamento — registro de status de tarefas por equipamento.
+"""Home Overview — camada de renderização.
 
 Melhorias Streamlit 1.42+:
-  - st.data_editor com CheckboxColumn para etapas D/R/M (substitui formulários manuais)
-  - @st.fragment para reruns parciais nos filtros (sem rerenderizar a página inteira)
-  - st.status para feedback granular de carregamento
-  - st.pills para filtro de setor sem rerun completo
-  - st.metric para contadores de alterações
-  - widget bind para sincronizar filtros com query params (URL compartilhável)
+  - st.metric nativo no lugar de _kpi_card HTML customizado
+  - @st.fragment para cards de KPI e ranking em reruns parciais
+  - st.status para carregamento granular
+  - st.dataframe com ProgressColumn para tabelas de departamento
+  - st.popover para ajuda contextual nos cards
+  - st.segmented_control para troca de visão (resumo / tendência)
 """
 from __future__ import annotations
 
-import streamlit as st
+import time
+
 import pandas as pd
-from datetime import date
+import plotly.express as px
+import streamlit as st
 
-from src.utils.timezone import now_brt as _now_brt
-
-from src.ui.components.filters import select_equipamento, select_grupo, select_revisao
-from src.ui.components.feedback import notice_card, selection_summary
-from src.ui.components.actions import download_action, primary_action_button
-from src.ui.components.forms import validation_summary
-from src.ui.core.styles import page_header as _ph
+from src.auth.scope import get_my_scope
+from src.auth.permissions import can_view_all_data
+from src.domain.kpi import calc_global_kpis, calc_dept_kpis
+from src.ui.core.styles import page_header
+from src.ui.components.feedback import selection_summary
+from src.ui.components.actions import refresh_button, primary_action_button
+from src.ui.components.tables import data_table
+from src.ui.components.states import empty_message, loading_block
 from src.ui.core.cache import bump_data_version
-from src.ui.core.confirm_dialog import confirm_dialog
-from src.ui.core.empty_state import empty_state
-from src.ui.core.error_messages import show_supabase_error
-from src.utils.ui_helpers import df_to_xlsx
-from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_user_id
-from src.utils.weeks import week_from_revisao
+from src.utils import nav
+from src.utils.kpi_engine import get_group_kpis
+from src.utils.ui_helpers import status_badge, mobile_columns
+from src.utils.nav import get_current_revisao, set_current_revisao
+from src.utils.supabase_helpers import current_tenant_id
+
+from .data import (
+    load_revision, load_groups, load_depts,
+    load_snapshots, load_group_sector_view,
+    snapshots_supported, insert_snapshot,
+)
+from .transforms import (
+    enforce_home_schema, rev_start_end, current_week,
+    enrich_kdf, compute_coverage, compute_dept_summary, build_trend_chart_data,
+)
 
 
-# ── Queries ─────────────────────────────────────────────────────────────
+# ── Fragment: KPIs principais ───────────────────────────────────────────
 
-@st.cache_data(ttl=60, show_spinner=False)
-def _load_revisoes(_tenant_id: str, _ver: str = "0") -> list[dict]:
-    sb = sb_for_user()
-    return (
-        sb.table("revisoes")
-        .select("id,titulo,status,data_inicio,semanas_total")
-        .eq("tenant_id", _tenant_id)
-        .order("created_at", desc=True)
-        .execute()
-        .data
-    ) or []
-
-
-@st.cache_data(ttl=60, show_spinner=False)
-def _load_grupos(_tenant_id: str, _ver: str = "0", _token: str = "") -> list[dict]:
-    sb = sb_for_user()
-    return (
-        sb.table("equip_grupos")
-        .select("id,nome")
-        .eq("tenant_id", _tenant_id)
-        .eq("ativo", True)
-        .order("nome")
-        .execute()
-        .data
-    ) or []
-
-
-@st.cache_data(ttl=30, show_spinner=False)
-def _load_equipamentos(
-        _tenant_id: str,
-        _grupo_id: str,
-        _ver: str = "0") -> list[dict]:
-    sb = sb_for_user()
-    return (
-        sb.table("equipamentos")
-        .select("id,frota,modelo,status")
-        .eq("tenant_id", _tenant_id)
-        .eq("ativo", True)
-        .eq("grupo_id", _grupo_id)
-        .order("frota")
-        .execute()
-        .data
-    ) or []
-
-
-@st.cache_data(ttl=30, show_spinner=False)
-def _load_tarefas(
-        _tenant_id: str,
-        _revisao_id: str,
-        _equipamento_id: str,
-        _ver: str = "0") -> list[dict]:
-    sb = sb_for_user()
-    return (
-        sb.table("tarefas_servico")
-        .select("id,status,etapa_d,etapa_r,etapa_m,semana,observacao,servicos(id,nome,setor_id,setores(nome))")
-        .eq("tenant_id", _tenant_id)
-        .eq("revisao_id", _revisao_id)
-        .eq("equipamento_id", _equipamento_id)
-        .execute()
-        .data
-    ) or []
-
-
-# ── Helpers de UI ───────────────────────────────────────────────────────
-
-def _build_editor_df(tarefas: list[dict], semana_default: int) -> pd.DataFrame:
-    """Constrói o DataFrame para st.data_editor a partir das tarefas."""
-    rows = []
-    for t in tarefas:
-        svc = t.get("servicos") or {}
-        setor = (svc.get("setores") or {}).get("nome") or "Setor"
-        rows.append({
-            "_id": t["id"],
-            "_status": t.get("status") or "pendente",
-            "Setor": setor,
-            "Serviço": svc.get("nome") or "—",
-            "D": bool(t.get("etapa_d")),
-            "R": bool(t.get("etapa_r")),
-            "M": bool(t.get("etapa_m")),
-            "Semana": int(t.get("semana") or semana_default),
-            "Observação": t.get("observacao") or "",
-        })
-    return pd.DataFrame(rows)
-
-
-def _df_to_changes(
-        edited: pd.DataFrame,
-        original: pd.DataFrame,
-        user_id: str | None) -> list[dict]:
-    """Detecta linhas alteradas e monta payloads para upsert."""
-    changes = []
-    for idx in range(len(edited)):
-        e = edited.iloc[idx]
-        o = original.iloc[idx]
-        # Normaliza observação: None e "" são equivalentes
-        obs_e = (e["Observação"] or "").strip()
-        obs_o = (o["Observação"] or "").strip()
-
-        # Detecta qualquer mudança nas colunas editáveis
-        changed = (
-            bool(e["D"]) != bool(o["D"])
-            or bool(e["R"]) != bool(o["R"])
-            or bool(e["M"]) != bool(o["M"])
-            or int(e["Semana"]) != int(o["Semana"])
-            or obs_e != obs_o
+@st.fragment
+def _fragment_kpis(
+    kdf: pd.DataFrame,
+    dep_total: int,
+    dep_done: int,
+    cov: dict,
+    gk: dict,
+) -> None:
+    """KPIs com st.metric nativo — reroda independentemente dos tabs."""
+    # mobile: stack KPIs em 1 coluna
+    _kpi2 = mobile_columns(2, 1)
+    r1c1, r1c2 = (_kpi2 * 2)[:2]
+    with r1c1:
+        st.metric(
+            "% concluído",
+            f"{gk['pct']}%",
+            delta=f"Etapas: {gk['done_steps']:,}/{gk['expected_steps']:,}",
+            delta_color="off",
+            help="Percentual global ponderado por expected_steps de cada grupo.",
         )
-        if not changed:
-            continue
+    with r1c2:
+        st.metric(
+            "Departamentos concluídos",
+            f"{dep_done}/{dep_total}",
+            delta=f"Frotas: {cov['eq_done']}/{cov['eq_total']}",
+            delta_color="off",
+        )
 
-        # Recalcula status a partir das etapas
-        d, r, m = bool(e["D"]), bool(e["R"]), bool(e["M"])
-        if d and r and m:
-            status = "concluido"
-        elif d or r or m:
-            status = "em_andamento"
+    _kpi2b = mobile_columns(2, 1)
+    r2c1, r2c2 = (_kpi2b * 2)[:2]
+    with r2c1:
+        st.metric(
+            "Risco",
+            f"{cov['risco_pct']}%",
+            delta="grupos < 50%" if cov["risco_pct"] > 0 else "sem grupos críticos",
+            delta_color="inverse" if cov["risco_pct"] > 0 else "off",
+            help="Proporção de grupos com equipamentos + template e % de execução < 50.",
+        )
+    with r2c2:
+        st.metric(
+            "Cobertura",
+            f"{cov['grupos_com_peso']}/{cov['total_grupos']}",
+            delta="c/ equipamentos + template",
+            delta_color="off",
+            help="Grupos que têm equipamentos ativos E template de serviços configurado.",
+        )
+
+    # Popover de alerta de cobertura (não ocupa espaço vertical permanente)
+    if cov["grupos_com_peso"] <= 1 and cov["total_grupos"] >= 2:
+        with st.popover("⚠️ Cobertura baixa — saiba mais"):
+            st.warning(
+                f"Apenas **{cov['grupos_com_peso']}/{cov['total_grupos']}** grupos "
+                "têm equipamentos ativos + template. O % global pode refletir apenas um grupo."
+            )
+            if st.session_state.get("current_role") in ("admin", "superadmin"):
+                if st.button(
+                    "Abrir Templates",
+                    use_container_width=True,
+                        key="home_go_templates_pop"):
+                    nav.goto("Templates")
+
+
+# ── Fragment: ranking de grupos ─────────────────────────────────────────
+
+@st.fragment
+def _fragment_ranking(
+    scope: pd.DataFrame,
+    tenant_id: str,
+    revisao_id: str,
+    ver: str,
+) -> None:
+    """Top 5 melhores / críticos com detalhe de setores."""
+    if scope.empty:
+        st.info("Sem grupos configurados (equipamentos + template) para ranquear.")
+        return
+
+    best = scope.sort_values(["pct", "done_steps"],
+                             ascending=[False, False]).head(5)
+    worst = scope.sort_values(["pct", "done_steps"],
+                              ascending=[True, True]).head(5)
+
+    a, b = st.columns(2)
+    sector_map = load_group_sector_view(tenant_id, revisao_id, ver)
+
+    def _render_grupo_card(row: dict, mode: str) -> None:
+        gid = row.get("grupo_id")
+        sec = sector_map.get(str(gid), {})
+        pct = int(pd.to_numeric(row.get("pct", 0), errors="coerce") or 0)
+        total = int(sec.get("setores_total") or 0)
+        concl = int(sec.get("setores_concluidos") or 0)
+        pend = int(sec.get("setores_pendentes") or 0)
+
+        with st.container(border=True):
+            col_l, col_r = st.columns([0.75, 0.25])
+            with col_l:
+                st.markdown(f"**{row.get('Grupo', 'Grupo')}**")
+            with col_r:
+                status_badge("concluido" if mode == "best" else "travado")
+
+            mc1, mc2, mc3 = st.columns(3)
+            with mc1:
+                st.metric("Execução", f"{pct}%")
+            with mc2:
+                st.metric(
+                    "Setores pend.",
+                    pend,
+                    delta_color="inverse" if pend > 0 else "off")
+            with mc3:
+                st.metric("Setores conc.", f"{concl}/{total}")
+            st.caption("Setor fecha quando D+R+M ok em todos os equipamentos.")
+            if st.button("Abrir na Matriz", key=f"rank_open_{mode}_{gid}",
+                         use_container_width=True, type="secondary"):
+                st.session_state.update({
+                    "matriz_grupo_id": gid,
+                    "matriz_view": "group",
+                    "matriz_departamento_id": None,
+                })
+                nav.goto("Matriz")
+
+    with a:
+        st.markdown("### Top 5 melhores")
+        for r in best.to_dict("records"):
+            _render_grupo_card(r, "best")
+    with b:
+        st.markdown("### Top 5 críticos")
+        for r in worst.to_dict("records"):
+            _render_grupo_card(r, "worst")
+
+
+# ── Fragment: departamentos pendentes ───────────────────────────────────
+
+@st.fragment
+def _fragment_departamentos(
+    dsum: pd.DataFrame,
+    dep_total: int,
+    dept_to_name: dict,
+    scope: pd.DataFrame,
+) -> None:
+    if dsum is None or getattr(dsum, "empty", True) or dep_total == 0:
+        empty_message("Sem dados por departamento.")
+        return
+
+    dsum_v = dsum.copy()
+    dsum_v["Departamento"] = dsum_v["departamento_id"].map(
+        dept_to_name).fillna(dsum_v["departamento_id"].astype(str))
+    dsum_v["Concluído"] = pd.to_numeric(
+        dsum_v["pct"], errors="coerce").fillna(0) >= 100
+    pend = dsum_v[~dsum_v["Concluído"]].sort_values("pct")
+    done = dsum_v[dsum_v["Concluído"]].sort_values("pct", ascending=False)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("#### Pendentes")
+        if pend.empty:
+            empty_message("Nenhum departamento pendente.", kind="success")
         else:
-            # mantém status original se nenhuma etapa marcada
-            status = o["_status"]
+            data_table(
+                pend[["Departamento", "pct", "grupos"]].rename(columns={"pct": "%", "grupos": "Grupos"}),
+                column_config={"%": st.column_config.ProgressColumn("%", min_value=0, max_value=100)},
+            )
+    with c2:
+        st.markdown("#### Concluídos")
+        if done.empty:
+            empty_message("Ainda não há departamentos concluídos.")
+        else:
+            data_table(
+                done[["Departamento", "pct", "grupos"]].rename(columns={"pct": "%", "grupos": "Grupos"}),
+                column_config={"%": st.column_config.ProgressColumn("%", min_value=0, max_value=100)},
+            )
 
-        changes.append({
-            "id": e["_id"],
-            "etapa_d": d,
-            "etapa_r": r,
-            "etapa_m": m,
-            "status": status,
-            "semana": int(e["Semana"]) or None,
-            "observacao": obs_e or None,
-            "updated_by": user_id or None,
-        })
-    return changes
-
-
-# ── Fragment: seletor de contexto (reroda só esta parte ao mudar) ───────
-
-@st.fragment
-def _fragment_seletores(
-        revisoes: list[dict]) -> tuple[dict | None, str | None, str | None]:
-    """Seletor de revisão + grupo + equipamento em fragment isolado."""
-    if not revisoes:
-        empty_state(
-            icon="◑", title="Nenhuma revisão criada",
-            description="Crie uma revisão para começar a registrar tarefas.",
-            action_label="Ir para Revisões", action_key="apt_goto_rev",
-            nav_to="Admin - Revisões",
-        )
-        return None, None, None
-
-    tenant_id = current_tenant_id()
-    ver = str(st.session_state.get("data_version", "0"))
-
-    # Revisão
-    default_idx = next((i for i, r in enumerate(
-        revisoes) if r["status"] == "ativa"), 0)
-    revisao = select_revisao(
-        revisoes,
-        key="apt_revisao_sel",
-        default_status="ativa",
-        show_status_icon=True,
-    )
-    if not revisao:
-        return None, None, None
-    revisao_id = revisao["id"]
-
-    data_inicio = None
-    semanas_total = None
-    try:
-        if revisao.get("data_inicio"):
-            data_inicio = date.fromisoformat(revisao["data_inicio"])
-        semanas_total = int(revisao.get("semanas_total") or 0) or None
-    except Exception:
-        pass  # ignorado — operação opcional
-
-    semana_default = week_from_revisao(
-        _now_brt().date(), data_inicio, semanas_total)
-
-    # Grupo
-    grupos = _load_grupos(tenant_id, ver, st.session_state.get("sb_access_token", ""))
-    if not grupos:
-        empty_state(
-            icon="⊕",
-            title="Nenhum grupo cadastrado",
-            description="Cadastre grupos de equipamentos para organizar as tarefas.",
-            action_label="Ir para Grupos",
-            action_key="apt_goto_grupos",
-            nav_to="Admin - Grupos",
-        )
-        return None, None, None
-
-    qp_grupo = st.query_params.get("grupo")
-    default_grupo = qp_grupo if qp_grupo else None
-    grupo_nome, grupo_id = select_grupo(
-        grupos,
-        key="apt_grupo_sel",
-        default_id=default_grupo,
-    )
-    if not grupo_id:
-        return None, None, None
-    st.query_params["grupo"] = grupo_id  # sincroniza URL
-
-    # Equipamento
-    equips = _load_equipamentos(tenant_id, grupo_id, ver)
-    if not equips:
-        st.info("Nenhum equipamento neste grupo.")
-        return None, None, None
-
-    qp_eq = st.query_params.get("eq")
-    eq_label, equipamento_id = select_equipamento(
-        equips,
-        key="apt_eq_sel",
-        default_id=qp_eq,
-    )
-    if not equipamento_id:
-        return None, None, None
-    st.query_params["eq"] = equipamento_id
-
-    st.session_state["_apt_semana_default"] = int(semana_default)
-    st.session_state["_apt_revisao_id"] = revisao_id
-    st.session_state["_apt_revisao_titulo"] = revisao.get("titulo") or "Revisão"
-    st.session_state["_apt_grupo_nome"] = grupo_nome or "Grupo"
-    st.session_state["_apt_eq_label"] = eq_label or "Equipamento"
-    st.session_state["_apt_equipamento_id"] = equipamento_id
-
-    return revisao, revisao_id, equipamento_id
+    with st.expander("Detalhe por grupos e etapas", expanded=False):
+        if not scope.empty:
+            top_backlog = scope.sort_values(
+                ["backlog_steps", "pct"], ascending=[False, True]).head(10)
+            data_table(
+                top_backlog[["Grupo", "pct", "done_steps", "expected_steps", "eq_count", "svc_count", "backlog_steps"]]
+                .rename(columns={"pct": "%", "done_steps": "Feitas", "expected_steps": "Esperadas",
+                                 "eq_count": "Equip", "svc_count": "Serviços", "backlog_steps": "Etapas pend."}),
+                column_config={
+                    "%": st.column_config.ProgressColumn("%", min_value=0, max_value=100),
+                    "Feitas": st.column_config.NumberColumn("Feitas", format="%,d"),
+                    "Esperadas": st.column_config.NumberColumn("Esperadas", format="%,d"),
+                    "Etapas pend.": st.column_config.NumberColumn("Etapas pend.", format="%,d"),
+                },
+            )
 
 
-# ── Fragment: editor de tarefas ─────────────────────────────────────────
+# ── Fragment: tendência semanal ─────────────────────────────────────────
 
 @st.fragment
-def _fragment_editor(
-        tenant_id: str,
-        revisao_id: str,
-        equipamento_id: str) -> None:
-    """Editor de tarefas em fragment — reroda independentemente dos seletores."""
-    ver = str(st.session_state.get("data_version", "0"))
-
-    with st.spinner("", show_time=False):
-        tarefas = _load_tarefas(tenant_id, revisao_id, equipamento_id, ver)
-
-    if not tarefas:
-        notice_card(
-            "Equipamento sem tarefas",
-            "Nenhuma tarefa foi encontrada para o equipamento selecionado nesta revisão. Peça ao administrador para gerar ou sincronizar a matriz.",
-            tone="warning",
+def _fragment_tendencia(
+    tenant_id: str,
+    revisao_id: str,
+    ver: str,
+    week: int,
+    scope: pd.DataFrame,
+) -> None:
+    if not snapshots_supported():
+        empty_message(
+            "Tabela **kpi_snapshots** não encontrada.",
+            "Rode o SQL de próximos passos para habilitar tendência semanal.",
+            kind="warning",
         )
         return
 
-    semana_default = st.session_state.get("_apt_semana_default", 1)
-    user_id = current_user_id()
+    if st.button("Salvar snapshot desta semana", icon=":material/save:",
+                 use_container_width=True, key="home_save_snapshot"):
+        ok, msg = insert_snapshot(tenant_id, revisao_id, week, scope)
+        if ok:
+            st.toast("✓ Snapshot salvo", icon=":material/check_circle:")
+            bump_data_version()
+        else:
+            st.error(f"Falha: {msg}")
 
-    # Filtros rápidos
-    col_f1, col_f2 = st.columns([0.6, 0.4])
-    with col_f1:
-        show_pending = st.toggle(
-            "Somente pendentes/travados",
-            value=False,
-            key="apt_pending_toggle")
-    with col_f2:
-        semana_val = st.number_input(
-            "Semana (sugestão)",
-            min_value=0,
-            value=semana_default,
-            step=1,
-            key="apt_semana_num")
-
-    # Agrupa por setor para filtro de setores
-    setores_disponiveis = sorted({
-        (((t.get("servicos") or {}).get("setores") or {}).get("nome") or "Setor")
-        for t in tarefas
-    })
-    setor_filtro = st.pills(
-        "Filtrar por setor",
-        setores_disponiveis,
-        selection_mode="multi",
-        default=None,
-        key="apt_setor_pills",
-        label_visibility="collapsed" if len(setores_disponiveis) <= 1 else "visible",
-    ) if len(setores_disponiveis) > 1 else None
-
-    # Filtra tarefas
-    tarefas_filtradas = tarefas
-    if show_pending:
-        tarefas_filtradas = [t for t in tarefas_filtradas if t.get(
-            "status") in ("pendente", "travado", "em_andamento")]
-    if setor_filtro:
-        tarefas_filtradas = [t for t in tarefas_filtradas if (
-            ((t.get("servicos") or {}).get("setores") or {}).get("nome") or "Setor") in setor_filtro]
-
-    if not tarefas_filtradas:
-        st.info("Nenhuma tarefa para os filtros selecionados.")
+    sdf = load_snapshots(tenant_id, revisao_id, ver)
+    if sdf.empty:
+        empty_message("Ainda não há snapshots salvos para esta revisão.")
         return
 
-    # Monta DataFrame para o editor
-    df_orig = _build_editor_df(tarefas_filtradas, int(semana_val))
-    df_display = df_orig.drop(columns=["_id", "_status"])
-
-    # Métricas rápidas antes do editor
-    m1, m2, m3, m4 = st.columns(4)
-    with m1:
-        st.metric("Total", len(tarefas_filtradas))
-    with m2:
-        st.metric(
-            "Concluídos", sum(
-                1 for t in tarefas_filtradas if t.get("status") == "concluido"))
-    with m3:
-        st.metric(
-            "Pendentes", sum(
-                1 for t in tarefas_filtradas if t.get("status") == "pendente"))
-    with m4:
-        st.metric(
-            "Travados", sum(
-                1 for t in tarefas_filtradas if t.get("status") == "travado"), delta_color="inverse" if sum(
-                1 for t in tarefas_filtradas if t.get("status") == "travado") > 0 else "off")
-
-    # Barra de progresso do equipamento atual
-    _total_tasks = len(tarefas_filtradas)
-    _done_tasks = sum(
-        1 for t in tarefas_filtradas if t.get("status") == "concluido")
-    st.progress(
-        _done_tasks / _total_tasks if _total_tasks else 0,
-        text=f"Progresso: {_done_tasks}/{_total_tasks} tarefas concluídas "
-        f"({100 * _done_tasks // _total_tasks if _total_tasks else 0}%)",
+    g = build_trend_chart_data(sdf)
+    fig_t = px.line(g, x="week_number", y="pct", markers=True, text="pct")
+    fig_t.update_traces(
+        texttemplate="%{text:.1f}%", textposition="top center",
+        hovertemplate="Semana %{x}<br>%{y:.1f}%<extra></extra>",
     )
+    fig_t.update_layout(
+        height=340, margin=dict(l=12, r=12, t=10, b=10),
+        paper_bgcolor="#06080B", plot_bgcolor="#0C111A",
+        xaxis=dict(title="Semana", gridcolor="rgba(255,255,255,0.06)"),
+        yaxis=dict(title="% concluído", range=[0, 105], gridcolor="rgba(255,255,255,0.06)"),
+        font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=12),
+    )
+    st.plotly_chart(fig_t, use_container_width=True,
+                    config={"displayModeBar": False})
+    st.caption(
+        "Percentual global ponderado por semana, com base nos snapshots salvos.")
 
-    # ── st.data_editor com CheckboxColumn para D, R, M ───────────────────────
-    st.caption("Marque as etapas D (Desmontagem), R (Revisão), M (Montagem). "
-               "O status é calculado automaticamente: D+R+M = Concluído.")
+    # Tabela dos snapshots com DatetimeColumn nativa
+    if "created_at" in sdf.columns:
+        with st.expander("Ver snapshots salvos", expanded=False):
+            data_table(
+                sdf.sort_values("week_number", ascending=False).head(50),
+                column_config={
+                    "created_at": st.column_config.DatetimeColumn(
+                        "Salvo em",
+                        format="DD/MM/YYYY HH:mm",
+                        timezone="America/Sao_Paulo",
+                    ),
+                    "pct": st.column_config.ProgressColumn("% KPI", min_value=0, max_value=100),
+                },
+            )
 
-    edited = st.data_editor(
-        df_display,
+
+# ── Fragment: risco por departamento ─────────────────────────────────────────
+
+@st.fragment
+def _fragment_risco(
+        kdf: pd.DataFrame,
+        gid_to_dept: dict,
+        dept_to_name: dict) -> None:
+    ddf = calc_dept_kpis(kdf, gid_to_dept)
+    if ddf.empty:
+        empty_message("Sem dados por departamento.")
+        return
+
+    ddf = ddf.copy()
+    ddf["Departamento"] = ddf["departamento_id"].map(
+        dept_to_name).fillna(ddf["departamento_id"].astype(str))
+    ddf["Risco"] = ((100 - ddf["pct"]) * 2 + (ddf["backlog_steps"] /
+                    ddf["grupos"].clip(lower=1))).round().astype(int)
+    ddf = ddf.sort_values("Risco", ascending=False)
+
+    data_table(
+        ddf[["Departamento", "pct", "backlog_steps", "grupos", "Risco"]].rename(
+            columns={"pct": "%", "backlog_steps": "Etapas pendentes", "grupos": "Grupos"}
+        ),
         column_config={
-            "Setor": st.column_config.TextColumn(
-                "Setor",
-                disabled=True),
-            "Serviço": st.column_config.TextColumn(
-                "Serviço",
-                disabled=True),
-            "D": st.column_config.CheckboxColumn(
-                "D",
-                help="Desmontagem concluída"),
-            "R": st.column_config.CheckboxColumn(
-                "R",
-                help="Revisão concluída"),
-            "M": st.column_config.CheckboxColumn(
-                "M",
-                help="Montagem concluída"),
-            "Semana": st.column_config.NumberColumn(
-                "Semana",
-                min_value=0,
-                step=1),
-            "Observação": st.column_config.TextColumn(
-                "Observação",
-                max_chars=500),
+            "%": st.column_config.ProgressColumn("%", min_value=0, max_value=100),
+            "Risco": st.column_config.NumberColumn("Risco", help="Fórmula: (100-%) × 2 + backlog/grupos"),
         },
-        hide_index=True,
-        use_container_width=True,
-        num_rows="fixed",
-        key="apt_data_editor",
     )
-
-    # Reconstrói df_orig com _id e _status para comparar
-    df_edited_full = df_orig.copy()
-    df_edited_full[["Setor",
-                    "Serviço",
-                    "D",
-                    "R",
-                    "M",
-                    "Semana",
-                    "Observação"]] = edited[["Setor",
-                                             "Serviço",
-                                             "D",
-                                             "R",
-                                             "M",
-                                             "Semana",
-                                             "Observação"]]
-
-    changes = _df_to_changes(df_edited_full, df_orig, user_id)
-
-    if not changes:
-        st.info("Nenhuma alteração detectada.")
-        return
-
-    # Validacao: travado exige observacao
-    invalidos = [c for c in changes if c["status"] ==
-                 "travado" and not (c.get("observacao") or "").strip()]
-    if invalidos:
-        n = len(invalidos)
-        validation_summary(
-            [
-                f"{'Um item foi marcado' if n == 1 else f'{n} itens foram marcados'} como Travado sem observação.",
-                "Preencha o campo Observação antes de salvar.",
-            ],
-            title="Existem validações pendentes no apontamento",
-        )
-        st.stop()
-
-    st.metric(
-        "Alterações pendentes",
-        len(changes),
-        delta=f"{'item' if len(changes) == 1 else 'itens'} a salvar",
-    )
-
-    # Exportar tarefas filtradas como XLSX
-    _exp_df = df_display.copy()
-    _col_save, _col_xlsx = st.columns([0.75, 0.25])
-    with _col_xlsx:
-        try:
-            download_action(
-                "Exportar XLSX",
-                data=df_to_xlsx(_exp_df, sheet_name="Apontamento"),
-                file_name="apontamento.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="apt_xlsx_btn",
-                help="Baixa a visão filtrada atual em Excel.",
-            )
-        except Exception:
-            pass  # openpyxl nao disponivel
-
-    with _col_save:
-        if primary_action_button("Salvar alterações", key="apt_save_btn", help="Aplica as alterações pendentes nas tarefas exibidas."):
-            st.session_state["_apt_confirm_save"] = True
-
-    # Dialogo de confirmacao
-    n_changes = len(changes)
-    confirmed = confirm_dialog(
-        trigger_key="_apt_confirm_save",
-        title="Salvar alterações?",
-        body=f"Você está prestes a salvar **{n_changes} {
-            'alteração' if n_changes == 1 else 'alterações'}**. Confirma?",
-        confirm_label="Salvar",
-    )
-    if confirmed:
-        sb = sb_for_user()
-        erros = 0
-        with st.spinner("Salvando…", show_time=False):
-            for ch in list(changes):
-                tid = ch.pop("id")
-                try:
-                    sb.table("tarefas_servico").update(
-                        ch).eq("id", tid).execute()
-                except Exception as e:
-                    show_supabase_error(e, f"Tarefa {tid}")
-                    erros += 1
-
-        # Invalida cache de KPIs para refletir os novos apontamentos
-        try:
-            from src.utils.kpi_engine import invalidate_kpi_cache
-            invalidate_kpi_cache()
-        except Exception:
-            pass  # invalidação de cache opcional — não bloqueia o fluxo
-        bump_data_version()
-        if erros == 0:
-            st.toast(
-                f"✅ {n_changes} {
-                    'alteração salva' if n_changes == 1 else 'alterações salvas'}.",
-                icon=":material/check_circle:",
-            )
-        else:
-            st.toast(f"⚠️ {erros} erro(s) ao salvar.", icon=":material/error:")
-        st.rerun()
 
 
 # ── Ponto de entrada público ────────────────────────────────────────────
 
-def render_apontamento() -> None:
-    _ph("◉", "Apontamento",
-        "Registre o status de cada tarefa por equipamento, serviço e semana.")
-
+def render_home_overview() -> None:
+    page_header("Home")
     tenant_id = current_tenant_id()
-    ver = str(st.session_state.get("data_version", "0"))
-    revisoes = _load_revisoes(tenant_id, ver)
-
-    # Fragment 1: seletores (reroda apenas ao mudar revisão/grupo/equipamento)
-    _fragment_seletores(revisoes)
-
-    revisao_id = st.session_state.get("_apt_revisao_id")
-    equipamento_id = st.session_state.get("_apt_equipamento_id")
-
-    if not revisao_id or not equipamento_id:
+    if not tenant_id:
+        st.info("Selecione um tenant para ver o resumo.")
         return
 
+    ver = str(st.session_state.get("data_version", "0"))
+    rev = load_revision(tenant_id, ver, get_current_revisao())
+    if not rev:
+        st.warning("Nenhuma revisão encontrada para este tenant.")
+        return
+
+    rev_start, _rev_end, semanas_total = rev_start_end(rev)
+    week = current_week(rev_start, semanas_total)
+
+    if rev.get("id"):
+        # Compatível com versões antigas de set_current_revisao que aceitam
+        # apenas o ID.
+        set_current_revisao(rev["id"])
+        st.session_state["_sidebar_rev_titulo"] = rev.get("titulo")
+        st.session_state["_sidebar_rev_semana"] = week
+    grupos = load_groups(tenant_id, ver)
+    deps = load_depts(tenant_id, ver)
+    gid_to_name = {g["id"]: (g.get("nome") or "—")
+                   for g in grupos if g.get("id")}
+    gid_to_dept = {g["id"]: g.get("departamento_id")
+                   for g in grupos if g.get("id")}
+    dept_to_name = {d["id"]: (d.get("nome") or "—")
+                    for d in deps if d.get("id")}
+
+    dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id)
+    role = st.session_state.get("current_role") or ""
+    if not can_view_all_data(role) and dep_scope_ids == [] and grp_scope_ids == []:
+        st.warning("Você não possui departamentos ou grupos vinculados para visualizar esta revisão.")
+        return
+
+    if dep_scope_ids is not None:
+        deps = [d for d in deps if d.get("id") in dep_scope_ids]
+    if grp_scope_ids is not None:
+        grupos = [g for g in grupos if g.get("id") in grp_scope_ids]
+
+    # ── Header da revisão ───────────────────────────────────────────────────
+    h1_col, h2_col = st.columns([0.82, 0.18])
+    with h1_col:
+        st.markdown(f"## {rev.get('titulo', 'Revisão')}")
+        st.caption(
+            f"Semana {week}/{semanas_total}"
+            + (f" • Início {rev_start.date()}" if rev_start else "")
+        )
+        status_badge(rev.get("status"))
+
+        # ── Badge de prazo ───────────────────────────────────────────────────
+        try:
+            from src.domain.kpi import calc_prazo
+            prazo = calc_prazo(
+                data_inicio=rev.get("data_inicio"),
+                data_fim=rev.get("data_fim"),
+            )
+            if prazo["status_prazo"] != "sem_prazo":
+                dr = prazo["dias_restantes"]
+                if dr < 0:
+                    prazo_label = f"⚠️ {abs(dr)} dias em atraso"
+                    prazo_color = "red"
+                elif dr == 0:
+                    prazo_label = "⚠️ Vence hoje"
+                    prazo_color = "orange"
+                elif dr <= 7:
+                    prazo_label = f"⏰ {dr} dias restantes"
+                    prazo_color = "orange"
+                else:
+                    prazo_label = f"📅 {dr} dias restantes"
+                    prazo_color = "green"
+                st.badge(prazo_label, color=prazo_color)
+        except Exception:
+            pass  # badge de prazo é opcional — não bloqueia renderização
+
+    with h2_col:
+        if refresh_button("home_refresh_btn", help="Atualiza KPIs, rankings e snapshots visíveis."):
+            bump_data_version()
+            st.session_state["home_pulse"] = True
+            st.toast("Atualizado", icon=":material/refresh:")
+            st.rerun()
+
     selection_summary(
-        "Contexto do apontamento",
+        "Contexto da visão",
         {
-            "Revisão": st.session_state.get("_apt_revisao_titulo") or "-",
-            "Grupo": st.session_state.get("_apt_grupo_nome") or "-",
-            "Equipamento": st.session_state.get("_apt_eq_label") or "-",
-            "Semana sugerida": st.session_state.get("_apt_semana_default") or "-",
+            "Revisão": rev.get("titulo") or "-",
+            "Status": rev.get("status") or "-",
+            "Semana": f"{week}/{semanas_total}",
+            "Grupos": len(grupos),
+            "Departamentos": len(deps),
         },
-        caption="As alterações abaixo serão salvas apenas para o equipamento selecionado.",
+        caption="A Home consolida a mesma revisão ativa usada nas páginas operacionais.",
     )
+
+    # ── Carrega KPIs ────────────────────────────────────────────────────────
+    with st.spinner("", show_time=False):
+        kdf = get_group_kpis(tenant_id, rev["id"], ver, prefer_mv=True, _token=st.session_state.get("sb_access_token", ""))
+
+    kdf = enforce_home_schema(kdf)
+    if kdf is None or (hasattr(kdf, "empty") and kdf.empty):
+        st.info("Sem KPIs nesta revisão ainda.")
+        return
+
+    kdf = enrich_kdf(
+        kdf,
+        gid_to_name,
+        gid_to_dept,
+        dep_scope_ids,
+        grp_scope_ids)
+    gk = calc_global_kpis(kdf)
+    cov = compute_coverage(kdf)
+    dsum, dep_total, dep_done = compute_dept_summary(kdf, gid_to_dept)
+    scope = kdf[(kdf["eq_count"] > 0) & (kdf["svc_count"] > 0)].copy()
+
+    # Fragment 1: KPIs
+    _fragment_kpis(kdf, dep_total, dep_done, cov, gk)
 
     st.divider()
 
-    # Fragment 2: editor (reroda apenas ao editar tarefas)
-    _fragment_editor(tenant_id, revisao_id, equipamento_id)
+    # ── Tabs com on_change lazy loading ──────────────────────────────────────
+    _HOME_TABS = ["📊 Resumo", "⏳ Pendentes", "⚠️ Risco", "📈 Tendência"]
+
+    def _on_home_tab_change() -> None:
+        st.session_state["_home_tab"] = st.session_state["_home_tab_ctrl"]
+
+    active_home = st.session_state.get("_home_tab", _HOME_TABS[0])
+    if active_home not in _HOME_TABS:
+        active_home = _HOME_TABS[0]
+
+    st.segmented_control(
+        "Visão",
+        _HOME_TABS,
+        default=active_home,
+        key="_home_tab_ctrl",
+        on_change=_on_home_tab_change,
+        label_visibility="collapsed",
+    )
+    active_home = st.session_state.get("_home_tab", _HOME_TABS[0])
+
+    if active_home == "📊 Resumo":
+        _fragment_ranking(scope, tenant_id, rev["id"], ver)
+
+    elif active_home == "⏳ Pendentes":
+        st.markdown("### Departamentos (visão de fim)")
+        _fragment_departamentos(dsum, dep_total, dept_to_name, scope)
+
+    elif active_home == "⚠️ Risco":
+        st.markdown("### Risco por departamento")
+        _fragment_risco(kdf, gid_to_dept, dept_to_name)
+
+    else:  # 📈 Tendência
+        st.markdown("### Tendência semanal")
+        _fragment_tendencia(tenant_id, rev["id"], ver, week, scope)
