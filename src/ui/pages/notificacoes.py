@@ -44,7 +44,7 @@ def _risk_color(pct: int) -> str:
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _load_data(_tid: str, _rev_id: str, _ver: str = "0") -> dict:
+def _load_data(_tid: str, _rev_id: str, _ver: str = "0", _token: str = "") -> dict:
     """Carrega todos os dados necessários para os alertas em uma só query."""
     sb = sb_for_user()
     try:
