@@ -154,7 +154,7 @@ def retry_pending(
             try:
                 progress_callback(msg)
             except Exception:
-                pass
+                pass  # ignorado — operação opcional
 
     try:
         svc = get_supabase_service()
@@ -191,7 +191,7 @@ def retry_pending(
                 try:
                     pdf_bytes = base64.b64decode(row["pdf_bytes_b64"])
                 except Exception:
-                    pass
+                    pass  # ignorado — operação opcional
 
             try:
                 send_email_with_retry(

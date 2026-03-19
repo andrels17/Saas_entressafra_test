@@ -235,7 +235,7 @@ def send_email_with_retry(
                 try:
                     on_retry(attempt, exc)
                 except Exception:
-                    pass
+                    pass  # ignorado — operação opcional
 
             if is_last:
                 log_error(

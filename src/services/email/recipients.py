@@ -73,7 +73,7 @@ def _fetch_user_emails(svc, user_ids: set[str]) -> dict[str, str]:
                 break
             page += 1
     except Exception:
-        pass
+        pass  # ignorado — operação opcional
     return out
 
 

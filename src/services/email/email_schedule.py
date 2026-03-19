@@ -102,7 +102,7 @@ class ScheduleConfig:
                     if days_since < 14:
                         candidate += timedelta(weeks=1)
                 except Exception:
-                    pass
+                    pass  # ignorado — operação opcional
 
         return candidate
 
@@ -150,7 +150,7 @@ def load_schedule_config(tenant_id: str) -> ScheduleConfig:
         if rows:
             return _row_to_config(rows[0])
     except Exception:
-        pass
+        pass  # ignorado — operação opcional
     return ScheduleConfig(tenant_id=tenant_id)
 
 

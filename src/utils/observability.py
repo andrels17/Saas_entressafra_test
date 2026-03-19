@@ -77,7 +77,7 @@ def _maybe_capture_sentry(exc: Exception, context: dict) -> None:
                 scope.set_extra(k, v)
             sentry_sdk.capture_exception(exc)
     except Exception:
-        pass
+        pass  # ignorado — operação opcional
 
 
 # ── Registro em memória (últimos 200 erros) ─────────────────────────────

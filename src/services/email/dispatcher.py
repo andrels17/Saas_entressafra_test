@@ -736,7 +736,7 @@ def dispatch_relatorio_semanal(
                             error=str(e),
                         )
                     except Exception:
-                        pass
+                        pass  # ignorado — operação opcional
 
         except Exception as e:
             result.failed += 1

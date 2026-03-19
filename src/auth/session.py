@@ -78,7 +78,7 @@ def hard_logout() -> None:
     try:
         st.query_params.clear()
     except Exception:
-        pass
+        pass  # ignorado intencionalmente — query_params pode não estar disponível
 
     st.rerun()
 
@@ -94,7 +94,7 @@ def _clear_all_caches() -> None:
         try:
             fn()
         except Exception:
-            pass
+            pass  # ignorado — operação opcional
 
 
 # ── Renovação de token ──────────────────────────────────────────────────
@@ -120,7 +120,7 @@ def try_refresh_session() -> bool:
             )
             return True
     except Exception:
-        pass
+        pass  # ignorado — operação opcional
     return False
 
 

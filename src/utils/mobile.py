@@ -23,7 +23,7 @@ def is_mobile() -> bool:
     return bool(st.session_state.get("__force_mobile__", False) or qp_mobile)
 
 
-def render_mobile_toggle():
+def render_mobile_toggle() -> None:
     """Toggle do modo mobile.
 
     Nota: em mobile, a sidebar pode estar escondida por CSS.
@@ -58,7 +58,7 @@ def render_mobile_toggle():
                 help="Ativa a experiência otimizada para celular. Você também pode usar ?mobile=1 no link.",
             )
     except Exception:
-        pass
+        pass  # ignorado — operação opcional
 
     # Controle no corpo (sempre visível)
     # Usamos checkbox (mais estável que toggle em Safari)

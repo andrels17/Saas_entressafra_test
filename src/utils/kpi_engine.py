@@ -84,7 +84,7 @@ def invalidate_kpi_cache() -> None:
     try:
         get_group_kpis.clear()
     except Exception:
-        pass
+        pass  # cache pode não estar inicializado
     # Incrementa o 'ver' na sessão — força nova chave de cache mesmo sem
     # clear()
     ver = st.session_state.get("_kpi_ver", 0)

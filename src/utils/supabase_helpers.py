@@ -4,7 +4,6 @@ Fonte única de verdade para:
   - Criar um cliente autenticado como o usuário atual (sb_for_user)
   - Ler tenant_id / role / user_id do session_state de forma segura
 """
-from __future__ import annotations
 
 try:
     from supabase import Client  # type: ignore
@@ -59,3 +58,23 @@ def normalize_id(value) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+def sanitize_user_input(value: str, *, max_length: int = 500) -> str:
+    """Sanitiza entrada do usuário antes de usar em queries ou atualizações.
+
+    - Remove caracteres de controle (exceto newline/tab)
+    - Limita comprimento
+    - Strip de espaços extras
+
+    PostgREST parametriza valores automaticamente (sem SQL injection direta),
+    mas esta função protege contra dados malformados e excessivamente longos.
+    """
+    if not value:
+        return ""
+    # Remove null bytes e outros caracteres de controle problemáticos
+    allowed_controls = {"\n", "\t"}
+    cleaned = "".join(
+        c for c in value
+        if c in allowed_controls or (ord(c) >= 32 and ord(c) != 127)
+    )
+    return cleaned.strip()[:max_length]

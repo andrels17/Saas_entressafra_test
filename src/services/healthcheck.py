@@ -314,5 +314,5 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     report = run_health_check()
-    print(report.summary())
+    log.info(report.summary())
     sys.exit(0 if report.ok else 1)

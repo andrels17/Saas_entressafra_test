@@ -133,7 +133,7 @@ def get_my_scope(tenant_id: str, sb=None) -> tuple[list[str] | None, list[str] |
             u = sb.auth.get_user()
             user_id = getattr(getattr(u, "user", None), "id", None) or getattr(u, "id", None)
         except Exception:
-            pass
+            pass  # ignorado — operação opcional
 
     dept_ids, grp_ids = get_user_scope(sb, tenant_id, user_id, role=role)
     st.session_state["scope_departamento_ids"] = dept_ids

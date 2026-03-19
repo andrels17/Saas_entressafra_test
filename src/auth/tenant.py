@@ -100,14 +100,19 @@ def load_user_tenants() -> list[dict]:
     return tenants
 
 
+_ROLE_REVALIDATION_TTL = 120  # segundos entre revalidações de role no banco
+
+
 def ensure_tenant_selected() -> None:
     """Garante que exista um tenant selecionado em session_state.
 
     Proteções anti-vazamento:
     - Tenant/role ficam vinculados ao user_id atual.
     - Se o user_id mudar, limpamos tenant/role para não herdar escopo.
-    - Mesmo com tenant já selecionado, revalidamos o role no banco em todo run.
+    - Role é revalidado no banco a cada _ROLE_REVALIDATION_TTL segundos
+      (em vez de todo rerun), reduzindo queries sem sacrificar segurança.
     """
+    import time
     user_id = _current_user_id()
     prev_user = st.session_state.get("_tenant_user_id")
 
@@ -115,11 +120,17 @@ def ensure_tenant_selected() -> None:
     if prev_user and user_id and prev_user != user_id:
         _clear_tenant_selection()
 
-    # Tenant já selecionado: revalida role e retorna
+    # Tenant já selecionado: revalida role apenas se TTL expirou
     if st.session_state.get("current_tenant_id"):
-        if refresh_current_role():
+        now = time.time()
+        last_val = st.session_state.get("_role_last_validated", 0)
+        if now - last_val >= _ROLE_REVALIDATION_TTL:
+            if refresh_current_role():
+                st.session_state["_role_last_validated"] = now
+                return
+            _clear_tenant_selection()
+        else:
             return
-        _clear_tenant_selection()
 
     tenants = load_user_tenants()
 

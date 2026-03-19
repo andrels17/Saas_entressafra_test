@@ -155,3 +155,8 @@ def validate_config_or_stop() -> None:
             "📖 Consulte a documentação de configuração no `README.md` do projeto.\n\n"
             "Após corrigir, reinicie o aplicativo.")
         st.stop()
+# ── Limites de consultas paginadas ──────────────────────────────────────────
+# Use fetch_all() de src.utils.fetching para queries que podem exceder estes limites
+MAX_QUERY_ROWS = 5_000    # limite padrão para queries simples
+MAX_QUERY_ROWS_LARGE = 20_000  # para tabelas grandes (tarefas, equipamentos)
+QUERY_PAGE_SIZE = 500     # tamanho de chunk para operações em lote
