@@ -145,8 +145,8 @@ def seed_demo_data(tenant_id: str) -> dict:
                 _get_or_create_equipamento(
                     svc, tenant_id, gid, frota, modelo))
 
-    # templates: vincula todos os serviços a todos os grupos (pode refinar depois)
-    # evita duplicar via select-check
+    # templates: vincula todos os serviços a todos os grupos
+    # Cada grupo recebe todos os serviços de todos os setores (configuração demo completa)
     for gid in grupo_ids.values():
         existing = (
             svc.table("grupo_servicos")
@@ -157,10 +157,12 @@ def seed_demo_data(tenant_id: str) -> dict:
             .data
         ) or []
         existing_ids = {r["servico_id"] for r in existing}
-        to_add = [{"tenant_id": tenant_id, "grupo_id": gid, "servico_id": sid}
-                  for sid in servico_ids if sid not in existing_ids]
+        to_add = [
+            {"tenant_id": tenant_id, "grupo_id": gid, "servico_id": sid}
+            for sid in servico_ids
+            if sid not in existing_ids
+        ]
         if to_add:
-            # batch insert
             for i in range(0, len(to_add), 500):
                 svc.table("grupo_servicos").insert(to_add[i:i + 500]).execute()
 

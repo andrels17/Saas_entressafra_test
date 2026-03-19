@@ -48,3 +48,14 @@ def current_role() -> str:
 def current_user_id() -> str:
     """Retorna user_id do usuário logado (string vazia se não definido)."""
     return st.session_state.get("sb_user_id") or ""
+
+
+def normalize_id(value) -> str:
+    """Normaliza qualquer ID (UUID, int, str) para string.
+
+    Garante consistência nas comparações de chaves entre dados do Supabase
+    que podem retornar tipos diferentes dependendo da coluna (UUID vs int).
+    """
+    if value is None:
+        return ""
+    return str(value).strip()
