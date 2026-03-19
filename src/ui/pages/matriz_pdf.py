@@ -307,7 +307,7 @@ def _build_pdf_tables(
                 if right in order_map:
                     service_name, suffix = left, right
             except Exception:
-                pass
+                pass  # ignorado — operação opcional
             if service_name not in by_service:
                 by_service[service_name] = {
                     "name": service_name, "cols": [

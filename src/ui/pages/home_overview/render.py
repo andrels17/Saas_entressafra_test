@@ -404,7 +404,7 @@ def render_home_overview() -> None:
                     prazo_color = "green"
                 st.badge(prazo_label, color=prazo_color)
         except Exception:
-            pass
+            pass  # badge de prazo é opcional — não bloqueia renderização
 
     with h2_col:
         if refresh_button("home_refresh_btn", help="Atualiza KPIs, rankings e snapshots visíveis."):

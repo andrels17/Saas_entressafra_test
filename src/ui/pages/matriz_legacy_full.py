@@ -1005,7 +1005,7 @@ def _build_pdf_tables(
                 if right in order_map:
                     service_name, suffix = left, right
             except Exception:
-                pass
+                pass  # ignorado — operação opcional
             if service_name not in by_service:
                 by_service[service_name] = {
                     "name": service_name, "cols": [
@@ -1401,7 +1401,7 @@ def _fetch_template(sb, tenant_id, grupo_id):
             if all_s:
                 return s2s, all_s
         except Exception:
-            pass
+            pass  # ignorado — operação opcional
     tpl = (
         sb.table("grupo_servicos").select("servico_id") .eq(
             "tenant_id",
@@ -1851,7 +1851,7 @@ def render_matriz():
             _rev_semanas_total = int(
                 rev_row.get("semanas_total") or 0) or None if rev_row else None
         except Exception:
-            pass
+            pass  # ignorado — operação opcional
         _semana_sugerida = _week_from_revisao(
             _now_brt().date(), _rev_data_inicio, _rev_semanas_total)
 
@@ -2469,11 +2469,11 @@ def render_matriz():
                             try:
                                 _load_payload.clear()
                             except Exception:
-                                pass
+                                pass  # ignorado — operação opcional
                             try:
                                 _group_kpis.clear()
                             except Exception:
-                                pass
+                                pass  # ignorado — operação opcional
                             try:
                                 nav.rerun_keep_menu()
                             except Exception:

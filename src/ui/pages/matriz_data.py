@@ -120,7 +120,7 @@ def _fetch_template(sb, tenant_id, grupo_id):
             if all_s:
                 return s2s, all_s
         except Exception:
-            pass
+            pass  # ignorado — operação opcional
     tpl = (
         sb.table("grupo_servicos").select("servico_id") .eq(
             "tenant_id",

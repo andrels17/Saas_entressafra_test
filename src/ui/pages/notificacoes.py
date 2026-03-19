@@ -1007,7 +1007,7 @@ def _fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
                 st.caption(f"**Prévia:** {preview_cfg.descricao_humana()}")
                 st.caption(f"Próximo disparo: {prox} (Brasília)")
             except Exception:
-                pass
+                pass  # ignorado — operação opcional
 
     with st.expander("📋 Como configurar o scheduler", expanded=False):
         st.markdown(f"""

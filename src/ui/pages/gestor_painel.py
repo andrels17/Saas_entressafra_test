@@ -578,7 +578,7 @@ def _fragment_pendencias(
                 key="pend_xlsx_btn",
             )
         except Exception:
-            pass
+            pass  # ignorado — operação opcional
 
 
 # ── Ponto de entrada público ────────────────────────────────────────────

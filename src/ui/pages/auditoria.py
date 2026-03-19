@@ -244,7 +244,7 @@ def _fragment_auditoria(
                 key="audit_xlsx_btn",
             )
         except Exception:
-            pass
+            pass  # ignorado — operação opcional
     st.caption("Dica: se aparecer vazio, confirme que você rodou "
                "`sql/etapa5_auditoria_trigger.sql` no Supabase.")
 

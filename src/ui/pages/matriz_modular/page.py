@@ -435,7 +435,7 @@ def render_matriz():
             _rev_semanas_total = int(
                 rev_row.get("semanas_total") or 0) or None if rev_row else None
         except Exception:
-            pass
+            pass  # ignorado — operação opcional
         _semana_sugerida = _week_from_revisao(
             _now_brt().date(), _rev_data_inicio, _rev_semanas_total)
 

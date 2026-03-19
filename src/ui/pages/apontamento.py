@@ -198,7 +198,7 @@ def _fragment_seletores(
             data_inicio = date.fromisoformat(revisao["data_inicio"])
         semanas_total = int(revisao.get("semanas_total") or 0) or None
     except Exception:
-        pass
+        pass  # ignorado — operação opcional
 
     semana_default = week_from_revisao(
         _now_brt().date(), data_inicio, semanas_total)
@@ -476,7 +476,7 @@ def _fragment_editor(
             from src.utils.kpi_engine import invalidate_kpi_cache
             invalidate_kpi_cache()
         except Exception:
-            pass
+            pass  # invalidação de cache opcional — não bloqueia o fluxo
         bump_data_version()
         if erros == 0:
             st.toast(

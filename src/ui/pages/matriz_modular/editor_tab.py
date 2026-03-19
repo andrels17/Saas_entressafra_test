@@ -243,4 +243,4 @@ def render_editor_tab(
             key_prefix=f"mtz_{equip_sel}_{svc_sel}_",
         )
     except Exception:
-        pass
+        pass  # comentários são opcionais — tabela pode não existir

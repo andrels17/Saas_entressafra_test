@@ -70,8 +70,8 @@ def _resolve_task_row(sb, task_map, revisao_id, equipamento_id, servico_id):
             task_map[(equipamento_id, servico_id)] = row
             task_map[(str(equipamento_id), str(servico_id))] = row
             return row
-    except Exception:
-        pass
+    except Exception as _e:
+        import logging; logging.getLogger("saas").debug("_get_or_create_task: %s", _e)
     return {}
 
 def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_v, svc_names_v, eqs, task_map, eq_label_short, rev_start, atraso_dias, semana_lote):
@@ -255,11 +255,11 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
                     try:
                         _load_payload.clear()
                     except Exception:
-                        pass
+                        pass  # cache.clear() pode falhar sem bloquear o fluxo
                     try:
                         _group_kpis.clear()
                     except Exception:
-                        pass
+                        pass  # cache.clear() pode falhar sem bloquear o fluxo
                     try:
                         nav.rerun_keep_menu()
                     except Exception:
