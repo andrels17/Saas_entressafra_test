@@ -1087,6 +1087,7 @@ def render_notificacoes() -> None:
 
     # Filtro de escopo (não-admin vê apenas seus grupos)
     role = current_role()
+    is_admin = Role.is_admin(role)
     dep_ids, grp_ids = get_my_scope(tenant_id)
     if not can_view_all_data(role):
         if dep_ids == [] and grp_ids == []:
