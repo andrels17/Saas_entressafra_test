@@ -5,9 +5,18 @@ from collections import defaultdict
 import streamlit as st
 
 from src.utils.supabase_helpers import sb_for_user
+from src.db.supabase_client import get_supabase_anon
 
-def _group_kpis(_tid, _rev_id, _ver="0"):
-    _sb = sb_for_user()
+
+def _sb_from_token(token: str = ""):
+    """Constrói cliente sem acessar st.session_state (seguro dentro de cache_data)."""
+    sb = get_supabase_anon()
+    if token:
+        sb.postgrest.auth(token)
+    return sb
+
+def _group_kpis(_tid, _rev_id, _ver="0", _token=""):
+    _sb = _sb_from_token(_token)
     _gids = [
         g.get("id") for g in (
             _sb.table("equip_grupos").select("id").eq(
@@ -65,7 +74,7 @@ def _group_kpis(_tid, _rev_id, _ver="0"):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def _load_payload(_tid, _gid, _rid, _lim, _ver="0", _token=""):
-    _sb = sb_for_user()
+    _sb = _sb_from_token(_token)
     _eqs = (
         _sb.table("equipamentos").select("id,frota,modelo").eq(
             "tenant_id",
@@ -145,7 +154,7 @@ def _dept_name(_tid, _did, _ver="0", _token=""):
         return ""
     try:
         row = (
-            sb_for_user().table("departamentos").select("nome").eq(
+            _sb_from_token(_token).table("departamentos").select("nome").eq(
                 "tenant_id", _tid).eq(
                 "id", _did).limit(1).execute().data)
         return (row[0].get("nome") or "") if row else ""
@@ -156,7 +165,7 @@ def _dept_name(_tid, _did, _ver="0", _token=""):
 @st.cache_data(ttl=300, show_spinner=False)
 def _all_dept_names(_tid, _ver="0", _token=""):
     try:
-        rows = sb_for_user().table("departamentos").select(
+        rows = _sb_from_token(_token).table("departamentos").select(
             "id,nome").eq("tenant_id", _tid).execute().data or []
         return {r["id"]: r.get("nome", "") for r in rows}
     except BaseException:

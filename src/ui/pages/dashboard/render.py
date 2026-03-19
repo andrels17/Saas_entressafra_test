@@ -26,6 +26,15 @@ from src.ui.core.cache import bump_data_version
 from src.utils.kpi_engine import get_group_kpis
 from src.utils.nav import set_current_revisao
 from src.utils.supabase_helpers import current_tenant_id, sb_for_user
+from src.db.supabase_client import get_supabase_anon
+
+
+def _sb_from_token(token: str = ""):
+    sb = get_supabase_anon()
+    if token:
+        sb.postgrest.auth(token)
+    return sb
+
 from src.utils.ui_helpers import status_badge
 
 from .transforms import (
@@ -57,7 +66,7 @@ def _load_revisao(sb, tenant_id: str) -> dict | None:
 @st.cache_data(ttl=30, show_spinner=False)
 def _load_base_cached(_tenant_id: str, _revisao_id: str, _token: str = "",
                       _ver: str = "0") -> tuple[list, list]:
-    sb = sb_for_user()
+    sb = _sb_from_token(_token)
     try:
         raw = sb.table("mv_matriz_base").select("*").eq("tenant_id",
                                                         _tenant_id).eq("revisao_id", _revisao_id).execute().data or []
@@ -86,7 +95,7 @@ def _load_base(sb,
 
 @st.cache_data(ttl=120, show_spinner=False)
 def _load_departamentos(_tenant_id: str, _ver: str = "0", _token: str = "") -> list[dict]:
-    sb = sb_for_user()
+    sb = _sb_from_token(_token)
     try:
         return (
             sb.table("departamentos")
@@ -103,7 +112,7 @@ def _load_departamentos(_tenant_id: str, _ver: str = "0", _token: str = "") -> l
 
 @st.cache_data(ttl=120, show_spinner=False)
 def _load_grupos(_tenant_id: str, _ver: str = "0", _token: str = "") -> list[dict]:
-    sb = sb_for_user()
+    sb = _sb_from_token(_token)
     try:
         return (
             sb.table("equip_grupos")
