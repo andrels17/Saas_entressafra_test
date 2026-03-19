@@ -127,7 +127,7 @@ def render_login():
             try:
                 sb.auth.sign_out()
             except Exception:
-                pass
+                pass  # ignorado — operação opcional
             with st.spinner("Autenticando..."):
                 try:
                     res = sb.auth.sign_in_with_password(

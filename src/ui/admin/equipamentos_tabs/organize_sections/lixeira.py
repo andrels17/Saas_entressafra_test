@@ -108,7 +108,7 @@ def render_lixeira_section(sb, tenant_id: str):
                         for eid in sel_ids:
                             audit_equipment_deleted(eid, frotas.get(eid, eid))
                     except Exception:
-                        pass
+                        pass  # ignorado — operação opcional
                     st.success(f"Apagados: {len(sel_ids)}")
                     _rerun()
                 except Exception as e:

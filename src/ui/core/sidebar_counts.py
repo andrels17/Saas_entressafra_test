@@ -20,7 +20,7 @@ def _safe_count(res) -> int:
         if isinstance(res, dict) and res.get("count") is not None:
             return int(res["count"])
     except Exception:
-        pass
+        pass  # ignorado — operação opcional
     return 0
 
 

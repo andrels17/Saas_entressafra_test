@@ -21,4 +21,4 @@ def clear_cached_functions(*funcs: Any) -> None:
             try:
                 clear()
             except Exception:
-                pass
+                pass  # ignorado — operação opcional

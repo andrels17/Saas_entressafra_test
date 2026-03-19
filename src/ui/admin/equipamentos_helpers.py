@@ -78,8 +78,8 @@ def _rerun():
         if hasattr(nav, "rerun_keep_menu"):
             nav.rerun_keep_menu()
             return
-    except Exception:
-        pass
+    except Exception as _e:
+        import logging; logging.getLogger("saas").warning("Erro em equipamentos_helpers: %s", _e)
     st.rerun()
 
 
@@ -145,8 +145,8 @@ def _audit(
         base["user_id"] = user_id
     try:
         sb.table("equip_audit").insert(base).execute()
-    except Exception:
-        pass
+    except Exception as _e:
+        import logging; logging.getLogger("saas").warning("equipamentos_helpers.py: %s", _e)
 
 
 def _load_grupos(sb, tenant_id: str):
@@ -297,8 +297,8 @@ def _ensure_grupos(sb,
             try:
                 sb.table("equip_grupos").update({"departamento_id": dep_id}).eq(
                     "tenant_id", tenant_id).eq("id", gid).execute()
-            except Exception:
-                pass
+            except Exception as _e:
+                import logging; logging.getLogger("saas").warning("equipamentos_helpers.py: %s", _e)
 
     # Recarrega e retorna mapa atualizado
     try:

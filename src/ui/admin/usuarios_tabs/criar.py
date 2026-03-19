@@ -47,8 +47,8 @@ def render_tab_criar(svc, tenant_id: str, rerun_fn, safe_json_fn):
             try:
                 svc.table("user_profiles").upsert(
                     {"user_id": new_user_id, "nome": nome}).execute()
-            except Exception:
-                pass
+            except Exception as _e:
+                st.error(f"Erro ao salvar: {_e}")
             svc.table("tenant_users").upsert(
                 {"tenant_id": tenant_id, "user_id": new_user_id, "role": user_role}
             ).execute()
@@ -85,8 +85,8 @@ def render_tab_criar(svc, tenant_id: str, rerun_fn, safe_json_fn):
             try:
                 svc.table("user_profiles").upsert(
                     {"user_id": invited_user_id, "nome": nome_i}).execute()
-            except Exception:
-                pass
+            except Exception as _e:
+                st.error(f"Erro ao salvar: {_e}")
             svc.table("tenant_users").upsert(
                 {"tenant_id": tenant_id, "user_id": invited_user_id, "role": role_i}
             ).execute()

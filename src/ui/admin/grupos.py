@@ -153,8 +153,8 @@ def _render_limpeza_grupos(sb, tenant_id: str, deps: list[dict]):
                     try:
                         sb.table("grupo_servicos").update({"grupo_id": canon_id}).eq(
                             "tenant_id", tenant_id).eq("grupo_id", gid).execute()
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        st.warning(f"Erro ao salvar: {_e}")
 
                     # 3) Apaga ou desativa duplicado
                     try:
@@ -207,8 +207,8 @@ def _render_limpeza_grupos(sb, tenant_id: str, deps: list[dict]):
                                 sb.table("grupo_servicos").delete().eq(
                                     "tenant_id", tenant_id).eq(
                                     "grupo_id", gid).execute()
-                            except Exception:
-                                pass
+                            except Exception as _e:
+                                import logging; logging.getLogger("saas").warning("grupos.py: %s", _e)
                             sb.table("equip_grupos").delete().eq(
                                 "tenant_id", tenant_id).eq("id", gid).execute()
                         else:
@@ -361,8 +361,8 @@ def _render_limpeza_total_grupos(sb, tenant_id: str):
                             try:
                                 sb.table(tbl).update({col: None}).eq(
                                     "tenant_id", tenant_id).eq(col, gid).execute()
-                            except Exception:
-                                pass
+                            except Exception as _e:
+                                import logging; logging.getLogger("saas").warning("grupos.py: %s", _e)
 
                     sb.table("equip_grupos").delete().eq(
                         "tenant_id", tenant_id).eq(
@@ -492,8 +492,8 @@ def render_admin_grupos():
         if grp_search:
             try:
                 q = q.ilike("nome", f"%{grp_search.strip()}%")
-            except Exception:
-                pass
+            except Exception as _e:
+                import logging; logging.getLogger("saas").warning("grupos.py: %s", _e)
 
         grupos = q.execute().data or []
         if grp_search:
@@ -701,8 +701,8 @@ def render_admin_grupos():
                             try:
                                 sb.table("equipamentos").update({"grupo_id": None}).eq(
                                     "tenant_id", tenant_id).eq("grupo_id", gid).execute()
-                            except Exception:
-                                pass
+                            except Exception as _e:
+                                import logging; logging.getLogger("saas").warning("grupos.py: %s", _e)
                             try:
                                 sb.table("equip_grupos").delete().eq(
                                     "tenant_id", tenant_id).eq("id", gid).execute()
@@ -762,8 +762,8 @@ def render_admin_grupos():
                 if eq_only_active:
                     try:
                         qe = qe.eq("ativo", True)
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        st.warning(f"Erro ao salvar: {_e}")
 
                 if eq_search:
                     # ilike em frota e modelo (best-effort)
@@ -772,8 +772,8 @@ def render_admin_grupos():
                         # PostgREST: or=(frota.ilike.*x*,modelo.ilike.*x*)
                         qe = qe.or_(
                             f"frota.ilike.%{term}%,modelo.ilike.%{term}%")
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        st.warning(f"Erro ao salvar: {_e}")
 
                 # Ordenação (best-effort)
                 try:
@@ -792,8 +792,8 @@ def render_admin_grupos():
                             qe = qe.order("created_at")
                         except Exception:
                             qe = qe.order("id")
-                except Exception:
-                    pass
+                except Exception as _e:
+                    import logging; logging.getLogger("saas").warning("grupos.py: %s", _e)
 
                 # paginação via range
                 try:

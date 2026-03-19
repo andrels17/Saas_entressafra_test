@@ -155,8 +155,8 @@ def render_limpeza_section(sb, tenant_id: str):
                         sb.table("equipamentos").delete().eq(
                             "tenant_id", tenant_id).eq(
                             "ativo", False).execute()
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        import logging; logging.getLogger("saas").warning("limpeza.py: %s", _e)
                     sb.table("equipamentos").delete().eq(
                         "tenant_id", tenant_id).execute()
                     _audit(sb, tenant_id, "hard_delete", {"scope": "all"})
@@ -247,8 +247,8 @@ def render_limpeza_section(sb, tenant_id: str):
                 sb.table(table).update({"ativo": False}).eq(
                     "tenant_id", tenant_id).in_("id", chunk).execute()
                 updated += len(chunk)
-            except Exception:
-                pass
+            except Exception as _e:
+                import logging; logging.getLogger("saas").warning("limpeza.py: %s", _e)
         return updated
 
     # --- Importante: se não estiver usando service role, deletes/updates podem falhar por RLS.
@@ -409,8 +409,8 @@ def render_limpeza_section(sb, tenant_id: str):
                                 str(e))}")
                     try:
                         st.json(e.json())
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        import logging; logging.getLogger("saas").warning("limpeza.py: %s", _e)
                 except Exception as e:
                     st.error(
                         f"Falha ao reapontar equipamentos.departamento_id (de {did} -> {canon_id}): {e}")
@@ -459,8 +459,8 @@ def render_limpeza_section(sb, tenant_id: str):
                                 str(e))}")
                     try:
                         st.json(e.json())
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        import logging; logging.getLogger("saas").warning("limpeza.py: %s", _e)
                 except Exception as e:
                     st.error(
                         f"Falha ao reapontar equipamentos.grupo_id (de {gid} -> {canon_id}): {e}")
@@ -475,8 +475,8 @@ def render_limpeza_section(sb, tenant_id: str):
                 sb, tenant_id, "dedupe", {
                     "departamentos": dep_report, "grupos": grp_report, "found": {
                         "dep_sets": len(dep_dups), "grp_sets": len(grp_dups)}, }, )
-        except Exception:
-            pass
+        except Exception as _e:
+            import logging; logging.getLogger("saas").warning("limpeza.py: %s", _e)
 
         st.success(
             "Deduplicação concluída. " f"Departamentos: apagados={

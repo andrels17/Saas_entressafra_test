@@ -135,8 +135,8 @@ def _render_limpeza_departamentos(sb, tenant_id: str):
                     try:
                         sb.table("equipamentos").update({"departamento_id": canon_id}).eq(
                             "tenant_id", tenant_id).eq("departamento_id", did).execute()
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        st.warning(f"Erro ao salvar: {_e}")
 
                     try:
                         sb.table("departamentos").delete().eq(
@@ -314,8 +314,8 @@ def _render_limpeza_total_departamentos(sb, tenant_id: str):
                     try:
                         sb.table("equipamentos").update({"departamento_id": None}).eq(
                             "tenant_id", tenant_id).eq("departamento_id", did).execute()
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        st.warning(f"Erro ao salvar: {_e}")
 
                     sb.table("departamentos").delete().eq(
                         "tenant_id", tenant_id).eq(
@@ -424,8 +424,8 @@ def render_admin_departamentos():
             # client, cai no filtro local.
             try:
                 q = q.ilike("nome", f"%{dep_search.strip()}%")
-            except Exception:
-                pass
+            except Exception as _e:
+                st.warning(f"Erro ao buscar dados: {_e}")
 
         deps = q.execute().data or []
         if dep_search:
@@ -620,7 +620,7 @@ def render_admin_departamentos():
                                 sb.table("equip_grupos").update({"departamento_id": None}).eq(
                                     "tenant_id", tenant_id).eq("departamento_id", did).execute()
                             except Exception:
-                                pass
+                                pass  # ignorado — operação opcional
                             try:
                                 sb.table("departamentos").delete().eq(
                                     "tenant_id", tenant_id).eq("id", did).execute()
@@ -669,8 +669,8 @@ def render_admin_departamentos():
                 if g_search:
                     try:
                         qg = qg.ilike("nome", f"%{g_search.strip()}%")
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        st.warning(f"Erro ao salvar: {_e}")
 
                 grupos = qg.execute().data or []
                 if g_search:

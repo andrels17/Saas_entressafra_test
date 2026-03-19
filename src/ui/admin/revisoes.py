@@ -188,8 +188,8 @@ def _delete_revisao_cascade(tenant_id: str, revisao_id: str) -> dict:
         svc.table("historico_eventos").delete().eq(
             "tenant_id", tenant_id).eq(
             "revisao_id", revisao_id).execute()
-    except Exception:
-        pass
+    except Exception as _e:
+        import logging; logging.getLogger("saas").warning("revisoes.py: %s", _e)
 
     svc.table("tarefas_servico").delete().eq(
         "tenant_id", tenant_id).eq(
@@ -234,8 +234,8 @@ def _safe_distinct_task_summary(tenant_id: str, revisao_id: str) -> dict:
             "tarefas_pendentes": pend,
             "tarefas_total": len(rows),
         })
-    except Exception:
-        pass
+    except Exception as _e:
+        import logging; logging.getLogger("saas").warning("revisoes.py: %s", _e)
 
     out["historico"] = _safe_count_rows(
         svc, "historico_eventos", tenant_id, revisao_id)

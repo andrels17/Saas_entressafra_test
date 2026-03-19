@@ -111,7 +111,7 @@ def safe_rerun() -> None:
             nav.rerun_keep_menu()
             return
     except Exception:
-        pass
+        pass  # ignorado — operação opcional
     st.rerun()
 
 

@@ -72,7 +72,7 @@ def get_display_names(tenant_id: str, user_id: str) -> Tuple[str, str]:
             if un:
                 user_name = un
     except Exception:
-        pass
+        pass  # ignorado — operação opcional
 
     # 2) tenant_users (multi-tenant) costuma ter 'nome' ou 'name'
     if user_name == "Usuário":

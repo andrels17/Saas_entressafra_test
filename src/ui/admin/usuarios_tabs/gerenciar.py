@@ -39,8 +39,8 @@ def _load_tenant_users(svc, tenant_id: str) -> list[dict]:
             nome_map = {p.get("user_id"): p.get("nome") for p in profs}
             for r in rows:
                 r["user_profiles"] = {"nome": nome_map.get(r.get("user_id"))}
-        except Exception:
-            pass
+        except Exception as _e:
+            import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
         return rows
 
 
@@ -61,8 +61,8 @@ def _load_user_scope_multi(svc, tenant_id: str, user_id: str) -> dict:
             out["grupo_id"] = next((r.get("grupo_id")
                                    for r in rows if r.get("grupo_id")), None)
             return out
-    except Exception:
-        pass
+    except Exception as _e:
+        import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
     try:
         row = (
             svc.table("tenant_user_scope")
@@ -78,8 +78,8 @@ def _load_user_scope_multi(svc, tenant_id: str, user_id: str) -> dict:
             g = row[0].get("grupo_id")
             out["departamento_ids"] = [d] if d else []
             out["grupo_id"] = g
-    except Exception:
-        pass
+    except Exception as _e:
+        import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
     return out
 
 
@@ -119,15 +119,15 @@ def _save_user_scope_multi(
         except Exception:
             try:
                 svc.table("tenant_user_scope").upsert(pl).execute()
-            except Exception:
-                pass
+            except Exception as _e:
+                import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
     else:
         try:
             svc.table("tenant_user_scope").delete().eq(
                 "tenant_id", tenant_id).eq(
                 "user_id", user_id).execute()
-        except Exception:
-            pass
+        except Exception as _e:
+            import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
 
     if not new_ok:
         d0 = departamento_ids[0] if departamento_ids else None
@@ -136,8 +136,8 @@ def _save_user_scope_multi(
                 svc.table("tenant_user_scope").delete().eq(
                     "tenant_id", tenant_id).eq(
                     "user_id", user_id).execute()
-            except Exception:
-                pass
+            except Exception as _e:
+                import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
             return
         pl = {
             "tenant_id": tenant_id,
@@ -157,14 +157,14 @@ def _clear_user_scope(svc, tenant_id: str, user_id: str):
         svc.table("tenant_user_departamentos").delete().eq(
             "tenant_id", tenant_id).eq(
             "user_id", user_id).execute()
-    except Exception:
-        pass
+    except Exception as _e:
+        import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
     try:
         svc.table("tenant_user_scope").delete().eq(
             "tenant_id", tenant_id).eq(
             "user_id", user_id).execute()
-    except Exception:
-        pass
+    except Exception as _e:
+        import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
 
 
 def _load_departamentos(svc, tenant_id: str) -> list[dict]:
@@ -250,8 +250,8 @@ def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn):
                     try:
                         svc.table("user_profiles").upsert(
                             {"user_id": target_user_id, "nome": new_nome}).execute()
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
                     svc.table("tenant_users").upsert(
                         {"tenant_id": tenant_id, "user_id": target_user_id, "role": new_role}
                     ).execute()
@@ -401,8 +401,8 @@ def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn):
                     svc.table("user_setores").delete().eq(
                         "tenant_id", tenant_id).eq(
                         "user_id", target_user_id).execute()
-                except Exception:
-                    pass
+                except Exception as _e:
+                    import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
                 _clear_user_scope(svc, tenant_id, target_user_id)
                 audit_user_deleted(target_user_id, cur_nome or target_user_id)
                 st.success("✅ Vínculo removido.")
