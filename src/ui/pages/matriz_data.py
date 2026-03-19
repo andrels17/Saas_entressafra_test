@@ -10,7 +10,7 @@ from src.utils.supabase_helpers import sb_for_user
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _group_kpis(_tid, _rev_id, _ver="0"):
+def _group_kpis(_tid, _rev_id, _ver="0", _token=""):
     _sb = sb_for_user()
     _gids = [
         g.get("id") for g in (
@@ -158,7 +158,7 @@ def _dept_name(_tid, _did, _ver="0"):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _all_dept_names(_tid, _ver="0"):
+def _all_dept_names(_tid, _ver="0", _token=""):
     try:
         rows = sb_for_user().table("departamentos").select(
             "id,nome").eq("tenant_id", _tid).execute().data or []
