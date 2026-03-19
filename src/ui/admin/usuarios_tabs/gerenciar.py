@@ -1,4 +1,5 @@
 """Tab 2 — Gerenciar usuários: role, escopo, senha, remoção."""
+import logging
 import streamlit as st
 from postgrest.exceptions import APIError
 from src.auth.audit import audit_user_role_changed, audit_user_deleted
