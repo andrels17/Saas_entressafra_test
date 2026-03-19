@@ -18,7 +18,7 @@ def render_tempos_tab(
     all_services,
     eq_label_short,
     eq_label,
-):
+) -> None:
     st.markdown("### ⏱️ Tempos de execução (D/R/M)")
     st.caption("Análise de duração entre as etapas Desmontagem → Revisão → Montagem.")
 

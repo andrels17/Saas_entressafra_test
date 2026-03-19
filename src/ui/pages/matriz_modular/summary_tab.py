@@ -5,7 +5,7 @@ import streamlit as st
 from src.ui.pages.matriz_runtime import risk_color as _risk_color
 
 
-def render_summary_tab(*, resumo_df):
+def render_summary_tab(*, resumo_df) -> None:
     st.markdown("### Ranking de equipamentos por progresso")
     st.caption("Ordenado do mais atrasado para o mais adiantado.")
     if resumo_df.empty:

@@ -1447,7 +1447,7 @@ def _all_dept_names(_tid, _ver="0"):
         return {}
 
 
-def render_matriz():
+def render_matriz() -> None:
     try:
         _inject_css()
         _ph("\u229e", "Matriz de Atividades",

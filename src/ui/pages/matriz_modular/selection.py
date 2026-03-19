@@ -10,7 +10,7 @@ from .styles import (
 )
 
 
-def render_selection_screen(*, tenant_id, revisao_id, grupos, search, status_filter, sort_by, data_version):
+def render_selection_screen(*, tenant_id, revisao_id, grupos, search, status_filter, sort_by, data_version) -> None:
     """Renderiza a grade de seleção de grupos.
 
     Retorna True quando a tela de seleção foi renderizada e o fluxo deve encerrar.

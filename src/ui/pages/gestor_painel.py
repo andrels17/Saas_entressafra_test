@@ -19,7 +19,7 @@ from src.ui.core.confirm_dialog import confirm_dialog
 from src.ui.core.empty_state import empty_state
 from src.ui.core.error_messages import show_supabase_error
 from src.utils.ui_helpers import df_to_xlsx, status_badge
-from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_role
+from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_role, sanitize_user_input
 from src.utils.mobile import is_mobile
 from src.auth.scope import get_user_scope
 from src.auth.roles import Role
@@ -549,7 +549,7 @@ def _fragment_pendencias(
                             st.error("Preencha o motivo antes de travar.")
                         else:
                             sb.table("tarefas_servico").update(
-                                {"status": "travado", "observacao": motivo}).eq("id", tid).execute()
+                                {"status": "travado", "observacao": sanitize_user_input(motivo, max_length=300)}).eq("id", tid).execute()
                             st.cache_data.clear()
                             st.rerun()
 

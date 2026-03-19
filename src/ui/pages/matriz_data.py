@@ -1,3 +1,4 @@
+# DEPRECATED — não é importado por nenhum módulo ativo. Use src/ui/pages/matriz_modular/data.py
 """Carga de dados e lookups da página de matriz."""
 from __future__ import annotations
 

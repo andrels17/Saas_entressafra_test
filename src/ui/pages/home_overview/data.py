@@ -79,7 +79,7 @@ def load_snapshots(
             .eq("tenant_id", tenant_id)
             .eq("revisao_id", revisao_id)
             .order("week_number")
-            .limit(20000)
+            .limit(20_000)  # usar fetch_all() se exceder este limite
             .execute()
             .data
         ) or []

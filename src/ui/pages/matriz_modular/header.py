@@ -7,7 +7,7 @@ from src.ui.pages.matriz_runtime import sector_set_open as _sector_set_open
 from .styles import _pct_bar_html
 
 
-def render_group_header(*, placeholder, grupo_nome, titulo, eqs, pct_geral, eq100_g, setor_rows, revisao_id, grupo_id):
+def render_group_header(*, placeholder, grupo_nome, titulo, eqs, pct_geral, eq100_g, setor_rows, revisao_id, grupo_id) -> None:
     with placeholder.container():
         st.markdown('<div class="enterprise-sticky">', unsafe_allow_html=True)
         c_l, c_r = st.columns([6, 1], vertical_alignment="center")

@@ -117,7 +117,7 @@ def _collect_matrix_changes(df_display, edited, svc_bool, col_meta):
 
     return changes
 
-def render_matriz():
+def render_matriz() -> None:
     try:
         _inject_css()
         _ph("\u229e", "Matriz de Atividades",
@@ -772,6 +772,68 @@ def render_matriz():
             else:
                 st.info("Sem tarefas para esta revisão/grupo.")
 
+            # ── M: Comparativo entre revisões ──────────────────────────────
+            st.divider()
+            st.markdown("#### Comparativo entre revisões do mesmo grupo")
+            st.caption("Compare o progresso desta revisão com revisões anteriores do mesmo grupo.")
+            try:
+                _all_revs = [r for r in revisoes if r.get("id")]
+                if len(_all_revs) > 1:
+                    # Busca KPIs de todas as revisões para este grupo
+                    _comp_rows = []
+                    for _rev in _all_revs[:6]:  # max 6 revisões
+                        _rid = _rev.get("id")
+                        _rtit = _rev.get("titulo") or str(_rid)[:8]
+                        try:
+                            _trows = (
+                                sb.table("tarefas_servico")
+                                .select("etapa_d,etapa_r,etapa_m")
+                                .eq("tenant_id", tenant_id)
+                                .eq("revisao_id", _rid)
+                                .in_("equipamento_id", [e["id"] for e in eqs])
+                                .execute().data
+                            ) or []
+                            _done = sum(
+                                int(bool(t.get("etapa_d"))) +
+                                int(bool(t.get("etapa_r"))) +
+                                int(bool(t.get("etapa_m")))
+                                for t in _trows
+                            )
+                            _total = max(len(eqs) * len(all_services) * 3, 1)
+                            _pct = round((_done / _total) * 100)
+                            _status = _rev.get("status") or "?"
+                            _comp_rows.append({
+                                "Revisão": _rtit,
+                                "Status": _status,
+                                "% Concluído": _pct,
+                                "Etapas concluídas": _done,
+                                "Total esperado": _total,
+                            })
+                        except Exception:
+                            pass  # ignorado — revisão pode não ter dados
+
+                    if _comp_rows:
+                        import pandas as pd
+                        _comp_df = pd.DataFrame(_comp_rows)
+                        # Destaca revisão atual
+                        _comp_df["Atual"] = _comp_df.apply(
+                            lambda r: "◄ atual" if r["Revisão"] in (titulo, revisao_id) else "", axis=1
+                        )
+                        st.dataframe(
+                            _comp_df,
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "% Concluído": st.column_config.ProgressColumn(
+                                    "% Concluído", min_value=0, max_value=100
+                                ),
+                            }
+                        )
+                else:
+                    st.info("Apenas uma revisão encontrada — sem dados para comparar.")
+            except Exception as _comp_err:
+                st.caption(f"Comparativo não disponível: {_comp_err}")
+
 
         # ── TAB: ANALYTICS & AUTOMAÇÃO ──
         with tab_analytics:
@@ -883,16 +945,35 @@ def render_matriz():
         # ── TAB: EDITAR CÉLULA ──
         if tab_editor is not None:
             with tab_editor:
-                from .editor_tab import render_editor_tab
-                render_editor_tab(
-                    sb=sb,
-                    tenant_id=tenant_id,
-                    revisao_id=revisao_id,
-                    setor_to_services=setor_to_services,
-                    eq_label_short=eq_label_short,
-                    task_map=task_map,
-                    semana_sugerida=_semana_sugerida,
+                from .editor_tab import render_editor_tab, render_bulk_editor
+                _edit_mode = st.radio(
+                    "Modo de edição",
+                    ["✏️ Célula individual", "⚡ Lote por serviço"],
+                    horizontal=True,
+                    key="mat_edit_mode",
                 )
+                st.divider()
+                if _edit_mode == "✏️ Célula individual":
+                    render_editor_tab(
+                        sb=sb,
+                        tenant_id=tenant_id,
+                        revisao_id=revisao_id,
+                        setor_to_services=setor_to_services,
+                        eq_label_short=eq_label_short,
+                        task_map=task_map,
+                        semana_sugerida=_semana_sugerida,
+                    )
+                else:
+                    render_bulk_editor(
+                        sb=sb,
+                        tenant_id=tenant_id,
+                        revisao_id=revisao_id,
+                        setor_to_services=setor_to_services,
+                        task_map=task_map,
+                        eqs=eqs,
+                        eq_label_short=eq_label_short,
+                        semana_sugerida=_semana_sugerida,
+                    )
 
         # ── TAB: EXPORTAR ──
         with tab_exportar:

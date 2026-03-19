@@ -152,7 +152,7 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
             disabled=['Status', 'Equipamento'],
         )
 
-    sv1, sv2, _ = st.columns([1.2, 1.8, 1])
+    sv1, sv2, sv3 = st.columns([1.2, 1.8, 1])
     with sv1:
         save_now = form_submit_button(
             '💾 Salvar alterações',
@@ -161,6 +161,26 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
         )
     with sv2:
         st.caption('Marque/desmarque etapas acima e clique em Salvar.')
+    with sv3:
+        # ── K: Export por setor ──
+        try:
+            import io
+            exp_df = df_display.reset_index(drop=True).copy()
+            for c in [c for c in exp_df.columns if c not in ('%', 'Equipamento', 'Status')]:
+                exp_df[c] = exp_df[c].apply(lambda v: 'OK' if bool(v) else '')
+            csv_bytes = exp_df.to_csv(index=False).encode('utf-8-sig')
+            safe_name = setor_nome.replace('/', '-').replace(' ', '_')
+            st.download_button(
+                '⬇️ CSV',
+                data=csv_bytes,
+                file_name=f'setor_{safe_name}.csv',
+                mime='text/csv',
+                use_container_width=True,
+                key=f'csv_{kb}',
+                help=f'Baixar dados do setor {setor_nome} em CSV',
+            )
+        except Exception:
+            pass  # export opcional — não bloqueia fluxo principal
 
     pending_changes_key = f'pending_changes_{kb}'
     pending_preview_key = f'pending_preview_{kb}'
@@ -260,6 +280,8 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
                         _group_kpis.clear()
                     except Exception:
                         pass  # cache.clear() pode falhar sem bloquear o fluxo
+                    # ── X: limpa cache para rerun mostrar progresso atualizado ──
+                    st.session_state.pop("_mtz_payload_cache", None)
                     try:
                         nav.rerun_keep_menu()
                     except Exception:
@@ -267,7 +289,25 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
 
 
 
-def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_disp, semana_sugerida, group_rev_start, setor_to_services, tarefas, eqs, task_map, eq_label_short):
+def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_disp, semana_sugerida, group_rev_start, setor_to_services, tarefas, eqs, task_map, eq_label_short) -> None:
+    # ── W: Ctrl+S — clica no primeiro botão "Salvar alterações" visível ──
+    st.markdown(
+        """<script>
+        (function() {
+            if (window._mtz_ctrlS) return;
+            window._mtz_ctrlS = true;
+            document.addEventListener('keydown', function(e) {
+                if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                    e.preventDefault();
+                    const btns = Array.from(document.querySelectorAll('button'));
+                    const save = btns.find(b => b.textContent.includes('Salvar alterações'));
+                    if (save) { save.click(); }
+                }
+            });
+        })();
+        </script>""",
+        unsafe_allow_html=True,
+    )
     st.markdown('### Drill-down por setor')
     st.caption('Marque as etapas (D/R/M) direto na tabela. Setores 🔴 são prioridade — expanda para editar.')
 

@@ -5,6 +5,7 @@ from collections import defaultdict
 import streamlit as st
 
 from src.utils.supabase_helpers import sb_for_user
+from src.repositories.base import fetch_grupo_template as _fetch_template_impl
 from src.db.supabase_client import get_supabase_anon
 
 
@@ -101,53 +102,8 @@ def _load_payload(_tid, _gid, _rid, _lim, _ver="0", _token=""):
 
 
 def _fetch_template(sb, tenant_id, grupo_id):
-    for select, setor_fn in [
-        ("servico_id, servicos(id,nome,setor_id,setores(nome))",
-         lambda sv: (sv.get("setores") or {}).get("nome") or "Setor"),
-        ("servico_id, servicos(id,nome,setor)",
-         lambda sv: sv.get("setor") or "Setor"),
-    ]:
-        try:
-            tpl = (
-                sb.table("grupo_servicos").select(select) .eq(
-                    "tenant_id",
-                    tenant_id).eq(
-                    "grupo_id",
-                    grupo_id).execute().data) or []
-            s2s = defaultdict(list)
-            all_s = []
-            for r in tpl:
-                sv = r.get("servicos") or {}
-                sid = sv.get("id")
-                if not sid:
-                    continue
-                s2s[setor_fn(sv)].append(sv)
-                all_s.append(sv)
-            if all_s:
-                return s2s, all_s
-        except Exception:
-            pass  # ignorado — operação opcional
-    tpl = (
-        sb.table("grupo_servicos").select("servico_id") .eq(
-            "tenant_id",
-            tenant_id).eq(
-            "grupo_id",
-            grupo_id).execute().data) or []
-    ids = [r.get("servico_id") for r in tpl if r.get("servico_id")]
-    if not ids:
-        return defaultdict(list), []
-    svs = (sb.table("servicos").select("id,nome,setor")
-           .eq("tenant_id", tenant_id).in_("id", ids).execute().data) or []
-    s2s = defaultdict(list)
-    all_s = []
-    for sv in svs:
-        sn = sv.get("setor") or "Setor"
-        item = {"id": sv.get("id"), "nome": sv.get("nome")}
-        s2s[sn].append(item)
-        all_s.append(item)
-    return s2s, all_s
-
-
+    """Delega para o repositório central — evita triplicação de lógica."""
+    return _fetch_template_impl(sb, tenant_id, grupo_id)
 @st.cache_data(ttl=300, show_spinner=False)
 def _dept_name(_tid, _did, _ver="0", _token=""):
     if not _did:

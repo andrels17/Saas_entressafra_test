@@ -17,7 +17,7 @@ def render_export_tab(
     view_agg,
     sector_tables_for_export,
     data_version,
-):
+) -> None:
     st.markdown("### Exportações")
     res_exp = resumo_df if (isinstance(resumo_df, pd.DataFrame) and not resumo_df.empty) else pd.DataFrame()
     va_exp = view_agg if (isinstance(view_agg, pd.DataFrame) and not view_agg.empty) else pd.DataFrame()
