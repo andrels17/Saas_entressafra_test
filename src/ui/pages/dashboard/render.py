@@ -85,7 +85,7 @@ def _load_base(sb,
                revisao_id: str) -> tuple[pd.DataFrame,
                                          pd.DataFrame]:
     ver = str(st.session_state.get("data_version", "0"))
-    raw_list, eq_list = _load_base_cached(tenant_id, revisao_id, ver, st.session_state.get("sb_access_token", ""))
+    raw_list, eq_list = _load_base_cached(tenant_id, revisao_id, st.session_state.get("sb_access_token", ""), ver)
     raw = pd.DataFrame(raw_list)
     eq_meta = pd.DataFrame(eq_list)
     if not eq_meta.empty and "id" in eq_meta.columns:
