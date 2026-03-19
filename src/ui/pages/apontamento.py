@@ -46,7 +46,7 @@ def _load_revisoes(_tenant_id: str, _ver: str = "0") -> list[dict]:
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _load_grupos(_tenant_id: str, _ver: str = "0") -> list[dict]:
+def _load_grupos(_tenant_id: str, _ver: str = "0", _token: str = "") -> list[dict]:
     sb = sb_for_user()
     return (
         sb.table("equip_grupos")
