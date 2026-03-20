@@ -384,6 +384,11 @@ def main():
 
     # ── Navegação (mobile vs desktop) ─────────────────────────────────────────
     if is_mobile():
+        # Esconde a sidebar via CSS inline — só quando mobile é confirmado
+        st.markdown(
+            "<style>section[data-testid='stSidebar']{display:none!important}</style>",
+            unsafe_allow_html=True,
+        )
         _render_mobile_nav(menu_pages, current)
     else:
         selected = _render_sidebar(menu_pages, current, role, user_id, tenant_id, is_mobile())
