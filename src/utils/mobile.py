@@ -1,33 +1,31 @@
-"""Detecção de mobile via JavaScript — sem toggle manual.
+"""Detecção automática de mobile via JavaScript — sem toggle manual.
 
 Estratégia:
-  1. Na primeira visita, um snippet JS mede window.innerWidth e grava
-     em session_state via st.query_params (?_mw=<largura>).
+  1. Um snippet JS mede window.innerWidth e grava em session_state
+     via st.query_params (?_mw=<largura>) na primeira visita.
   2. A partir do segundo rerun, is_mobile() lê essa largura.
-  3. Fallback: query param ?mobile=1 força o modo (atalho para
-     criar link direto para operadores de campo).
+  3. Fallback: ?mobile=1 força o modo (atalho para operadores de campo).
 
-Threshold: <= 768px = mobile (padrão da indústria para celular/tablet pequeno).
+Threshold: <= 768px = mobile.
 """
 from __future__ import annotations
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 _MOBILE_THRESHOLD = 768
 _SESSION_KEY = "__screen_width__"
 
 
 def _inject_width_detector() -> None:
-    """Injeta snippet JS que mede a largura e reescreve o query param _mw.
+    """Injeta JS que mede a largura da tela e reescreve ?_mw= na URL.
 
-    Executado uma vez por sessão. Usa st.components para JS puro.
-    O rerun é disparado automaticamente via window.location após a medição.
+    Usa st.markdown com unsafe_allow_html — sem componente externo,
+    sem renderização de texto indesejada.
     """
     if st.session_state.get("__width_detected__"):
         return
 
-    # Lê largura atual da URL se já foi gravada antes
+    # Lê largura já medida na URL
     try:
         mw = st.query_params.get("_mw")
         if mw and str(mw).isdigit():
@@ -37,35 +35,32 @@ def _inject_width_detector() -> None:
     except Exception:
         pass
 
-    # Injeta JS que mede e redireciona com ?_mw=<largura>
-    # height=0 para não ocupar espaço na página
-    components.html(
+    # Injeta script inline — não renderiza texto, apenas executa JS
+    st.markdown(
         """
-        <script>
-        (function() {
-            var w = window.innerWidth || document.documentElement.clientWidth || 768;
-            var url = new URL(window.location.href);
-            if (url.searchParams.get('_mw') !== String(w)) {
-                url.searchParams.set('_mw', w);
-                window.location.replace(url.toString());
-            }
-        })();
-        </script>
-        """,
-        height=0,
+<script>
+(function(){
+  var w = window.innerWidth || document.documentElement.clientWidth || 1024;
+  var u = new URL(window.location.href);
+  if (u.searchParams.get('_mw') !== String(w)) {
+    u.searchParams.set('_mw', w);
+    window.location.replace(u.toString());
+  }
+})();
+</script>
+""",
+        unsafe_allow_html=True,
     )
 
 
 def is_mobile() -> bool:
-    """Retorna True se a tela for menor ou igual a 768px.
+    """Retorna True se a tela for <= 768px.
 
     Detecta automaticamente via JS na primeira visita.
-    Fallback: ?mobile=1 na URL força o modo mobile.
+    Override: ?mobile=1 na URL força o modo mobile.
     """
-    # Override manual via URL (útil para atalhos no campo)
     try:
-        qp = st.query_params
-        if str(qp.get("mobile", "")).lower() in ("1", "true", "yes", "on"):
+        if str(st.query_params.get("mobile", "")).lower() in ("1", "true", "yes", "on"):
             return True
     except Exception:
         pass
@@ -74,13 +69,9 @@ def is_mobile() -> bool:
     if width is not None:
         return int(width) <= _MOBILE_THRESHOLD
 
-    # Ainda não mediu — chuta False (será corrigido após primeiro rerun)
     return False
 
 
 def detect_screen_width() -> None:
-    """Chama o detector JS. Deve ser chamado no início do app (antes do login).
-
-    Substitui render_mobile_toggle() — sem UI exposta ao usuário.
-    """
+    """Detecta a largura da tela via JS. Chamar no início do app."""
     _inject_width_detector()
