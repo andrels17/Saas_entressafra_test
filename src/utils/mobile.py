@@ -1,89 +1,86 @@
+"""Detecção de mobile via JavaScript — sem toggle manual.
+
+Estratégia:
+  1. Na primeira visita, um snippet JS mede window.innerWidth e grava
+     em session_state via st.query_params (?_mw=<largura>).
+  2. A partir do segundo rerun, is_mobile() lê essa largura.
+  3. Fallback: query param ?mobile=1 força o modo (atalho para
+     criar link direto para operadores de campo).
+
+Threshold: <= 768px = mobile (padrão da indústria para celular/tablet pequeno).
+"""
+from __future__ import annotations
+
 import streamlit as st
+import streamlit.components.v1 as components
+
+_MOBILE_THRESHOLD = 768
+_SESSION_KEY = "__screen_width__"
+
+
+def _inject_width_detector() -> None:
+    """Injeta snippet JS que mede a largura e reescreve o query param _mw.
+
+    Executado uma vez por sessão. Usa st.components para JS puro.
+    O rerun é disparado automaticamente via window.location após a medição.
+    """
+    if st.session_state.get("__width_detected__"):
+        return
+
+    # Lê largura atual da URL se já foi gravada antes
+    try:
+        mw = st.query_params.get("_mw")
+        if mw and str(mw).isdigit():
+            st.session_state[_SESSION_KEY] = int(mw)
+            st.session_state["__width_detected__"] = True
+            return
+    except Exception:
+        pass
+
+    # Injeta JS que mede e redireciona com ?_mw=<largura>
+    # height=0 para não ocupar espaço na página
+    components.html(
+        """
+        <script>
+        (function() {
+            var w = window.innerWidth || document.documentElement.clientWidth || 768;
+            var url = new URL(window.location.href);
+            if (url.searchParams.get('_mw') !== String(w)) {
+                url.searchParams.set('_mw', w);
+                window.location.replace(url.toString());
+            }
+        })();
+        </script>
+        """,
+        height=0,
+    )
 
 
 def is_mobile() -> bool:
-    """Retorna True quando o modo mobile estiver ativo.
+    """Retorna True se a tela for menor ou igual a 768px.
 
-    Streamlit não expõe user-agent de forma confiável. Então suportamos:
-    - toggle na UI (session_state)
-    - query param ?mobile=1 (útil para atalhos no chão de fábrica)
+    Detecta automaticamente via JS na primeira visita.
+    Fallback: ?mobile=1 na URL força o modo mobile.
     """
+    # Override manual via URL (útil para atalhos no campo)
     try:
         qp = st.query_params
-        qp_mobile = str(
-            qp.get(
-                "mobile",
-                "")).lower() in (
-            "1",
-            "true",
-            "yes",
-            "on")
+        if str(qp.get("mobile", "")).lower() in ("1", "true", "yes", "on"):
+            return True
     except Exception:
-        qp_mobile = False
-    return bool(st.session_state.get("__force_mobile__", False) or qp_mobile)
+        pass
+
+    width = st.session_state.get(_SESSION_KEY)
+    if width is not None:
+        return int(width) <= _MOBILE_THRESHOLD
+
+    # Ainda não mediu — chuta False (será corrigido após primeiro rerun)
+    return False
 
 
-def render_mobile_toggle() -> None:
-    """Toggle do modo mobile.
+def detect_screen_width() -> None:
+    """Chama o detector JS. Deve ser chamado no início do app (antes do login).
 
-    Nota: em mobile, a sidebar pode estar escondida por CSS.
-    Então também exibimos o toggle no corpo da página quando necessário.
+    Substitui render_mobile_toggle() — sem UI exposta ao usuário.
     """
-    # Importante: em alguns navegadores (ex.: Safari iOS) a sidebar pode ficar
-    # escondida por CSS quando o modo mobile está ativo — e aí o usuário não
-    # consegue “voltar” para o desktop.
-    #
-    # Estratégia:
-    # 1) Mantém o checkbox na sidebar (desktop)
-    # 2) Renderiza SEMPRE um controle compacto no corpo (desktop e mobile)
-    def _sync_mobile_from(widget_key: str):
-        """Sincroniza o estado global __force_mobile__ a partir de um widget."""
-        st.session_state["__force_mobile__"] = bool(
-            st.session_state.get(widget_key, False))
-
-    # Sidebar (desktop)
-    try:
-        with st.sidebar:
-            st.checkbox(
-                "📱 Modo chão de fábrica",
-                key="__force_mobile_sidebar__",
-                value=bool(
-                    st.session_state.get(
-                        "__force_mobile__",
-                        False)),
-                on_change=_sync_mobile_from,
-                args=(
-                    "__force_mobile_sidebar__",
-                ),
-                help="Ativa a experiência otimizada para celular. Você também pode usar ?mobile=1 no link.",
-            )
-    except Exception:
-        pass  # ignorado — operação opcional
-
-    # Controle no corpo (sempre visível)
-    # Usamos checkbox (mais estável que toggle em Safari)
-    cols = st.columns([0.58, 0.22, 0.20], vertical_alignment="center")
-    with cols[2]:
-        st.checkbox(
-            "📱 Mobile",
-            key="__force_mobile_body__",
-            value=bool(st.session_state.get("__force_mobile__", False)),
-            on_change=_sync_mobile_from,
-            args=("__force_mobile_body__",),
-            help="Ative para navegação e controles otimizados para celular. Obs.: ?mobile=1 no link força o mobile.",
-        )
-
-    # Logout no corpo: apenas em mobile (evita redundância com a sidebar no
-    # desktop)
-    with cols[1]:
-        if is_mobile() and st.session_state.get("sb_access_token"):
-            if st.button(
-                "⎋ Sair",
-                key="body_logout",
-                    use_container_width=True):
-                try:
-                    from src.auth.session import hard_logout
-                    hard_logout()
-                except Exception:
-                    st.session_state.clear()
-                    st.rerun()
+    _inject_width_detector()
