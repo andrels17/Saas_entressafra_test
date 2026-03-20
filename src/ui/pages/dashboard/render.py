@@ -67,8 +67,18 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
                       ver: str = "0") -> tuple[list, list]:
     sb = _sb_from_token(_token)
     try:
-        raw = sb.table("mv_matriz_base").select("*").eq("tenant_id",
-                                                        tenant_id).eq("revisao_id", revisao_id).execute().data or []
+        raw = (
+            sb.table("mv_matriz_base")
+            .select(
+                "equipamento_id,grupo_id,grupo,departamento_id,"
+                "frota,modelo,servico_id,setor,"
+                "state,ok_count,etapa_d,etapa_r,etapa_m,updated_at"
+            )
+            .eq("tenant_id", tenant_id)
+            .eq("revisao_id", revisao_id)
+            .execute()
+            .data
+        ) or []
     except Exception:
         raw = []
     try:
