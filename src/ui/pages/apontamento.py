@@ -27,6 +27,7 @@ from src.ui.core.empty_state import empty_state
 from src.ui.core.error_messages import show_supabase_error
 from src.utils.ui_helpers import df_to_xlsx
 from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_user_id
+from src.utils.mobile import is_mobile
 from src.utils.weeks import week_from_revisao
 
 
@@ -259,13 +260,64 @@ def _fragment_seletores(
 
 # ── Fragment: editor de tarefas ─────────────────────────────────────────
 
+
+def _render_mobile_card(t: dict, sb, user_id: str) -> None:
+    """Card de tarefa individual optimizado para toque em mobile."""
+    svc = t.get("servicos") or {}
+    setor = (svc.get("setores") or {}).get("nome") or "Setor"
+    tid = t["id"]
+    status = t.get("status") or "pendente"
+    obs = t.get("observacao") or ""
+    status_icon = {"concluido": "✅", "travado": "⛔", "em_andamento": "🔧", "pendente": "⏳"}.get(status, "⏳")
+
+    with st.container(border=True):
+        st.markdown(
+            f"{status_icon} **{svc.get('nome') or '—'}**  \n"
+            f'<span style="font-size:.8rem;color:#94A3B8">{setor}</span>',
+            unsafe_allow_html=True,
+        )
+        if obs:
+            st.caption(f"📝 {obs}")
+
+        c1, c2, c3 = st.columns(3)
+        new_d = c1.toggle("✂️ Desmontou", value=bool(t.get("etapa_d")), key=f"mob_d_{tid}")
+        new_r = c2.toggle("🔍 Revisou",   value=bool(t.get("etapa_r")), key=f"mob_r_{tid}")
+        new_m = c3.toggle("🔩 Montou",    value=bool(t.get("etapa_m")), key=f"mob_m_{tid}")
+
+        if new_d != bool(t.get("etapa_d")) or new_r != bool(t.get("etapa_r")) or new_m != bool(t.get("etapa_m")):
+            new_status = "concluido" if (new_d and new_r and new_m) else (
+                "em_andamento" if (new_d or new_r or new_m) else status)
+            try:
+                sb.table("tarefas_servico").update({
+                    "etapa_d": new_d, "etapa_r": new_r, "etapa_m": new_m,
+                    "status": new_status, "updated_by": user_id or None,
+                }).eq("id", tid).execute()
+                bump_data_version()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao salvar: {e}")
+
+        with st.expander("📝 Observação" + (f" — {obs[:30]}…" if len(obs) > 30 else (f" — {obs}" if obs else "")), expanded=False):
+            new_obs = st.text_area("obs", value=obs, key=f"mob_obs_{tid}",
+                                   label_visibility="collapsed", height=80)
+            if st.button("Salvar", key=f"mob_obs_save_{tid}", use_container_width=True):
+                norm = (new_obs or "").strip()
+                if norm != obs.strip():
+                    sb.table("tarefas_servico").update({
+                        "observacao": norm or None, "updated_by": user_id or None
+                    }).eq("id", tid).execute()
+                    bump_data_version()
+                    st.rerun()
+
+
 @st.fragment
 def _fragment_editor(
         tenant_id: str,
         revisao_id: str,
         equipamento_id: str) -> None:
-    """Editor de tarefas em fragment — reroda independentemente dos seletores."""
+    """Editor de tarefas — adaptativo desktop/mobile."""
     ver = str(st.session_state.get("data_version", "0"))
+    mobile = is_mobile()
 
     with st.spinner("", show_time=False):
         tarefas = _load_tarefas(tenant_id, revisao_id, equipamento_id, ver)
@@ -281,109 +333,85 @@ def _fragment_editor(
     semana_default = st.session_state.get("_apt_semana_default", 1)
     user_id = current_user_id()
 
-    # Filtros rápidos
-    col_f1, col_f2 = st.columns([0.6, 0.4])
-    with col_f1:
-        show_pending = st.toggle(
-            "Somente pendentes/travados",
-            value=False,
-            key="apt_pending_toggle")
-    with col_f2:
-        semana_val = st.number_input(
-            "Semana (sugestão)",
-            min_value=0,
-            value=semana_default,
-            step=1,
-            key="apt_semana_num")
+    # ── Filtros ───────────────────────────────────────────────────────────────
+    if mobile:
+        show_pending = st.toggle("Somente pendentes/travados", value=True, key="apt_pending_toggle")
+        semana_val = semana_default
+    else:
+        col_f1, col_f2 = st.columns([0.6, 0.4])
+        with col_f1:
+            show_pending = st.toggle("Somente pendentes/travados", value=False, key="apt_pending_toggle")
+        with col_f2:
+            semana_val = st.number_input(
+                "Semana (sugestão)", min_value=0, value=semana_default,
+                step=1, key="apt_semana_num")
 
-    # Agrupa por setor para filtro de setores
     setores_disponiveis = sorted({
         (((t.get("servicos") or {}).get("setores") or {}).get("nome") or "Setor")
         for t in tarefas
     })
     setor_filtro = st.pills(
-        "Filtrar por setor",
-        setores_disponiveis,
-        selection_mode="multi",
-        default=None,
-        key="apt_setor_pills",
+        "Setor", setores_disponiveis, selection_mode="multi",
+        default=None, key="apt_setor_pills",
         label_visibility="collapsed" if len(setores_disponiveis) <= 1 else "visible",
     ) if len(setores_disponiveis) > 1 else None
 
-    # Filtra tarefas
+    # ── Filtra ────────────────────────────────────────────────────────────────
     tarefas_filtradas = tarefas
     if show_pending:
-        tarefas_filtradas = [t for t in tarefas_filtradas if t.get(
-            "status") in ("pendente", "travado", "em_andamento")]
+        tarefas_filtradas = [t for t in tarefas_filtradas
+                             if t.get("status") in ("pendente", "travado", "em_andamento")]
     if setor_filtro:
-        tarefas_filtradas = [t for t in tarefas_filtradas if (
-            ((t.get("servicos") or {}).get("setores") or {}).get("nome") or "Setor") in setor_filtro]
+        tarefas_filtradas = [t for t in tarefas_filtradas
+                             if (((t.get("servicos") or {}).get("setores") or {}).get("nome") or "Setor")
+                             in setor_filtro]
 
     if not tarefas_filtradas:
         st.info("Nenhuma tarefa para os filtros selecionados.")
         return
 
-    # Monta DataFrame para o editor
+    # ── Métricas ──────────────────────────────────────────────────────────────
+    _total = len(tarefas_filtradas)
+    _done  = sum(1 for t in tarefas_filtradas if t.get("status") == "concluido")
+    _pend  = sum(1 for t in tarefas_filtradas if t.get("status") == "pendente")
+    _trav  = sum(1 for t in tarefas_filtradas if t.get("status") == "travado")
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total",       _total)
+    m2.metric("Concluídos",  _done)
+    m3.metric("Pendentes",   _pend)
+    m4.metric("Travados",    _trav, delta_color="inverse" if _trav else "off")
+
+    st.progress(
+        _done / _total if _total else 0,
+        text=f"Progresso: {_done}/{_total} ({100*_done//_total if _total else 0}%)",
+    )
+
+    # ── Mobile: cards de toque ────────────────────────────────────────────────
+    if mobile:
+        sb = sb_for_user()
+        st.caption(f"{len(tarefas_filtradas)} tarefa(s) — toque nos toggles para registrar.")
+        for t in tarefas_filtradas:
+            _render_mobile_card(t, sb, user_id)
+        return
+
+    # ── Desktop: data_editor ──────────────────────────────────────────────────
     df_orig = _build_editor_df(tarefas_filtradas, int(semana_val))
     df_display = df_orig.drop(columns=["_id", "_status"])
 
-    # Métricas rápidas antes do editor
-    m1, m2, m3, m4 = st.columns(4)
-    with m1:
-        st.metric("Total", len(tarefas_filtradas))
-    with m2:
-        st.metric(
-            "Concluídos", sum(
-                1 for t in tarefas_filtradas if t.get("status") == "concluido"))
-    with m3:
-        st.metric(
-            "Pendentes", sum(
-                1 for t in tarefas_filtradas if t.get("status") == "pendente"))
-    with m4:
-        st.metric(
-            "Travados", sum(
-                1 for t in tarefas_filtradas if t.get("status") == "travado"), delta_color="inverse" if sum(
-                1 for t in tarefas_filtradas if t.get("status") == "travado") > 0 else "off")
-
-    # Barra de progresso do equipamento atual
-    _total_tasks = len(tarefas_filtradas)
-    _done_tasks = sum(
-        1 for t in tarefas_filtradas if t.get("status") == "concluido")
-    st.progress(
-        _done_tasks / _total_tasks if _total_tasks else 0,
-        text=f"Progresso: {_done_tasks}/{_total_tasks} tarefas concluídas "
-        f"({100 * _done_tasks // _total_tasks if _total_tasks else 0}%)",
-    )
-
-    # ── st.data_editor com CheckboxColumn para D, R, M ───────────────────────
     st.caption("Marque as etapas D (Desmontagem), R (Revisão), M (Montagem). "
                "O status é calculado automaticamente: D+R+M = Concluído.")
 
     edited = st.data_editor(
         df_display,
         column_config={
-            "Setor": st.column_config.TextColumn(
-                "Setor",
-                disabled=True),
-            "Serviço": st.column_config.TextColumn(
-                "Serviço",
-                disabled=True),
-            "D": st.column_config.CheckboxColumn(
-                "D",
-                help="Desmontagem concluída"),
-            "R": st.column_config.CheckboxColumn(
-                "R",
-                help="Revisão concluída"),
-            "M": st.column_config.CheckboxColumn(
-                "M",
-                help="Montagem concluída"),
-            "Semana": st.column_config.NumberColumn(
-                "Semana",
-                min_value=0,
-                step=1),
-            "Observação": st.column_config.TextColumn(
-                "Observação",
-                max_chars=500),
+            "Setor":      st.column_config.TextColumn("Setor",     disabled=True),
+            "Serviço":    st.column_config.TextColumn("Serviço",   disabled=True),
+            "D":          st.column_config.CheckboxColumn("D",     help="Desmontagem concluída"),
+            "R":          st.column_config.CheckboxColumn("R",     help="Revisão concluída"),
+            "M":          st.column_config.CheckboxColumn("M",     help="Montagem concluída"),
+            "Semana":     st.column_config.NumberColumn("Semana",  min_value=0, step=1),
+            "Observação": st.column_config.TextColumn("Observação", max_chars=500),
         },
         hide_index=True,
         use_container_width=True,
@@ -391,21 +419,8 @@ def _fragment_editor(
         key="apt_data_editor",
     )
 
-    # Reconstrói df_orig com _id e _status para comparar
     df_edited_full = df_orig.copy()
-    df_edited_full[["Setor",
-                    "Serviço",
-                    "D",
-                    "R",
-                    "M",
-                    "Semana",
-                    "Observação"]] = edited[["Setor",
-                                             "Serviço",
-                                             "D",
-                                             "R",
-                                             "M",
-                                             "Semana",
-                                             "Observação"]]
+    df_edited_full[["Setor","Serviço","D","R","M","Semana","Observação"]] =         edited[["Setor","Serviço","D","R","M","Semana","Observação"]]
 
     changes = _df_to_changes(df_edited_full, df_orig, user_id)
 
@@ -413,7 +428,7 @@ def _fragment_editor(
         st.info("Nenhuma alteração detectada.")
         return
 
-    # Validacao: travado exige observacao
+    # Validação: travado exige observação
     invalidos = [c for c in changes if c["status"] ==
                  "travado" and not (c.get("observacao") or "").strip()]
     if invalidos:
@@ -433,7 +448,6 @@ def _fragment_editor(
         delta=f"{'item' if len(changes) == 1 else 'itens'} a salvar",
     )
 
-    # Exportar tarefas filtradas como XLSX
     _exp_df = df_display.copy()
     _col_save, _col_xlsx = st.columns([0.75, 0.25])
     with _col_xlsx:
@@ -447,19 +461,19 @@ def _fragment_editor(
                 help="Baixa a visão filtrada atual em Excel.",
             )
         except Exception:
-            pass  # openpyxl nao disponivel
+            pass
 
     with _col_save:
-        if primary_action_button("Salvar alterações", key="apt_save_btn", help="Aplica as alterações pendentes nas tarefas exibidas."):
+        if primary_action_button("Salvar alterações", key="apt_save_btn",
+                                  help="Aplica as alterações pendentes nas tarefas exibidas."):
             st.session_state["_apt_confirm_save"] = True
 
-    # Dialogo de confirmacao
     n_changes = len(changes)
     confirmed = confirm_dialog(
         trigger_key="_apt_confirm_save",
         title="Salvar alterações?",
-        body=f"Você está prestes a salvar **{n_changes} {
-            'alteração' if n_changes == 1 else 'alterações'}**. Confirma?",
+        body=f"Você está prestes a salvar **{n_changes} "
+             f"{'alteração' if n_changes == 1 else 'alterações'}**. Confirma?",
         confirm_label="Salvar",
     )
     if confirmed:
@@ -469,29 +483,25 @@ def _fragment_editor(
             for ch in list(changes):
                 tid = ch.pop("id")
                 try:
-                    sb.table("tarefas_servico").update(
-                        ch).eq("id", tid).execute()
+                    sb.table("tarefas_servico").update(ch).eq("id", tid).execute()
                 except Exception as e:
                     show_supabase_error(e, f"Tarefa {tid}")
                     erros += 1
 
-        # Invalida cache de KPIs para refletir os novos apontamentos
         try:
             from src.utils.kpi_engine import invalidate_kpi_cache
             invalidate_kpi_cache()
         except Exception:
-            pass  # invalidação de cache opcional — não bloqueia o fluxo
+            pass
         bump_data_version()
         if erros == 0:
             st.toast(
-                f"✅ {n_changes} {
-                    'alteração salva' if n_changes == 1 else 'alterações salvas'}.",
+                f"✅ {n_changes} {'alteração salva' if n_changes == 1 else 'alterações salvas'}.",
                 icon=":material/check_circle:",
             )
         else:
             st.toast(f"⚠️ {erros} erro(s) ao salvar.", icon=":material/error:")
         st.rerun()
-
 
 # ── Ponto de entrada público ────────────────────────────────────────────
 
