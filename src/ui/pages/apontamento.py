@@ -27,19 +27,28 @@ from src.ui.core.empty_state import empty_state
 from src.ui.core.error_messages import show_supabase_error
 from src.utils.ui_helpers import df_to_xlsx
 from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_user_id
+from src.db.supabase_client import get_supabase_anon
 from src.utils.mobile import is_mobile
 from src.utils.weeks import week_from_revisao
 
 
 # ── Queries ─────────────────────────────────────────────────────────────
 
+
+def _sb(token: str = ""):
+    """Cliente Supabase para uso em funções cacheadas (sem acessar session_state)."""
+    sb = get_supabase_anon()
+    if token:
+        sb.postgrest.auth(token)
+    return sb
+
+
 @st.cache_data(ttl=60, show_spinner=False)
-def _load_revisoes(_tenant_id: str, _ver: str = "0") -> list[dict]:
-    sb = sb_for_user()
+def _load_revisoes(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]:
     return (
-        sb.table("revisoes")
+        _sb(_token).table("revisoes")
         .select("id,titulo,status,data_inicio,semanas_total")
-        .eq("tenant_id", _tenant_id)
+        .eq("tenant_id", tenant_id)
         .order("created_at", desc=True)
         .execute()
         .data
@@ -47,12 +56,11 @@ def _load_revisoes(_tenant_id: str, _ver: str = "0") -> list[dict]:
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _load_grupos(_tenant_id: str, _ver: str = "0", _token: str = "") -> list[dict]:
-    sb = sb_for_user()
+def _load_grupos(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]:
     return (
-        sb.table("equip_grupos")
+        _sb(_token).table("equip_grupos")
         .select("id,nome")
-        .eq("tenant_id", _tenant_id)
+        .eq("tenant_id", tenant_id)
         .eq("ativo", True)
         .order("nome")
         .execute()
@@ -61,17 +69,13 @@ def _load_grupos(_tenant_id: str, _ver: str = "0", _token: str = "") -> list[dic
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def _load_equipamentos(
-        _tenant_id: str,
-        _grupo_id: str,
-        _ver: str = "0") -> list[dict]:
-    sb = sb_for_user()
+def _load_equipamentos(tenant_id: str, grupo_id: str, ver: str = "0", _token: str = "") -> list[dict]:
     return (
-        sb.table("equipamentos")
+        _sb(_token).table("equipamentos")
         .select("id,frota,modelo,status")
-        .eq("tenant_id", _tenant_id)
+        .eq("tenant_id", tenant_id)
         .eq("ativo", True)
-        .eq("grupo_id", _grupo_id)
+        .eq("grupo_id", grupo_id)
         .order("frota")
         .execute()
         .data
@@ -79,18 +83,13 @@ def _load_equipamentos(
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def _load_tarefas(
-        _tenant_id: str,
-        _revisao_id: str,
-        _equipamento_id: str,
-        _ver: str = "0") -> list[dict]:
-    sb = sb_for_user()
+def _load_tarefas(tenant_id: str, revisao_id: str, equipamento_id: str, ver: str = "0", _token: str = "") -> list[dict]:
     return (
-        sb.table("tarefas_servico")
+        _sb(_token).table("tarefas_servico")
         .select("id,status,etapa_d,etapa_r,etapa_m,semana,observacao,servicos(id,nome,setor_id,setores(nome))")
-        .eq("tenant_id", _tenant_id)
-        .eq("revisao_id", _revisao_id)
-        .eq("equipamento_id", _equipamento_id)
+        .eq("tenant_id", tenant_id)
+        .eq("revisao_id", revisao_id)
+        .eq("equipamento_id", equipamento_id)
         .execute()
         .data
     ) or []
@@ -245,7 +244,7 @@ def _fragment_seletores(
     st.query_params["grupo"] = grupo_id  # sincroniza URL
 
     # Equipamento
-    equips = _load_equipamentos(tenant_id, grupo_id, ver)
+    equips = _load_equipamentos(tenant_id, grupo_id, ver, st.session_state.get("sb_access_token", ""))
     if not equips:
         st.info("Nenhum equipamento neste grupo.")
         return None, None, None
@@ -335,7 +334,7 @@ def _fragment_editor(
     mobile = is_mobile()
 
     with st.spinner("", show_time=False):
-        tarefas = _load_tarefas(tenant_id, revisao_id, equipamento_id, ver)
+        tarefas = _load_tarefas(tenant_id, revisao_id, equipamento_id, ver, st.session_state.get("sb_access_token", ""))
 
     if not tarefas:
         notice_card(
@@ -530,7 +529,7 @@ def render_apontamento() -> None:
 
     tenant_id = current_tenant_id()
     ver = str(st.session_state.get("data_version", "0"))
-    revisoes = _load_revisoes(tenant_id, ver)
+    revisoes = _load_revisoes(tenant_id, ver, st.session_state.get("sb_access_token", ""))
 
     # Fragment 1: seletores (reroda apenas ao mudar revisão/grupo/equipamento)
     _fragment_seletores(revisoes)
