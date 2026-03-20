@@ -12,12 +12,22 @@ def render_login() -> None:
         """
         <style>
         section[data-testid="stSidebar"] { display: none !important; }
+
+        /* Centra todo o conteúdo da página de login */
+        section.main .block-container {
+            max-width: 460px !important;
+            padding-left: 1.2rem !important;
+            padding-right: 1.2rem !important;
+            margin: 0 auto !important;
+        }
+
         .login-card {
-            width: 100%; max-width: 420px; margin: 0 auto;
+            width: 100%;
             background: linear-gradient(145deg, #161B22, #0D1117);
             border: 1px solid rgba(220, 38, 38, 0.25);
             border-radius: 20px; padding: 2.8rem 2.6rem 2.2rem;
             box-shadow: 0 0 60px rgba(220,38,38,0.07), 0 20px 60px rgba(0,0,0,0.5);
+            margin-bottom: 1.2rem;
         }
         .login-logo-icon {
             width: 44px; height: 44px;
@@ -52,138 +62,134 @@ def render_login() -> None:
         unsafe_allow_html=True,
     )
 
-    _, center, _ = st.columns([1, 1.8, 1])
-    with center:
+    # Centralização por CSS — sem st.columns para evitar scroll horizontal no mobile
+    st.markdown(
+        """
+        <div class="login-card">
+          <div class="login-logo-icon">🌾</div>
+          <div class="login-brand">Agro<span>Safra</span></div>
+          <div class="login-badge">⬤&nbsp; ENTERPRISE</div>
+          <div class="login-tagline">
+            Plataforma de gestão de entressafra.<br>Acesse sua conta para continuar.
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+    with st.form("login_form", clear_on_submit=False):
+        st.markdown("**E-mail**")
+        email = st.text_input(
+            "email", placeholder="voce@empresa.com",
+            label_visibility="collapsed",
+        )
+        st.markdown("**Senha**")
+        senha = st.text_input(
+            "senha", type="password", placeholder="••••••••",
+            label_visibility="collapsed",
+        )
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+        entrar = st.form_submit_button(
+            "→  Entrar na plataforma",
+            use_container_width=True,
+            type="primary",
+        )
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        forgot = st.button("Esqueci minha senha", use_container_width=True)
+    with col_b:
         st.markdown(
-            """
-            <div class="login-card">
-              <div class="login-logo-icon">🌾</div>
-              <div class="login-brand">Agro<span>Safra</span></div>
-              <div class="login-badge">⬤&nbsp; ENTERPRISE</div>
-              <div class="login-tagline">
-                Plataforma de gestão de entressafra.<br>Acesse sua conta para continuar.
-              </div>
-            </div>
-            """,
+            "<p style='color:#4B5563;font-size:0.75rem;text-align:right;"
+            "padding-top:9px;margin:0'>Atenção a espaços extras</p>",
             unsafe_allow_html=True,
         )
 
-        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='login-footer'>© 2025 AgroSafra · Todos os direitos reservados</div>",
+        unsafe_allow_html=True,
+    )
+    # ── Lógica de login ─────────────────────────────────────────────────
+    if entrar:
+        reset_for_login_attempt()
+        email_norm = (email or "").strip().lower()
+        senha_val = (senha or "").strip()
 
-        with st.form("login_form", clear_on_submit=False):
-            st.markdown("**E-mail**")
-            email = st.text_input(
-                "email", placeholder="voce@empresa.com",
-                label_visibility="collapsed",
-            )
-            st.markdown("**Senha**")
-            senha = st.text_input(
-                "senha", type="password", placeholder="••••••••",
-                label_visibility="collapsed",
-            )
-            st.markdown(
-                "<div style='height:4px'></div>",
-                unsafe_allow_html=True)
-            entrar = st.form_submit_button(
-                "→  Entrar na plataforma",
-                use_container_width=True,
-                type="primary",
-            )
+        if not email_norm or not senha_val:
+            st.warning("⚠️ Informe seu e-mail e senha para continuar.")
+            return
 
-        col_a, col_b = st.columns(2)
-        with col_a:
-            forgot = st.button("Esqueci minha senha", use_container_width=True)
-        with col_b:
-            st.markdown(
-                "<p style='color:#4B5563;font-size:0.75rem;text-align:right;"
-                "padding-top:9px;margin:0'>Atenção a espaços extras</p>",
-                unsafe_allow_html=True,
-            )
+        # ── Rate limiting: bloqueia brute-force por e-mail ────────────
+        rl_key = get_rate_limit_key(email_norm)
+        allowed, rl_msg, wait_secs = check_rate_limit(rl_key)
+        if not allowed:
+            audit_login_blocked(email_norm, wait_secs)
+            st.error(f"🔒 {rl_msg}")
+            return
 
-        st.markdown(
-            "<div class='login-footer'>© 2025 AgroSafra · Todos os direitos reservados</div>",
-            unsafe_allow_html=True,
-        )
+        sb = get_supabase_anon_fresh()
+        try:
+            sb.auth.sign_out()
+        except Exception:
+            pass  # ignorado — operação opcional
+        with st.spinner("Autenticando..."):
+            try:
+                res = sb.auth.sign_in_with_password(
+                    {"email": email_norm, "password": senha_val}
+                )
+                user_id = res.user.id if res and res.user else ""
+                set_auth_session(
+                    res.session.access_token,
+                    res.session.refresh_token,
+                    user_id,
+                )
 
-        # ── Lógica de login ─────────────────────────────────────────────────
-        if entrar:
-            reset_for_login_attempt()
-            email_norm = (email or "").strip().lower()
-            senha_val = (senha or "").strip()
+                # Login OK: limpa contador de falhas e registra auditoria
+                record_success(rl_key)
+                audit_login_success(email_norm, user_id)
 
-            if not email_norm or not senha_val:
-                st.warning("⚠️ Informe seu e-mail e senha para continuar.")
-                return
+                # Evita herdar tenant/role/menu de sessão anterior
+                for k in (
+                    "current_tenant_id",
+                    "current_role",
+                    "_tenant_user_id",
+                    "__nav_to",
+                    "__current_page",
+                    "__menu",
+                        "menu"):
+                    st.session_state.pop(k, None)
+                st.session_state["_identity_user_id"] = user_id
+                st.success("✅ Login realizado!")
+                nav.goto("Início")
 
-            # ── Rate limiting: bloqueia brute-force por e-mail ────────────
-            rl_key = get_rate_limit_key(email_norm)
-            allowed, rl_msg, wait_secs = check_rate_limit(rl_key)
-            if not allowed:
-                audit_login_blocked(email_norm, wait_secs)
-                st.error(f"🔒 {rl_msg}")
-                return
+            except Exception as e:
+                # Falha: incrementa contador e avisa quantas tentativas
+                # restam
+                remaining = record_failure(rl_key)
+                audit_login_failure(email_norm)
+                if remaining > 0:
+                    st.warning(
+                        f"⚠️ Credenciais inválidas. "
+                        f"Você tem mais {remaining} tentativa(s) antes do bloqueio temporário."
+                    )
+                else:
+                    st.error(
+                        "🔒 Conta bloqueada temporariamente por excesso de tentativas.")
+                show_error(e)
 
+    # ── Recuperação de senha ────────────────────────────────────────────
+    if forgot:
+        email_norm = (email or "").strip().lower()
+        if not email_norm:
+            st.warning("Digite seu e-mail no campo acima primeiro.")
+        else:
             sb = get_supabase_anon_fresh()
             try:
-                sb.auth.sign_out()
-            except Exception:
-                pass  # ignorado — operação opcional
-            with st.spinner("Autenticando..."):
-                try:
-                    res = sb.auth.sign_in_with_password(
-                        {"email": email_norm, "password": senha_val}
-                    )
-                    user_id = res.user.id if res and res.user else ""
-                    set_auth_session(
-                        res.session.access_token,
-                        res.session.refresh_token,
-                        user_id,
-                    )
-
-                    # Login OK: limpa contador de falhas e registra auditoria
-                    record_success(rl_key)
-                    audit_login_success(email_norm, user_id)
-
-                    # Evita herdar tenant/role/menu de sessão anterior
-                    for k in (
-                        "current_tenant_id",
-                        "current_role",
-                        "_tenant_user_id",
-                        "__nav_to",
-                        "__current_page",
-                        "__menu",
-                            "menu"):
-                        st.session_state.pop(k, None)
-                    st.session_state["_identity_user_id"] = user_id
-                    st.success("✅ Login realizado!")
-                    nav.goto("Início")
-
-                except Exception as e:
-                    # Falha: incrementa contador e avisa quantas tentativas
-                    # restam
-                    remaining = record_failure(rl_key)
-                    audit_login_failure(email_norm)
-                    if remaining > 0:
-                        st.warning(
-                            f"⚠️ Credenciais inválidas. "
-                            f"Você tem mais {remaining} tentativa(s) antes do bloqueio temporário."
-                        )
-                    else:
-                        st.error(
-                            "🔒 Conta bloqueada temporariamente por excesso de tentativas.")
-                    show_error(e)
-
-        # ── Recuperação de senha ────────────────────────────────────────────
-        if forgot:
-            email_norm = (email or "").strip().lower()
-            if not email_norm:
-                st.warning("Digite seu e-mail no campo acima primeiro.")
-            else:
-                sb = get_supabase_anon_fresh()
-                try:
-                    sb.auth.reset_password_for_email(email_norm)
-                    audit_password_reset(email_norm)
-                    st.success(
-                        "📧 Se o e-mail estiver cadastrado, enviaremos um link.")
-                except Exception as e:
-                    st.error(f"Erro: `{repr(e)}`")
+                sb.auth.reset_password_for_email(email_norm)
+                audit_password_reset(email_norm)
+                st.success(
+                    "📧 Se o e-mail estiver cadastrado, enviaremos um link.")
+            except Exception as e:
+                st.error(f"Erro: `{repr(e)}`")
