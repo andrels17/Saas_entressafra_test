@@ -17,13 +17,13 @@ def _sb_from_token(token: str = ""):
     return sb
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _group_kpis(_tid, _rev_id, _ver="0", _token=""):
+def _group_kpis(tid, rev_id, ver="0", _token=""):
     _sb = _sb_from_token(_token)
     _gids = [
         g.get("id") for g in (
             _sb.table("equip_grupos").select("id").eq(
                 "tenant_id",
-                _tid).eq(
+                tid).eq(
                 "ativo",
                 True).execute().data or []) if g.get("id")]
     if not _gids:
@@ -31,7 +31,7 @@ def _group_kpis(_tid, _rev_id, _ver="0", _token=""):
     eq_rows = (
         _sb.table("equipamentos").select("id,grupo_id").eq(
             "tenant_id",
-            _tid).eq(
+            tid).eq(
             "ativo",
             True).in_(
                 "grupo_id",
@@ -43,7 +43,7 @@ def _group_kpis(_tid, _rev_id, _ver="0", _token=""):
     tpl_rows = (
         _sb.table("grupo_servicos").select("grupo_id,servico_id").eq(
             "tenant_id",
-            _tid).in_(
+            tid).in_(
             "grupo_id",
             _gids).execute().data) or []
     grp_svc = defaultdict(set)
@@ -55,7 +55,7 @@ def _group_kpis(_tid, _rev_id, _ver="0", _token=""):
     eq2g = {eid: gid for gid, eids in grp_eq.items() for eid in eids}
     for i in range(0, len(all_eq), 500):
         for t in ((_sb.table("tarefas_servico").select("equipamento_id,etapa_d,etapa_r,etapa_m")
-                   .eq("tenant_id", _tid).eq("revisao_id", _rev_id).in_("equipamento_id", all_eq[i:i + 500])
+                   .eq("tenant_id", tid).eq("revisao_id", rev_id).in_("equipamento_id", all_eq[i:i + 500])
                    .execute().data) or []):
             gid = eq2g.get(t.get("equipamento_id"))
             if gid:
@@ -75,28 +75,28 @@ def _group_kpis(_tid, _rev_id, _ver="0", _token=""):
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _load_payload(_tid, _gid, _rid, _lim, _ver="0", _token=""):
+def _load_payload(tid, gid, rid, lim, ver="0", _token=""):
     _sb = _sb_from_token(_token)
     _eqs = (
         _sb.table("equipamentos").select("id,frota,modelo").eq(
             "tenant_id",
-            _tid) .eq(
+            tid) .eq(
             "grupo_id",
-            _gid).eq(
+            gid).eq(
                 "ativo",
                 True).order("frota").limit(
-                    int(_lim)).execute().data) or []
+                    int(lim)).execute().data) or []
     if not _eqs:
         return {"eqs": [], "s2s": {}, "all_s": [], "tarefas": []}
-    _s2s, _all_s = _fetch_template(_sb, _tid, _gid)
+    _s2s, _all_s = _fetch_template(_sb, tid, gid)
     if not _all_s:
         return {"eqs": _eqs, "s2s": {}, "all_s": [], "tarefas": []}
     _tarefas = (
         _sb.table("tarefas_servico") .select(
             "id,equipamento_id,servico_id,status,semana,observacao,"
             "etapa_d,etapa_r,etapa_m,dt_inicio,dt_etapa_d,dt_etapa_r,dt_etapa_m") .eq(
-            "tenant_id", _tid).eq(
-                "revisao_id", _rid) .in_(
+            "tenant_id", tid).eq(
+                "revisao_id", rid) .in_(
                     "equipamento_id", [
                         e["id"] for e in _eqs]).execute().data) or []
     return {"eqs": _eqs, "s2s": _s2s, "all_s": _all_s, "tarefas": _tarefas}
@@ -106,24 +106,24 @@ def _fetch_template(sb, tenant_id, grupo_id):
     """Delega para o repositório central — evita triplicação de lógica."""
     return _fetch_template_impl(sb, tenant_id, grupo_id)
 @st.cache_data(ttl=300, show_spinner=False)
-def _dept_name(_tid, _did, _ver="0", _token=""):
-    if not _did:
+def _dept_name(tid, did, ver="0", _token=""):
+    if not did:
         return ""
     try:
         row = (
             _sb_from_token(_token).table("departamentos").select("nome").eq(
-                "tenant_id", _tid).eq(
-                "id", _did).limit(1).execute().data)
+                "tenant_id", tid).eq(
+                "id", did).limit(1).execute().data)
         return (row[0].get("nome") or "") if row else ""
     except BaseException:
         return ""
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _all_dept_names(_tid, _ver="0", _token=""):
+def _all_dept_names(tid, ver="0", _token=""):
     try:
         rows = _sb_from_token(_token).table("departamentos").select(
-            "id,nome").eq("tenant_id", _tid).execute().data or []
+            "id,nome").eq("tenant_id", tid).execute().data or []
         return {r["id"]: r.get("nome", "") for r in rows}
     except BaseException:
         return {}
