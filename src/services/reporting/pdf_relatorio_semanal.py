@@ -869,7 +869,7 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
             kpi_h = 14 * mm
             kpi_ww = (w - 36 * mm) / 4
             for ki, (klbl, kval, kcol) in enumerate([
-                ("Equipamentos", str(n_eq_g), WHITE),
+                ("Equipamentos", str(n_eq_g), FG),
                 ("Concluídos", str(n_conc_g), GREEN),
                 ("Sem início", str(n_crit_g), RED if n_crit_g else MUTED),
                 ("Travados", str(n_trav_g), RED if n_trav_g else MUTED),
