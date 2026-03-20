@@ -168,7 +168,8 @@ jobs:
             tests/test_kpi.py \
             tests/test_rate_limit.py \
             tests/test_audit.py \
-            tests/test_observability.py
+            tests/test_observability.py \
+            tests/test_integration_auth_tenant.py
           do
             test -f "$f" && echo "✅ $f" || (echo "❌ $f não encontrado" && exit 1)
           done
