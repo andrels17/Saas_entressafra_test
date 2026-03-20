@@ -65,32 +65,46 @@ def get_sidebar_badges(tenant_id: str, _token: str = "") -> dict[str, int]:
     )
     travados = _safe_count(r1)
 
-    # equipamentos parados (sem atualização recente)
+    # equipamentos parados (sem etapa marcada há >= 7 dias)
+    # Filtra apenas não-concluídos com pelo menos 1 etapa marcada
+    # (reduz drasticamente o volume vs SELECT * com limit 5000)
     try:
+        from src.utils.timezone import days_since_utc
+        from datetime import datetime, timezone, timedelta
+        _cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+
+        # Estratégia: conta equipamentos cujo max(dt_etapa_*) < cutoff
+        # usando apenas linhas não-concluídas com alguma etapa marcada
         rows = (
             sb.table("tarefas_servico")
-            .select("equipamento_id,status,updated_at,dt_etapa_d,dt_etapa_r,dt_etapa_m")
+            .select("equipamento_id,dt_etapa_d,dt_etapa_r,dt_etapa_m")
             .eq("tenant_id", tenant_id)
             .eq("revisao_id", revisao_id)
-            .limit(5000)
+            .not_.is_("dt_etapa_d", "null")   # só equipamentos iniciados
+            .neq("status", "concluido")
+            .limit(2000)
             .execute()
             .data
         ) or []
-        from src.utils.timezone import days_since_utc
-        ultimos: dict[str, tuple[str | None, str]] = {}
+
+        # Agrupa por equipamento: maior timestamp de etapa
+        ultimos: dict[str, str | None] = {}
         for row in rows:
             eid = row.get("equipamento_id")
             if not eid:
                 continue
-            mov = max([x for x in [row.get("dt_etapa_m"), row.get("dt_etapa_r"), row.get(
-                "dt_etapa_d"), row.get("updated_at")] if x] or [None])
-            prev = ultimos.get(eid)
-            if prev is None or ((mov or "") > (prev[0] or "")):
-                ultimos[eid] = (mov, row.get("status") or "pendente")
+            mov = max(
+                [x for x in [row.get("dt_etapa_m"), row.get("dt_etapa_r"),
+                              row.get("dt_etapa_d")] if x],
+                default=None
+            )
+            if mov and (eid not in ultimos or mov > (ultimos[eid] or "")):
+                ultimos[eid] = mov
+
         parados = sum(
-            1 for mov,
-            status in ultimos.values() if status != "concluido" and (
-                days_since_utc(mov) or 0) >= 7)
+            1 for mov in ultimos.values()
+            if mov and (days_since_utc(mov) or 0) >= 7
+        )
     except Exception:
         parados = 0
 
