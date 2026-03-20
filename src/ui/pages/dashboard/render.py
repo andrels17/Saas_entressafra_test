@@ -69,11 +69,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
     try:
         raw = (
             sb.table("mv_matriz_base")
-            .select(
-                "equipamento_id,grupo_id,grupo,departamento_id,"
-                "frota,modelo,servico_id,setor,"
-                "state,ok_count,etapa_d,etapa_r,etapa_m,updated_at"
-            )
+            .select("equipamento_id,grupo_id,grupo_nome,departamento_id,frota,modelo,servico_id,setor_nome,status,estado_execucao,etapas_ok,etapa_d,etapa_r,etapa_m,updated_at")
             .eq("tenant_id", tenant_id)
             .eq("revisao_id", revisao_id)
             .execute()
