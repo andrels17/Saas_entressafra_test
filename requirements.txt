@@ -7,3 +7,5 @@ altair>=5.3.0
 matplotlib==3.9.2
 reportlab==4.2.5
 openpyxl
+# Rate limiting backend (opcional — recomendado para produção multi-instância)
+# redis>=5.0.0
