@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import streamlit as st
 from datetime import datetime, timedelta, timezone
-from src.utils.supabase_helpers import sb_for_user, current_tenant_id
+from src.utils.supabase_helpers import current_tenant_id
+from src.db.supabase_client import get_supabase_anon
 
 
 def _safe_count(res) -> int:
@@ -25,12 +26,14 @@ def _safe_count(res) -> int:
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def get_sidebar_badges(tenant_id: str) -> dict[str, int]:
+def get_sidebar_badges(tenant_id: str, _token: str = "") -> dict[str, int]:
     """Contagens rápidas para badges na sidebar.
 
     Mantém leve: 2 contagens principais + 1 opcional (auditoria 24h).
     """
-    sb = sb_for_user()
+    sb = get_supabase_anon()
+    if _token:
+        sb.postgrest.auth(_token)
 
     # revisão ativa (se não existir, badges ficam 0)
     rev = (
@@ -127,7 +130,9 @@ def get_sidebar_badges(tenant_id: str) -> dict[str, int]:
 def sidebar_badges() -> dict[str, int]:
     """Helper que usa o tenant atual do session_state."""
     try:
-        return get_sidebar_badges(current_tenant_id())
+        import streamlit as st
+        token = st.session_state.get("sb_access_token", "")
+        return get_sidebar_badges(current_tenant_id(), token)
     except Exception:
         return {
             "gestor_travados": 0,
