@@ -424,11 +424,13 @@ def _build_payload(
         eq["grupo_pct"] = grupo_pct.get(eq.get("grupo_id", ""), 0)
 
     # ── evolução semanal ────────────────────────────────────────────────────
-    # Usa o cronograma real das tarefas (semana do serviço), e não uma projeção
-    # linear do calendário. Isso evita 0% artificiais no gráfico e no heatmap.
+    # Denominador: total_expected distribuído linearmente pelas semanas.
+    # Mesma fórmula do pct_geral — garante que Sem.N acumulado bate com o %
+    # global ao final da última semana processada.
+    # done por semana: soma etapa_d + etapa_r + etapa_m das tarefas apontadas
+    # nessa semana (campo `semana` em tarefas_servico).
     evolucao: list[SemanaSnapshot] = []
     semana_done_steps: dict[int, int] = {}
-    semana_expected_steps: dict[int, int] = {}
 
     for t in tarefas:
         sem = int(t.get("semana") or 0)
@@ -436,20 +438,19 @@ def _build_payload(
             continue
         semana_done_steps[sem] = semana_done_steps.get(
             sem, 0) + _sum_done_steps(t)
-        semana_expected_steps[sem] = semana_expected_steps.get(sem, 0) + 3
 
-    # fallback: se por algum motivo não houver semana nas tarefas, mantém uma
-    # distribuição linear para não quebrar o relatório.
-    if not semana_expected_steps and total_expected > 0:
-        for sem in range(1, semana_atual + 1):
-            semana_expected_steps[sem] = round(
-                total_expected / max(semanas_total, 1))
+    # Expected por semana: total_expected / semanas_total (distribuição linear)
+    # Usa o mesmo total_expected já calculado com eq × svc × 3
+    expected_por_semana = round(
+        total_expected / max(semanas_total, 1)) if total_expected > 0 else 0
 
     cumulative_done = 0
     cumulative_expected = 0
     for sem in range(1, semana_atual + 1):
         cumulative_done += semana_done_steps.get(sem, 0)
-        cumulative_expected += semana_expected_steps.get(sem, 0)
+        cumulative_expected += expected_por_semana
+        # Garante que o acumulado não ultrapasse o total real
+        cumulative_expected = min(cumulative_expected, total_expected)
         pct_sem = max(
             0, min(100, round(cumulative_done / max(cumulative_expected, 1) * 100)))
         evolucao.append(SemanaSnapshot(
