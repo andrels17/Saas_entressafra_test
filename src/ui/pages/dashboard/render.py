@@ -14,7 +14,7 @@ import streamlit as st
 
 from src.auth.scope import get_my_scope
 from src.auth.permissions import can_view_all_data
-from src.domain.kpi import calc_global_kpis
+from src.domain.kpi import calc_global_kpis, calc_dept_kpis
 from src.ui.core.empty_state import empty_state
 from src.ui.components.filters import multiselect_departamentos, multiselect_grupos
 from src.ui.components.feedback import notice_card, selection_summary
@@ -45,7 +45,6 @@ from .transforms import (
     group_progress,
     normalize_matriz_base,
     overall_from_base,
-    sector_progress,
 )
 
 
@@ -316,48 +315,98 @@ def _fragment_grupos(
 
 
 @st.fragment
-def _fragment_setores(base: pd.DataFrame, top_n: int = 10) -> None:
-    sdf = sector_progress(base)
-    if sdf.empty:
-        empty_message("Sem dados de setores.")
+def _fragment_departamentos(
+        group_kpis_df: pd.DataFrame,
+        gid_to_dept: dict,
+        dept_map: dict) -> None:
+    """Gráfico de barras horizontais: progresso por departamento."""
+    if group_kpis_df is None or group_kpis_df.empty:
+        empty_message("Sem dados de departamentos.")
         return
-    display = sdf.rename(columns={"setor": "Setor", "pct_concluido": "% Concluído"}).sort_values(
-        ["% Concluído", "Setor"], ascending=[False, True])
-    _render_pct_rank_chart(
-        display,
-        "Setor",
-        "% Concluído",
-        f"Top {top_n} setores por % de conclusão",
-        top_n=top_n)
+
+    dsum = calc_dept_kpis(group_kpis_df, gid_to_dept)
+    if dsum is None or dsum.empty:
+        empty_message("Sem dados de departamentos para esta revisão.")
+        return
+
+    dsum = dsum.copy()
+    dsum["Departamento"] = dsum["departamento_id"].map(dept_map).fillna("—")
+    dsum["pct"] = pd.to_numeric(dsum.get("pct", 0), errors="coerce").fillna(0).clip(0, 100)
+    dsum["Grupos"] = dsum.get("grupos", pd.Series(dtype=int)).fillna(0).astype(int)
+    dsum["Etapas feitas"] = dsum.get("done_steps", pd.Series(dtype=int)).fillna(0).astype(int)
+    dsum["Etapas esperadas"] = dsum.get("expected_steps", pd.Series(dtype=int)).fillna(0).astype(int)
+
+    display = (
+        dsum[["Departamento", "pct", "Grupos", "Etapas feitas", "Etapas esperadas"]]
+        .rename(columns={"pct": "% Concluído"})
+        .sort_values(["% Concluído", "Departamento"], ascending=[False, True])
+    )
+
+    # Gráfico de barras
+    chart_df = display[["Departamento", "% Concluído"]].copy()
+    chart_df = chart_df.sort_values("% Concluído", ascending=True)
+    chart_df["label"] = chart_df["% Concluído"].map(lambda v: f"{v:.1f}%")
+
+    # Cor condicional por progresso
+    chart_df["color"] = chart_df["% Concluído"].apply(
+        lambda v: "#12B76A" if v >= 80 else ("#F59E0B" if v >= 50 else "#EF4444")
+    )
+
+    fig = px.bar(
+        chart_df,
+        x="% Concluído",
+        y="Departamento",
+        orientation="h",
+        text="label",
+        color="color",
+        color_discrete_map="identity",
+        title="Progresso por departamento",
+    )
+    fig.update_traces(
+        textposition="outside",
+        cliponaxis=False,
+        hovertemplate="%{y}<br>% Concluído: %{x:.1f}%<extra></extra>",
+    )
+    fig.update_layout(
+        height=max(320, 52 * len(chart_df) + 80),
+        margin=dict(l=10, r=90, t=48, b=10),
+        xaxis=dict(range=[0, 110], title="% Concluído"),
+        yaxis=dict(title="", type="category"),
+        paper_bgcolor="#06080B",
+        plot_bgcolor="#0C111A",
+        font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=12),
+        showlegend=False,
+    )
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+    # Tabela detalhada
     data_table(
-        display.head(top_n)[["Setor", "% Concluído"]],
+        display,
         column_config={
             "% Concluído": st.column_config.ProgressColumn(
-                "% Concluído",
-                min_value=0,
-                max_value=100,
-                format="%.1f%%")},
+                "% Concluído", min_value=0, max_value=100, format="%.1f%%"),
+            "Grupos": st.column_config.NumberColumn("Grupos", format="%d"),
+            "Etapas feitas": st.column_config.NumberColumn("Etapas feitas", format="%d"),
+            "Etapas esperadas": st.column_config.NumberColumn("Etapas esperadas", format="%d"),
+        },
     )
+
     with st.expander("⬇ Exportar", expanded=False):
         from src.utils.ui_helpers import df_to_xlsx
-        _exp = display[["Setor", "% Concluído"]].copy()
         col_csv, col_xlsx = st.columns(2)
         with col_csv:
             st.download_button(
-                "CSV", _exp.to_csv(index=False).encode("utf-8"),
-                file_name="dashboard_setores.csv", mime="text/csv",
-                use_container_width=True, key="dash_setores_csv",
+                "CSV", display.to_csv(index=False).encode("utf-8"),
+                file_name="dashboard_departamentos.csv", mime="text/csv",
+                use_container_width=True, key="dash_dept_csv",
             )
         with col_xlsx:
             st.download_button(
                 "XLSX",
-                df_to_xlsx(
-                    _exp,
-                    sheet_name="Setores"),
-                file_name="dashboard_setores.xlsx",
+                df_to_xlsx(display, sheet_name="Departamentos"),
+                file_name="dashboard_departamentos.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-                key="dash_setores_xlsx",
+                use_container_width=True, key="dash_dept_xlsx",
             )
 
 
@@ -780,8 +829,8 @@ def render_dashboard() -> None:
 
     tabs = [
         "🏗️ Grupos",
+        "🏢 Departamentos",
         "🔧 Equipamentos",
-        "📋 Setores",
         "🌡️ Heatmap",
         "⚠️ Criticidade",
         "📈 Timeline"]
@@ -809,12 +858,12 @@ def render_dashboard() -> None:
             dept_map,
             dashboard_groups_filtered,
             top_n=top_n)
+    elif active == "🏢 Departamentos":
+        st.markdown("### Progresso por departamento")
+        _fragment_departamentos(dashboard_groups_filtered, gid_to_dept, dept_map)
     elif active == "🔧 Equipamentos":
         st.markdown("### Progresso por equipamento")
         _fragment_equipamentos(base_filtered, dept_map, top_n=top_n)
-    elif active == "📋 Setores":
-        st.markdown("### Progresso por setor")
-        _fragment_setores(base_filtered, top_n=top_n)
     elif active == "🌡️ Heatmap":
         st.markdown("### Heatmap de risco — Grupo × Setor")
         _fragment_heatmap(heat)
