@@ -267,6 +267,73 @@ def _build_route(role: str) -> dict:
     }
 
 
+# ── Navegação mobile (bottom selectbox + logout) ─────────────────────────────
+
+def _render_mobile_nav(menu_pages: list[str], current: str) -> None:
+    """Navegação mobile: barra superior compacta com selectbox + botão logout.
+
+    Não usa sidebar (escondida no mobile via CSS).
+    Um selectbox colapsado com label_visibility="collapsed" ocupa pouco
+    espaço e é nativo do Streamlit — sem JS externo.
+    """
+    core_pages  = [p for p in menu_pages if NAV_CONFIG.get(p, ("", "core", ""))[1] == "core"]
+    admin_pages = [p for p in menu_pages if NAV_CONFIG.get(p, ("", "core", ""))[1] == "admin"]
+
+    def _fmt(p: str) -> str:
+        icon, _, label = NAV_CONFIG.get(p, ("·", "core", p))
+        return f"{icon}  {label}"
+
+    # Linha 1: seletor de página principal + logout
+    c_nav, c_out = st.columns([5, 1])
+    with c_nav:
+        all_opts = core_pages + (admin_pages if admin_pages else [])
+        idx = all_opts.index(current) if current in all_opts else 0
+        pick = st.selectbox(
+            "Página",
+            all_opts,
+            index=idx,
+            format_func=_fmt,
+            key="mob_nav_sel",
+            label_visibility="collapsed",
+        )
+    with c_out:
+        if st.button("⎋", key="mob_logout_btn", help="Sair", use_container_width=True):
+            try:
+                from src.auth.session import hard_logout
+                hard_logout()
+            except Exception:
+                st.session_state.clear()
+                st.rerun()
+
+    if pick != current:
+        st.session_state["__current_page"] = pick
+        st.rerun()
+
+    # Linha 2: atalhos rápidos como pills (páginas core visíveis)
+    MAX_PILLS = 5
+    pill_pages = core_pages[:MAX_PILLS]
+    if len(pill_pages) > 1:
+        pill_labels = [NAV_CONFIG.get(p, ("·", "core", p))[0] + "  " +
+                       NAV_CONFIG.get(p, ("·", "core", p))[2] for p in pill_pages]
+        cur_label = (NAV_CONFIG.get(current, ("·", "core", current))[0] + "  " +
+                     NAV_CONFIG.get(current, ("·", "core", current))[2]
+                     if current in pill_pages else None)
+        sel = st.pills(
+            "nav", pill_labels,
+            default=cur_label,
+            key="mob_pills",
+            label_visibility="collapsed",
+        )
+        if sel:
+            idx_p = pill_labels.index(sel)
+            picked_page = pill_pages[idx_p]
+            if picked_page != current:
+                st.session_state["__current_page"] = picked_page
+                st.rerun()
+
+    st.divider()
+
+
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 def main():
     st.session_state.setdefault("sb_access_token", None)
@@ -317,25 +384,7 @@ def main():
 
     # ── Navegação (mobile vs desktop) ─────────────────────────────────────────
     if is_mobile():
-        core_pages  = [p for p in pages if NAV_CONFIG.get(p, ("", "core", ""))[1] == "core"]
-        admin_pages = [p for p in pages if NAV_CONFIG.get(p, ("", "core", ""))[1] == "admin"]
-        nav_opts    = core_pages + (["Admin"] if admin_pages else [])
-
-        def _fmt(p: str) -> str:
-            if p == "Admin": return "⚙ Admin"
-            icon, _, label = NAV_CONFIG.get(p, ("·", "core", p))
-            return f"{icon} {label}"
-
-        with st.container():
-            pick = st.selectbox("Navegação", nav_opts,
-                                index=nav_opts.index(current) if current in nav_opts else 0,
-                                format_func=_fmt, label_visibility="collapsed")
-        selected = pick
-        if pick == "Admin" and admin_pages:
-            selected = st.selectbox("Administração", admin_pages, index=0)
-        if selected != current:
-            st.session_state["__current_page"] = selected
-            st.rerun()
+        _render_mobile_nav(menu_pages, current)
     else:
         selected = _render_sidebar(menu_pages, current, role, user_id, tenant_id, is_mobile())
         if selected != current:
