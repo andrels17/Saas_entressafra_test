@@ -126,6 +126,15 @@ def _load_grupos(_tenant_id: str, _ver: str = "0", _token: str = "") -> list[dic
         return []
 
 
+def _pct_bar_color(v: float) -> str:
+    """Cor condicional padrão: verde >= 80 | amarelo >= 50 | vermelho < 50."""
+    if v >= 80:
+        return "#12B76A"
+    if v >= 50:
+        return "#F59E0B"
+    return "#EF4444"
+
+
 def _render_pct_rank_chart(
         df: pd.DataFrame,
         category_col: str,
@@ -140,13 +149,11 @@ def _render_pct_rank_chart(
     chart_df = chart_df[[category_col, value_col]].copy()
     chart_df[category_col] = chart_df[category_col].fillna("—").astype(str)
     chart_df[value_col] = pd.to_numeric(
-        chart_df[value_col],
-        errors="coerce").fillna(0).clip(
-        0,
-        100)
+        chart_df[value_col], errors="coerce").fillna(0).clip(0, 100)
     chart_df = chart_df.sort_values(value_col, ascending=False).head(top_n)
     chart_df = chart_df.sort_values(value_col, ascending=True)
     chart_df["label"] = chart_df[value_col].map(lambda v: f"{v:.1f}%")
+    chart_df["color"] = chart_df[value_col].apply(_pct_bar_color)
 
     fig = px.bar(
         chart_df,
@@ -154,6 +161,8 @@ def _render_pct_rank_chart(
         y=category_col,
         orientation="h",
         text="label",
+        color="color",
+        color_discrete_map="identity",
         title=title,
     )
     fig.update_traces(
@@ -163,7 +172,7 @@ def _render_pct_rank_chart(
     fig.update_layout(
         height=max(380, 42 * len(chart_df) + 80),
         margin=dict(l=10, r=90, t=48, b=10),
-        xaxis=dict(range=[0, 100], title="% Concluído"),
+        xaxis=dict(range=[0, 110], title="% Concluído"),
         yaxis=dict(title="", type="category"),
         paper_bgcolor="#06080B",
         plot_bgcolor="#0C111A",
@@ -171,8 +180,7 @@ def _render_pct_rank_chart(
         showlegend=False,
     )
     st.plotly_chart(
-        fig, use_container_width=True, config={
-            "displayModeBar": False})
+        fig, use_container_width=True, config={"displayModeBar": False})
 
 
 @st.fragment
@@ -319,7 +327,11 @@ def _fragment_departamentos(
         group_kpis_df: pd.DataFrame,
         gid_to_dept: dict,
         dept_map: dict) -> None:
-    """Gráfico de barras horizontais: progresso por departamento."""
+    """Gráfico de barras horizontais: progresso por departamento.
+
+    Clique em uma barra para filtrar o dashboard por aquele departamento.
+    Usa on_select do Plotly — zero queries extras, apenas session_state + rerun.
+    """
     if group_kpis_df is None or group_kpis_df.empty:
         empty_message("Sem dados de departamentos.")
         return
@@ -342,15 +354,10 @@ def _fragment_departamentos(
         .sort_values(["% Concluído", "Departamento"], ascending=[False, True])
     )
 
-    # Gráfico de barras
     chart_df = display[["Departamento", "% Concluído"]].copy()
     chart_df = chart_df.sort_values("% Concluído", ascending=True)
     chart_df["label"] = chart_df["% Concluído"].map(lambda v: f"{v:.1f}%")
-
-    # Cor condicional por progresso
-    chart_df["color"] = chart_df["% Concluído"].apply(
-        lambda v: "#12B76A" if v >= 80 else ("#F59E0B" if v >= 50 else "#EF4444")
-    )
+    chart_df["color"] = chart_df["% Concluído"].apply(_pct_bar_color)
 
     fig = px.bar(
         chart_df,
@@ -360,16 +367,16 @@ def _fragment_departamentos(
         text="label",
         color="color",
         color_discrete_map="identity",
-        title="Progresso por departamento",
+        title="Progresso por departamento — clique numa barra para filtrar",
     )
     fig.update_traces(
         textposition="outside",
         cliponaxis=False,
-        hovertemplate="%{y}<br>% Concluído: %{x:.1f}%<extra></extra>",
+        hovertemplate="%{y}<br>% Concluído: %{x:.1f}%<br><i>Clique para filtrar</i><extra></extra>",
     )
     fig.update_layout(
         height=max(320, 52 * len(chart_df) + 80),
-        margin=dict(l=10, r=90, t=48, b=10),
+        margin=dict(l=10, r=90, t=52, b=10),
         xaxis=dict(range=[0, 110], title="% Concluído"),
         yaxis=dict(title="", type="category"),
         paper_bgcolor="#06080B",
@@ -377,9 +384,32 @@ def _fragment_departamentos(
         font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=12),
         showlegend=False,
     )
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-    # Tabela detalhada
+    # on_select: Streamlit captura o clique sem rerenderizar nada — zero custo
+    event = st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={"displayModeBar": False},
+        on_select="rerun",
+        key="dash_dept_chart",
+    )
+
+    # Processa clique: aplica filtro e reexecuta sem nenhuma query extra
+    # session_state["dash_filter_dept"] armazena NOMES (o que st.multiselect usa internamente)
+    if event and event.get("selection", {}).get("points"):
+        clicked_name = event["selection"]["points"][0].get("y", "")
+        if clicked_name and clicked_name != "—":
+            current = st.session_state.get("dash_filter_dept", [])
+            if clicked_name in current:
+                # segundo clique no mesmo: remove (toggle)
+                new_val = [x for x in current if x != clicked_name]
+            else:
+                new_val = [clicked_name]
+            st.session_state["dash_filter_dept"] = new_val
+            st.rerun()
+
+    st.caption("💡 Clique em uma barra para filtrar o dashboard por departamento. Clique novamente para limpar.")
+
     data_table(
         display,
         column_config={
@@ -828,8 +858,8 @@ def render_dashboard() -> None:
     st.divider()
 
     tabs = [
-        "🏗️ Grupos",
         "🏢 Departamentos",
+        "🏗️ Grupos",
         "🔧 Equipamentos",
         "🌡️ Heatmap",
         "⚠️ Criticidade",
