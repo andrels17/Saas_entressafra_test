@@ -13,21 +13,23 @@ def render_login() -> None:
         <style>
         section[data-testid="stSidebar"] { display: none !important; }
 
-        /* Centra todo o conteúdo da página de login */
-        section.main .block-container {
-            max-width: 460px !important;
-            padding-left: 1.2rem !important;
-            padding-right: 1.2rem !important;
-            margin: 0 auto !important;
-        }
-
+        /* Desktop: card centralizado com colunas laterais invisíveis */
         .login-card {
-            width: 100%;
+            width: 100%; max-width: 420px; margin: 0 auto;
             background: linear-gradient(145deg, #161B22, #0D1117);
             border: 1px solid rgba(220, 38, 38, 0.25);
             border-radius: 20px; padding: 2.8rem 2.6rem 2.2rem;
             box-shadow: 0 0 60px rgba(220,38,38,0.07), 0 20px 60px rgba(0,0,0,0.5);
             margin-bottom: 1.2rem;
+        }
+
+        /* Mobile: ocupa toda a largura sem scroll horizontal */
+        @media (max-width: 768px) {
+            section.main .block-container {
+                max-width: 100% !important;
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+            }
         }
         .login-logo-icon {
             width: 44px; height: 44px;
@@ -62,55 +64,62 @@ def render_login() -> None:
         unsafe_allow_html=True,
     )
 
-    # Centralização por CSS — sem st.columns para evitar scroll horizontal no mobile
-    st.markdown(
-        """
-        <div class="login-card">
-          <div class="login-logo-icon">🌾</div>
-          <div class="login-brand">Agro<span>Safra</span></div>
-          <div class="login-badge">⬤&nbsp; ENTERPRISE</div>
-          <div class="login-tagline">
-            Plataforma de gestão de entressafra.<br>Acesse sua conta para continuar.
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    # Desktop: colunas para centralizar o card. Mobile: CSS faz isso sem colunas.
+    from src.utils.mobile import is_mobile
+    if is_mobile():
+        _col = st
+    else:
+        _, _col, _ = st.columns([1, 1.8, 1])
 
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-
-    with st.form("login_form", clear_on_submit=False):
-        st.markdown("**E-mail**")
-        email = st.text_input(
-            "email", placeholder="voce@empresa.com",
-            label_visibility="collapsed",
-        )
-        st.markdown("**Senha**")
-        senha = st.text_input(
-            "senha", type="password", placeholder="••••••••",
-            label_visibility="collapsed",
-        )
-        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-        entrar = st.form_submit_button(
-            "→  Entrar na plataforma",
-            use_container_width=True,
-            type="primary",
-        )
-
-    col_a, col_b = st.columns(2)
-    with col_a:
-        forgot = st.button("Esqueci minha senha", use_container_width=True)
-    with col_b:
+    with _col:
         st.markdown(
-            "<p style='color:#4B5563;font-size:0.75rem;text-align:right;"
-            "padding-top:9px;margin:0'>Atenção a espaços extras</p>",
+            """
+            <div class="login-card">
+              <div class="login-logo-icon">🌾</div>
+              <div class="login-brand">Agro<span>Safra</span></div>
+              <div class="login-badge">⬤&nbsp; ENTERPRISE</div>
+              <div class="login-tagline">
+                Plataforma de gestão de entressafra.<br>Acesse sua conta para continuar.
+              </div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
-    st.markdown(
-        "<div class='login-footer'>© 2025 AgroSafra · Todos os direitos reservados</div>",
-        unsafe_allow_html=True,
-    )
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+        with st.form("login_form", clear_on_submit=False):
+            st.markdown("**E-mail**")
+            email = st.text_input(
+                "email", placeholder="voce@empresa.com",
+                label_visibility="collapsed",
+            )
+            st.markdown("**Senha**")
+            senha = st.text_input(
+                "senha", type="password", placeholder="••••••••",
+                label_visibility="collapsed",
+            )
+            st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+            entrar = st.form_submit_button(
+                "→  Entrar na plataforma",
+                use_container_width=True,
+                type="primary",
+            )
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            forgot = st.button("Esqueci minha senha", use_container_width=True)
+        with col_b:
+            st.markdown(
+                "<p style='color:#4B5563;font-size:0.75rem;text-align:right;"
+                "padding-top:9px;margin:0'>Atenção a espaços extras</p>",
+                unsafe_allow_html=True,
+            )
+
+        st.markdown(
+            "<div class='login-footer'>© 2025 AgroSafra · Todos os direitos reservados</div>",
+            unsafe_allow_html=True,
+        )
     # ── Lógica de login ─────────────────────────────────────────────────
     if entrar:
         reset_for_login_attempt()
