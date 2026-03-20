@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 from datetime import date, datetime, timezone
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -58,6 +59,160 @@ from .styles import (
 from .selection import render_selection_screen
 from .header import render_group_header
 from .summary_tab import render_summary_tab
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _build_evo_chart_data(
+    tarefas_json: str,
+    svc_ids_rank: tuple[str, ...],
+    total_cells_rank: int,
+    semanas_total: int,
+    rev_start_iso: str,
+) -> dict | None:
+    """Transforma tarefas em séries para o gráfico de evolução — cacheado por 60s.
+
+    Recebe tarefas como JSON string para ser hashável pelo cache do Streamlit.
+    Retorna dict com pc, ps, meta, agg, cum — ou None se não houver dados.
+    """
+    import json
+
+    tarefas = json.loads(tarefas_json)
+    df = pd.DataFrame(tarefas)
+    if df.empty:
+        return None
+
+    rev_start = pd.to_datetime(rev_start_iso, utc=True)
+    svc_set = set(svc_ids_rank)
+
+    def _wk(s):
+        dt = pd.to_datetime(s, errors="coerce", utc=True)
+        return ((dt - rev_start).dt.days.clip(lower=0) // 7 + 1).astype("Int64")
+
+    has_dt = any(
+        c in df.columns and df[c].notna().any()
+        for c in ["dt_etapa_d", "dt_etapa_r", "dt_etapa_m"]
+    )
+
+    if has_dt:
+        events = []
+        for dc in ["dt_etapa_d", "dt_etapa_r", "dt_etapa_m"]:
+            if dc not in df.columns:
+                continue
+            sub = df[df["servico_id"].isin(svc_set)].copy()
+            if sub.empty:
+                continue
+            sub["wk"] = _wk(sub[dc])
+            sub = sub.dropna(subset=["wk"])
+            if not sub.empty:
+                events.append(sub[["wk"]].assign(cnt=1))
+        if not events:
+            return {"mode": "no_timestamps"}
+
+        ev = pd.concat(events, ignore_index=True)
+        agg = ev.groupby("wk", dropna=True)["cnt"].sum().sort_index()
+        cum = agg.cumsum()
+        mw = int(max(cum.index.max(), agg.index.max()))
+        idx = range(1, mw + 1)
+        wt = max(semanas_total, mw, 1)
+
+        pc = (cum / max(total_cells_rank, 1) * 100).round(1).to_frame("Cumulativo (%)")
+        ps = (agg / max(total_cells_rank, 1) * 100).round(1).to_frame("Na semana (%)")
+        pc = pc.reindex(idx).ffill().fillna(0)
+        ps = ps.reindex(idx).fillna(0)
+        meta = pd.Series(
+            [min(100.0, (w / wt) * 100) for w in idx],
+            index=idx, name="Meta (%)",
+        )
+        return {"mode": "timestamps", "pc": pc, "ps": ps, "meta": meta,
+                "agg": agg, "cum": cum}
+
+    if "semana" in df.columns:
+        df_done = df[df["servico_id"].isin(svc_set) & df["semana"].notna()].copy()
+        if df_done.empty:
+            return None
+        df_done["semana"] = pd.to_numeric(df_done["semana"], errors="coerce").astype("Int64")
+        df_done = df_done.dropna(subset=["semana"])
+        cum_vals = []
+        for w in sorted(df_done["semana"].unique()):
+            w_df = df_done[df_done["semana"] <= w]
+            ok_w = int(
+                w_df[["etapa_d", "etapa_r", "etapa_m"]]
+                .fillna(False).astype(bool).astype(int).sum().sum()
+            )
+            cum_vals.append({"Semana": int(w), "% Concluído": round(
+                (ok_w / max(total_cells_rank, 1)) * 100, 1)})
+        return {"mode": "semana_col", "cum_vals": cum_vals}
+
+    return None
+
+
+def _render_altair_evo(pc: pd.DataFrame, ps: pd.DataFrame,
+                       meta: pd.Series) -> None:
+    """Renderiza o gráfico de evolução com Altair (hover rico + crosshair)."""
+    df_chart = pc.join(ps).join(meta).reset_index(names="Semana")
+    df_melt = df_chart.melt("Semana", var_name="série", value_name="valor")
+
+    # Delta vs meta por semana (calculado no Vega-Lite via transform)
+    df_meta = df_chart[["Semana", "Meta (%)"]].rename(columns={"Meta (%)": "meta_val"})
+    df_melt = df_melt.merge(df_meta, on="Semana", how="left")
+    df_melt["delta"] = (df_melt["valor"] - df_melt["meta_val"]).round(1)
+
+    nearest = alt.selection_point(
+        nearest=True, on="mouseover", fields=["Semana"], empty=False
+    )
+
+    color_scale = alt.Scale(
+        domain=["Cumulativo (%)", "Meta (%)", "Na semana (%)"],
+        range=["#7F77DD", "#378ADD", "#D85A30"],
+    )
+
+    base = alt.Chart(df_melt).encode(
+        x=alt.X("Semana:Q", axis=alt.Axis(tickMinStep=1, title="Semana")),
+        y=alt.Y(
+            "valor:Q",
+            axis=alt.Axis(title="%", format=".1f"),
+            scale=alt.Scale(domain=[0, 100]),
+        ),
+        color=alt.Color(
+            "série:N",
+            scale=color_scale,
+            legend=alt.Legend(orient="bottom", title=None),
+        ),
+    )
+
+    lines = base.mark_line(
+        strokeWidth=2,
+        point=alt.OverlayMarkDef(size=40, filled=True),
+    )
+
+    points_highlight = base.mark_point(
+        size=80, filled=True, opacity=0,
+    ).encode(
+        opacity=alt.condition(nearest, alt.value(1), alt.value(0)),
+        tooltip=[
+            alt.Tooltip("Semana:Q", title="Semana"),
+            alt.Tooltip("série:N", title="Série"),
+            alt.Tooltip("valor:Q", title="%", format=".1f"),
+            alt.Tooltip("delta:Q", title="vs meta", format="+.1f"),
+        ],
+    ).add_params(nearest)
+
+    rule = (
+        alt.Chart(df_melt)
+        .mark_rule(color="#888780", strokeWidth=1, strokeDash=[4, 3], opacity=0.6)
+        .encode(x="Semana:Q")
+        .transform_filter(nearest)
+    )
+
+    chart = (
+        (lines + points_highlight + rule)
+        .properties(height=320)
+        .configure_view(strokeWidth=0)
+        .configure_axis(gridOpacity=0.15, domainOpacity=0.3)
+        .configure_legend(labelFontSize=12, symbolSize=80)
+    )
+
+    st.altair_chart(chart, use_container_width=True)
+
 
 def _pct_bar_html(pct, height=4):
     """Barra de progresso HTML inline — não depende do módulo legado."""
@@ -686,99 +841,65 @@ def render_matriz() -> None:
                     seen_e.add(sid)
                     svc_ids_rank.append(sid)
             total_cells_rank = int(len(eqs) * max(len(svc_ids_rank), 1) * 3)
+
             rev_start2 = pd.to_datetime((rev_row or {}).get("data_inicio") or (
                 rev_row or {}).get("created_at"), errors="coerce", utc=True)
             if pd.isna(rev_start2):
                 rev_start2 = pd.Timestamp(_now_utc()).normalize()
-            df_tasks = pd.DataFrame(tarefas)
-            if not df_tasks.empty:
-                has_dt = any(
-                    (c in df_tasks.columns and df_tasks[c].notna().any()) for c in [
-                        "dt_etapa_d", "dt_etapa_r", "dt_etapa_m"])
-                if has_dt:
-                    def _wk(s):
-                        dt = pd.to_datetime(s, errors="coerce", utc=True)
-                        return ((dt - rev_start2).dt.days.clip(lower=0) //
-                                7 + 1).astype("Int64")
-                    events = []
-                    for dc in ["dt_etapa_d", "dt_etapa_r", "dt_etapa_m"]:
-                        if dc not in df_tasks.columns:
-                            continue
-                        sub = df_tasks[df_tasks["servico_id"].isin(
-                            svc_ids_rank)].copy()
-                        if sub.empty:
-                            continue
-                        sub["wk"] = _wk(sub[dc])
-                        sub = sub.dropna(subset=["wk"])
-                        if not sub.empty:
-                            events.append(sub[["wk"]].assign(cnt=1))
-                    if events:
-                        ev = pd.concat(events, ignore_index=True)
-                        agg = ev.groupby("wk", dropna=True)[
-                            "cnt"].sum().sort_index()
-                        cum = agg.cumsum()
-                        mw = int(max(cum.index.max(), agg.index.max()))
-                        idx = range(1, mw + 1)
-                        pc = (cum / max(total_cells_rank, 1) *
-                              100).round(1).to_frame("Cumulativo (%)")
-                        ps = (agg / max(total_cells_rank, 1) *
-                              100).round(1).to_frame("Na semana (%)")
-                        pc = pc.reindex(idx).ffill().fillna(0)
-                        ps = ps.reindex(idx).fillna(0)
-                        wt = int(
-                            (rev_row or {}).get("semanas_total") or mw or 1)
-                        meta = pd.Series([min(100.0, (w / max(wt, 1)) * 100)
-                                         for w in idx], index=idx, name="Meta (%)")
-                        # KPIs de evolução
-                        pct_atual = float(
-                            pc["Cumulativo (%)"].iloc[-1]) if not pc.empty else 0
-                        sem_atual = int(pc.index[-1]) if not pc.empty else 0
-                        meta_atual = float(
-                            meta.iloc[-1]) if len(meta) > 0 else 0
-                        delta_vs_meta = round(pct_atual - meta_atual, 1)
-                        mk1, mk2, mk3, mk4 = st.columns(4)
-                        mk1.metric("Progresso atual", f"{pct_atual:.1f}%")
-                        mk2.metric("Meta (semana atual)",
-                                   f"{meta_atual:.1f}%",
-                                   delta=f"{delta_vs_meta:+.1f}%",
-                                   delta_color="normal" if delta_vs_meta >= 0 else "inverse")
-                        mk3.metric("Semanas decorridas", str(sem_atual))
-                        mk4.metric("Total etapas",
-                                   f"{int(cum.iloc[-1])}/{total_cells_rank}")
-                        st.divider()
-                        st.line_chart(pc.join(ps).join(meta))
-                        with st.expander("📋 Tabela detalhada", expanded=False):
-                            det = pc.join(ps).join(meta).copy()
-                            det["Concluídos (semana)"] = agg.reindex(
-                                idx).fillna(0).astype(int).values
-                            det["Concluídos (acum.)"] = cum.reindex(
-                                idx).ffill().fillna(0).astype(int).values
-                            st.dataframe(
-                                det.reset_index(
-                                    names="Semana"),
-                                use_container_width=True,
-                                hide_index=True)
-                    else:
-                        st.info(
-                            "Ainda não há timestamps suficientes para gerar o gráfico.")
-                elif "semana" in df_tasks.columns:
-                    df_done = df_tasks[(df_tasks["servico_id"].isin(
-                        svc_ids_rank)) & df_tasks["semana"].notna()].copy()
-                    if not df_done.empty:
-                        df_done["semana"] = pd.to_numeric(
-                            df_done["semana"], errors="coerce").astype("Int64")
-                        df_done = df_done.dropna(subset=["semana"])
-                        cum_vals = []
-                        for w in sorted(df_done["semana"].unique()):
-                            w_df = df_done[df_done["semana"] <= w]
-                            ok_w = int(w_df[["etapa_d", "etapa_r", "etapa_m"]].fillna(
-                                False).astype(bool).astype(int).sum().sum())
-                            cum_vals.append({"Semana": int(w), "% Concluído": round(
-                                (ok_w / max(total_cells_rank, 1)) * 100, 1)})
-                        st.line_chart(
-                            pd.DataFrame(cum_vals).set_index("Semana"))
-                    else:
-                        st.info("Sem dados de evolução.")
+
+            if tarefas:
+                import json as _json
+                evo = _build_evo_chart_data(
+                    tarefas_json=_json.dumps(tarefas, default=str),
+                    svc_ids_rank=tuple(svc_ids_rank),
+                    total_cells_rank=total_cells_rank,
+                    semanas_total=int((rev_row or {}).get("semanas_total") or 1),
+                    rev_start_iso=str(rev_start2),
+                )
+
+                if evo is None:
+                    st.info("Sem tarefas para esta revisão/grupo.")
+                elif evo.get("mode") == "no_timestamps":
+                    st.info("Ainda não há timestamps suficientes para gerar o gráfico.")
+                elif evo.get("mode") == "semana_col":
+                    st.line_chart(
+                        pd.DataFrame(evo["cum_vals"]).set_index("Semana"))
+                elif evo.get("mode") == "timestamps":
+                    pc   = evo["pc"]
+                    ps   = evo["ps"]
+                    meta = evo["meta"]
+                    agg  = evo["agg"]
+                    cum  = evo["cum"]
+                    idx  = pc.index
+
+                    pct_atual    = float(pc["Cumulativo (%)"].iloc[-1]) if not pc.empty else 0
+                    sem_atual    = int(pc.index[-1]) if not pc.empty else 0
+                    meta_atual   = float(meta.iloc[-1]) if len(meta) > 0 else 0
+                    delta_vs_meta = round(pct_atual - meta_atual, 1)
+
+                    mk1, mk2, mk3, mk4 = st.columns(4)
+                    mk1.metric("Progresso atual", f"{pct_atual:.1f}%")
+                    mk2.metric("Meta (semana atual)",
+                               f"{meta_atual:.1f}%",
+                               delta=f"{delta_vs_meta:+.1f}%",
+                               delta_color="normal" if delta_vs_meta >= 0 else "inverse")
+                    mk3.metric("Semanas decorridas", str(sem_atual))
+                    mk4.metric("Total etapas",
+                               f"{int(cum.iloc[-1])}/{total_cells_rank}")
+                    st.divider()
+
+                    _render_altair_evo(pc, ps, meta)
+
+                    with st.expander("📋 Tabela detalhada", expanded=False):
+                        det = pc.join(ps).join(meta).copy()
+                        det["Concluídos (semana)"] = agg.reindex(
+                            idx).fillna(0).astype(int).values
+                        det["Concluídos (acum.)"] = cum.reindex(
+                            idx).ffill().fillna(0).astype(int).values
+                        st.dataframe(
+                            det.reset_index(names="Semana"),
+                            use_container_width=True,
+                            hide_index=True)
                 else:
                     st.info("Sem timestamps nem coluna semana disponíveis.")
             else:
