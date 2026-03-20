@@ -13,15 +13,19 @@ import streamlit as st
 from postgrest.exceptions import APIError
 
 from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_role
-from src.db.supabase_client import get_supabase_service
+from src.db.supabase_client import get_supabase_service, get_supabase_anon
 from src.utils import nav
 
 
 STATUSES = ["pendente", "em_andamento", "concluido", "travado", "nao_aplica"]
 
 
-def _fetch_revisoes(sb, tenant_id):
-    """Fetch revisoes; if RLS/policy blocks, fallback to service role."""
+@st.cache_data(ttl=30, show_spinner=False)
+def _fetch_revisoes_cached(tenant_id: str, _token: str = "") -> list[dict]:
+    """Carrega revisões com cache (ttl=30s). Usa service role como fallback."""
+    sb = get_supabase_anon()
+    if _token:
+        sb.postgrest.auth(_token)
     try:
         return (
             sb.table("revisoes")
@@ -46,7 +50,12 @@ def _fetch_revisoes(sb, tenant_id):
             return []
 
 
-def _fetch_revisoes_min(sb, tenant_id):
+@st.cache_data(ttl=30, show_spinner=False)
+def _fetch_revisoes_min_cached(tenant_id: str, _token: str = "") -> list[dict]:
+    """Versão mínima (menos campos) com cache para seleção de revisão."""
+    sb = get_supabase_anon()
+    if _token:
+        sb.postgrest.auth(_token)
     try:
         return (
             sb.table("revisoes")
@@ -71,21 +80,50 @@ def _fetch_revisoes_min(sb, tenant_id):
             return []
 
 
+@st.cache_data(ttl=30, show_spinner=False)
+def _load_grupos_cached(tenant_id: str, _token: str = "") -> list[dict]:
+    """Grupos ativos para seleção na sincronização (cacheado)."""
+    sb = get_supabase_anon()
+    if _token:
+        sb.postgrest.auth(_token)
+    try:
+        return (
+            sb.table("equip_grupos")
+            .select("id,nome,ativo,departamento_id")
+            .eq("tenant_id", tenant_id)
+            .eq("ativo", True)
+            .order("nome")
+            .execute()
+            .data
+        ) or []
+    except Exception:
+        return []
+
+
+def _fetch_revisoes(sb, tenant_id):
+    """Compat: usa token do session_state se disponível."""
+    import streamlit as _st
+    token = _st.session_state.get("sb_access_token", "")
+    return _fetch_revisoes_cached(tenant_id, token)
+
+
+def _fetch_revisoes_min(sb, tenant_id):
+    """Compat: usa token do session_state se disponível."""
+    import streamlit as _st
+    token = _st.session_state.get("sb_access_token", "")
+    return _fetch_revisoes_min_cached(tenant_id, token)
+
+
 def _chunk(lst, size):
     for i in range(0, len(lst), size):
         yield lst[i:i + size]
 
 
 def _load_grupos(sb, tenant_id):
-    return (
-        sb.table("equip_grupos")
-        .select("id,nome")
-        .eq("tenant_id", tenant_id)
-        .eq("ativo", True)
-        .order("nome")
-        .execute()
-        .data
-    ) or []
+    """Compat: delega para versão cacheada."""
+    import streamlit as _st
+    token = _st.session_state.get("sb_access_token", "")
+    return _load_grupos_cached(tenant_id, token)
 
 
 def _load_equipamentos(sb, tenant_id):

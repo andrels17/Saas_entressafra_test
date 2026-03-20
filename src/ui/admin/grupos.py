@@ -3,6 +3,75 @@ import streamlit as st
 from src.ui.admin_components.layout import admin_block, admin_divider
 from src.ui.admin_components.utils import inject_enterprise_css, pager, safe_rerun, norm_name
 from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_role
+from src.db.supabase_client import get_supabase_anon
+
+
+# ── Funções de leitura cacheadas ─────────────────────────────────────────────
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _load_grupos_admin(tenant_id: str, with_dept: bool = True,
+                       _token: str = "") -> list[dict]:
+    """Carrega grupos para a tela de admin (cacheado, ttl=30s)."""
+    sb = get_supabase_anon()
+    if _token:
+        sb.postgrest.auth(_token)
+    try:
+        sel = "id,nome,ativo,created_at,departamento_id" if with_dept else "id,nome,ativo,created_at"
+        return (
+            sb.table("equip_grupos")
+            .select(sel)
+            .eq("tenant_id", tenant_id)
+            .order("nome")
+            .execute()
+            .data
+        ) or []
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _load_departamentos_admin(tenant_id: str, _token: str = "") -> list[dict]:
+    """Carrega departamentos ativos para o admin (cacheado, ttl=30s)."""
+    sb = get_supabase_anon()
+    if _token:
+        sb.postgrest.auth(_token)
+    try:
+        return (
+            sb.table("departamentos")
+            .select("id,nome,ativo")
+            .eq("tenant_id", tenant_id)
+            .eq("ativo", True)
+            .order("nome")
+            .execute()
+            .data
+        ) or []
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _load_equipamentos_count_por_grupo(tenant_id: str,
+                                        _token: str = "") -> dict[str, int]:
+    """Retorna dict grupo_id → contagem de equipamentos (cacheado)."""
+    sb = get_supabase_anon()
+    if _token:
+        sb.postgrest.auth(_token)
+    try:
+        rows = (
+            sb.table("equipamentos")
+            .select("id,grupo_id")
+            .eq("tenant_id", tenant_id)
+            .execute()
+            .data
+        ) or []
+        counts: dict[str, int] = {}
+        for r in rows:
+            gid = r.get("grupo_id")
+            if gid:
+                counts[gid] = counts.get(gid, 0) + 1
+        return counts
+    except Exception:
+        return {}
 
 
 # _inject_enterprise_css → moved to admin_components.utils
@@ -388,20 +457,10 @@ def render_admin_grupos() -> None:
 
     tenant_id = current_tenant_id()
     sb = sb_for_user()
+    token = st.session_state.get("sb_access_token", "")
 
-    # Departamentos (opcional)
-    try:
-        deps = (
-            sb.table("departamentos")
-            .select("id,nome,ativo")
-            .eq("tenant_id", tenant_id)
-            .eq("ativo", True)
-            .order("nome")
-            .execute()
-            .data
-        ) or []
-    except Exception:
-        deps = []
+    # Departamentos (cacheado — evita query a cada rerun)
+    deps = _load_departamentos_admin(tenant_id, token)
     dep_map = {d["nome"]: d["id"] for d in deps}
     dep_names = ["(sem departamento)"] + [d["nome"] for d in deps]
 
@@ -480,70 +539,30 @@ def render_admin_grupos() -> None:
                 "Por página", [
                     10, 20, 50], index=0, key="grp_page_size")
 
-        try:
-            q = sb.table("equip_grupos").select("id, nome, ativo, created_at, departamento_id").eq(
-                "tenant_id", tenant_id).order("nome")
-        except Exception:
-            q = sb.table("equip_grupos").select("id, nome, ativo, created_at").eq(
-                "tenant_id", tenant_id).order("nome")
+        # Leitura cacheada — evita re-query a cada rerun por filtro/paginação
+        grupos = _load_grupos_admin(tenant_id, with_dept=bool(deps), _token=token)
         if only_active:
-            q = q.eq("ativo", True)
+            grupos = [g for g in grupos if g.get("ativo")]
 
-        if grp_search:
-            try:
-                q = q.ilike("nome", f"%{grp_search.strip()}%")
-            except Exception as _e:
-                import logging; logging.getLogger("saas").warning("grupos.py: %s", _e)
-
-        grupos = q.execute().data or []
         if grp_search:
             ss = grp_search.strip().lower()
-            grupos = [
-                g for g in grupos if ss in str(
-                    g.get(
-                        "nome",
-                        "")).lower()]
+            grupos = [g for g in grupos if ss in str(g.get("nome", "")).lower()]
 
-        # Ordenação local (garante opções como mais recentes)
+        # Ordenação local
         try:
             sm = sort_mode
         except Exception:
             sm = "A–Z"
         if sm == "A–Z":
-            grupos = sorted(
-                grupos,
-                key=lambda x: str(
-                    x.get(
-                        "nome",
-                        "")).lower())
+            grupos = sorted(grupos, key=lambda x: str(x.get("nome", "")).lower())
         elif sm == "Z–A":
-            grupos = sorted(
-                grupos,
-                key=lambda x: str(
-                    x.get(
-                        "nome",
-                        "")).lower(),
-                reverse=True)
+            grupos = sorted(grupos, key=lambda x: str(x.get("nome", "")).lower(), reverse=True)
         elif sm == "Ativos primeiro":
-            grupos = sorted(
-                grupos, key=lambda x: (
-                    0 if x.get("ativo") else 1, str(
-                        x.get(
-                            "nome", "")).lower()))
+            grupos = sorted(grupos, key=lambda x: (0 if x.get("ativo") else 1, str(x.get("nome", "")).lower()))
         elif sm == "Inativos primeiro":
-            grupos = sorted(
-                grupos, key=lambda x: (
-                    0 if not x.get("ativo") else 1, str(
-                        x.get(
-                            "nome", "")).lower()))
+            grupos = sorted(grupos, key=lambda x: (0 if not x.get("ativo") else 1, str(x.get("nome", "")).lower()))
         elif sm == "Mais recentes":
-            grupos = sorted(
-                grupos,
-                key=lambda x: str(
-                    x.get(
-                        "created_at",
-                        "")),
-                reverse=True)
+            grupos = sorted(grupos, key=lambda x: str(x.get("created_at", "")), reverse=True)
         elif sm == "Mais antigos":
             grupos = sorted(grupos, key=lambda x: str(x.get("created_at", "")))
 
@@ -551,18 +570,10 @@ def render_admin_grupos() -> None:
             st.info("Nenhum grupo encontrado.")
             return
 
-        # KPIs rápidos (best-effort)
-        try:
-            total_equip = (
-                sb.table("equipamentos")
-                .select("id", count="exact")
-                .eq("tenant_id", tenant_id)
-                .execute()
-                .count
-            )
-            total_equip = int(total_equip or 0)
-        except Exception:
-            total_equip = 0
+        # Contagem de equipamentos por grupo — 1 query cacheada para todos os grupos
+        # (era 1 query por grupo dentro do for loop = N+1)
+        eq_count_por_grupo = _load_equipamentos_count_por_grupo(tenant_id, token)
+        total_equip = sum(eq_count_por_grupo.values())
 
         k1, k2, k3 = st.columns(3, gap="small")
         k1.metric("Grupos", len(grupos))
@@ -578,24 +589,13 @@ def render_admin_grupos() -> None:
 
         for g in grupos_page:
             gid = g["id"]
-            # badge de equipamentos (best-effort)
-            try:
-                eq_cnt = (
-                    sb.table("equipamentos")
-                    .select("id", count="exact")
-                    .eq("tenant_id", tenant_id)
-                    .eq("grupo_id", gid)
-                    .execute()
-                    .count
-                )
-                eq_cnt = int(eq_cnt or 0)
-            except Exception:
-                eq_cnt = 0
+            # badge de equipamentos — lookup no dict cacheado (sem nova query)
+            eq_cnt = eq_count_por_grupo.get(gid, 0)
 
             dep_nome = "(sem)"
             if deps:
                 dep_nome = next(
-                    (d["nome"] for d in deps if d["id"] == g.get("departamento_id")), "(sem)", )
+                    (d["nome"] for d in deps if d["id"] == g.get("departamento_id")), "(sem)")
 
             with st.expander(f"{g['nome']}", expanded=False):
                 status_txt = "ATIVO" if g.get("ativo") else "INATIVO"

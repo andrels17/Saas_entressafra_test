@@ -3,11 +3,74 @@ from src.ui.admin_components.layout import admin_block, admin_divider
 from src.ui.admin_components.utils import inject_enterprise_css, pager, safe_rerun, norm_name
 
 from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_role
+from src.db.supabase_client import get_supabase_anon
 
 from src.ui.core.styles import page_header as _ph
 
 
 # _inject_enterprise_css → moved to admin_components.utils
+
+
+# ── Funções de leitura cacheadas ─────────────────────────────────────────────
+# Extraídas do corpo de render_admin_departamentos para evitar re-queries
+# a cada rerun do Streamlit. TTL=30s: dados de admin mudam pouco e o usuário
+# percebe a latência de query muito mais do que 30s de defasagem.
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _load_departamentos(tenant_id: str, only_active: bool,
+                        _token: str = "") -> list[dict]:
+    """Carrega todos os departamentos do tenant (cacheado)."""
+    sb = get_supabase_anon()
+    if _token:
+        sb.postgrest.auth(_token)
+    try:
+        q = (
+            sb.table("departamentos")
+            .select("id,nome,ativo,created_at")
+            .eq("tenant_id", tenant_id)
+            .order("nome")
+        )
+        if only_active:
+            q = q.eq("ativo", True)
+        return q.execute().data or []
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _load_grupos_por_dept(tenant_id: str, _token: str = "") -> list[dict]:
+    """Carrega grupos para calcular badges de departamento (cacheado)."""
+    sb = get_supabase_anon()
+    if _token:
+        sb.postgrest.auth(_token)
+    try:
+        return (
+            sb.table("equip_grupos")
+            .select("id,departamento_id")
+            .eq("tenant_id", tenant_id)
+            .execute()
+            .data
+        ) or []
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _load_equipamentos_por_dept(tenant_id: str, _token: str = "") -> list[dict]:
+    """Carrega equipamentos para calcular badges de departamento (cacheado)."""
+    sb = get_supabase_anon()
+    if _token:
+        sb.postgrest.auth(_token)
+    try:
+        return (
+            sb.table("equipamentos")
+            .select("id,grupo_id")
+            .eq("tenant_id", tenant_id)
+            .execute()
+            .data
+        ) or []
+    except Exception:
+        return []
 
 
 # clamp → clamp from admin_components.utils
@@ -415,19 +478,11 @@ def render_admin_departamentos() -> None:
                 "Por página", [
                     10, 20, 50], index=0, key="dep_page_size")
 
-        q = sb.table("departamentos").select("id,nome,ativo,created_at").eq(
-            "tenant_id", tenant_id).order("nome")
-        if only_active:
-            q = q.eq("ativo", True)
-        if dep_search:
-            # ilike é o melhor (faz case-insensitive) — se não existir no
-            # client, cai no filtro local.
-            try:
-                q = q.ilike("nome", f"%{dep_search.strip()}%")
-            except Exception as _e:
-                st.warning(f"Erro ao buscar dados: {_e}")
+        # Leitura cacheada — evita re-query a cada rerun por filtro/paginação
+        token = st.session_state.get("sb_access_token", "")
+        deps = _load_departamentos(tenant_id, only_active, token)
 
-        deps = q.execute().data or []
+        # Filtro de busca (local, sem nova query)
         if dep_search:
             ss = dep_search.strip().lower()
             deps = [d for d in deps if ss in str(d.get("nome", "")).lower()]
@@ -438,30 +493,15 @@ def render_admin_departamentos() -> None:
         except Exception:
             sm = "A–Z"
         if sm == "A–Z":
-            deps = sorted(deps, key=lambda x: (str(x.get("nome", "")).lower()))
+            deps = sorted(deps, key=lambda x: str(x.get("nome", "")).lower())
         elif sm == "Z–A":
-            deps = sorted(deps, key=lambda x: (
-                str(x.get("nome", "")).lower()), reverse=True)
+            deps = sorted(deps, key=lambda x: str(x.get("nome", "")).lower(), reverse=True)
         elif sm == "Ativos primeiro":
-            deps = sorted(
-                deps, key=lambda x: (
-                    0 if x.get("ativo") else 1, str(
-                        x.get(
-                            "nome", "")).lower()))
+            deps = sorted(deps, key=lambda x: (0 if x.get("ativo") else 1, str(x.get("nome", "")).lower()))
         elif sm == "Inativos primeiro":
-            deps = sorted(
-                deps, key=lambda x: (
-                    0 if not x.get("ativo") else 1, str(
-                        x.get(
-                            "nome", "")).lower()))
+            deps = sorted(deps, key=lambda x: (0 if not x.get("ativo") else 1, str(x.get("nome", "")).lower()))
         elif sm == "Mais recentes":
-            deps = sorted(
-                deps,
-                key=lambda x: str(
-                    x.get(
-                        "created_at",
-                        "")),
-                reverse=True)
+            deps = sorted(deps, key=lambda x: str(x.get("created_at", "")), reverse=True)
         elif sm == "Mais antigos":
             deps = sorted(deps, key=lambda x: str(x.get("created_at", "")))
 
@@ -469,49 +509,22 @@ def render_admin_departamentos() -> None:
             st.info("Nenhum departamento encontrado.")
             return
 
-        # Pré-cálculos (best-effort) para os badges (grupos/equipamentos)
+        # Pré-cálculos de badges usando leituras cacheadas (evita 3 queries extras)
         dept_group_count: dict[str, int] = {}
-        try:
-            rows = (
-                sb.table("equip_grupos")
-                .select("id,departamento_id")
-                .eq("tenant_id", tenant_id)
-                .execute()
-                .data
-            ) or []
-            for r in rows:
-                did = r.get("departamento_id")
-                if did:
-                    dept_group_count[did] = dept_group_count.get(did, 0) + 1
-        except Exception:
-            dept_group_count = {}
+        grupo_rows = _load_grupos_por_dept(tenant_id, token)
+        for r in grupo_rows:
+            did = r.get("departamento_id")
+            if did:
+                dept_group_count[did] = dept_group_count.get(did, 0) + 1
 
         dept_equip_count: dict[str, int] = {}
-        try:
-            # Conta via join indireto: equipamentos -> grupo -> departamento
-            grupos = (
-                sb.table("equip_grupos")
-                .select("id,departamento_id")
-                .eq("tenant_id", tenant_id)
-                .execute()
-                .data
-            ) or []
-            grp_to_dep = {g["id"]: g.get("departamento_id")
-                          for g in grupos if g.get("id")}
-            eq_rows = (
-                sb.table("equipamentos")
-                .select("id,grupo_id")
-                .eq("tenant_id", tenant_id)
-                .execute()
-                .data
-            ) or []
-            for e in eq_rows:
-                gid = e.get("grupo_id")
-                did = grp_to_dep.get(gid)
-                if did:
-                    dept_equip_count[did] = dept_equip_count.get(did, 0) + 1
-        except Exception:
-            dept_equip_count = {}
+        grp_to_dep = {g["id"]: g.get("departamento_id") for g in grupo_rows if g.get("id")}
+        eq_rows = _load_equipamentos_por_dept(tenant_id, token)
+        for e in eq_rows:
+            gid = e.get("grupo_id")
+            did = grp_to_dep.get(gid)
+            if did:
+                dept_equip_count[did] = dept_equip_count.get(did, 0) + 1
 
         # KPIs rápidos
         try:

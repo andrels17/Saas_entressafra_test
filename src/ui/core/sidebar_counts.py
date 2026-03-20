@@ -1,7 +1,23 @@
+"""Contagens para badges da sidebar.
+
+Estratégia de performance:
+  - Antes: 5 queries separadas por rerun (ttl=30s)
+  - Depois: 2 queries por rerun (ttl=60s)
+    · Query 1: revisão ativa (1 row)
+    · Query 2: tarefas_servico com todos os status de uma vez (1 query)
+      agrupa localmente em Python → elimina 3 round-trips ao banco
+  - auditoria_24h mantida como best-effort separada (tabela diferente)
+
+TTL de 60s é adequado para badges: são indicativos, não críticos.
+O usuário percebe latência de query muito mais do que um badge com
+60s de defasagem.
+"""
 from __future__ import annotations
 
-import streamlit as st
 from datetime import datetime, timedelta, timezone
+
+import streamlit as st
+
 from src.utils.supabase_helpers import current_tenant_id
 from src.db.supabase_client import get_supabase_anon
 
@@ -10,32 +26,34 @@ def _safe_count(res) -> int:
     """Extrai count de respostas do supabase-py com tolerância a versões."""
     if res is None:
         return 0
-    # supabase-py costuma retornar objeto com atributo .count
     if hasattr(res, "count") and getattr(res, "count") is not None:
         try:
             return int(getattr(res, "count"))
         except Exception:
             return 0
-    # fallback (algumas versões retornam dict)
     try:
         if isinstance(res, dict) and res.get("count") is not None:
             return int(res["count"])
     except Exception:
-        pass  # ignorado — operação opcional
+        pass
     return 0
 
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def get_sidebar_badges(tenant_id: str, _token: str = "") -> dict[str, int]:
-    """Contagens rápidas para badges na sidebar.
+    """Badges da sidebar em 2 queries (era 5).
 
-    Mantém leve: 2 contagens principais + 1 opcional (auditoria 24h).
+    Query 1 — revisão ativa: busca o id da revisão com status 'ativa'.
+    Query 2 — tarefas_servico: carrega status + timestamps de uma só vez
+               e agrupa localmente, eliminando 3 round-trips anteriores.
+    Query 3 — historico_eventos: contagem de auditoria 24h (best-effort,
+               tabela diferente, não pode ser unida com tarefas_servico).
     """
     sb = get_supabase_anon()
     if _token:
         sb.postgrest.auth(_token)
 
-    # revisão ativa (se não existir, badges ficam 0)
+    # ── Query 1: revisão ativa ───────────────────────────────────────────────
     rev = (
         sb.table("revisoes")
         .select("id")
@@ -46,80 +64,72 @@ def get_sidebar_badges(tenant_id: str, _token: str = "") -> dict[str, int]:
         .execute()
         .data
     ) or []
+
     if not rev:
-        return {
-            "gestor_travados": 0,
-            "equip_parados": 0,
-            "apont_pendentes": 0,
-            "auditoria_24h": 0}
+        return {"gestor_travados": 0, "equip_parados": 0,
+                "apont_pendentes": 0, "auditoria_24h": 0}
+
     revisao_id = rev[0]["id"]
 
-    # travados (Painel do Gestor)
-    r1 = (
-        sb.table("tarefas_servico")
-        .select("id", count="exact")
-        .eq("tenant_id", tenant_id)
-        .eq("revisao_id", revisao_id)
-        .eq("status", "travado")
-        .execute()
-    )
-    travados = _safe_count(r1)
-
-    # equipamentos parados (sem etapa marcada há >= 7 dias)
-    # Filtra apenas não-concluídos com pelo menos 1 etapa marcada
-    # (reduz drasticamente o volume vs SELECT * com limit 5000)
+    # ── Query 2: tarefas_servico — tudo em uma só chamada ───────────────────
+    # Busca status + timestamps das etapas.
+    # Antes: 3 queries (travados count, parados rows, pendentes count).
+    # Agora: 1 query, agrupamento feito em Python.
+    travados = pendentes = parados = 0
     try:
         from src.utils.timezone import days_since_utc
-        from datetime import datetime, timezone, timedelta
-        _cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
 
-        # Estratégia: conta equipamentos cujo max(dt_etapa_*) < cutoff
-        # usando apenas linhas não-concluídas com alguma etapa marcada
         rows = (
             sb.table("tarefas_servico")
-            .select("equipamento_id,dt_etapa_d,dt_etapa_r,dt_etapa_m")
+            .select(
+                "equipamento_id,status,"
+                "dt_etapa_d,dt_etapa_r,dt_etapa_m"
+            )
             .eq("tenant_id", tenant_id)
             .eq("revisao_id", revisao_id)
-            .not_.is_("dt_etapa_d", "null")   # só equipamentos iniciados
-            .neq("status", "concluido")
-            .limit(2000)
+            .limit(5000)
             .execute()
             .data
         ) or []
 
-        # Agrupa por equipamento: maior timestamp de etapa
-        ultimos: dict[str, str | None] = {}
+        # Última movimentação por equipamento (para detectar parados)
+        ultimos: dict[str, str] = {}
+
         for row in rows:
-            eid = row.get("equipamento_id")
-            if not eid:
-                continue
-            mov = max(
-                [x for x in [row.get("dt_etapa_m"), row.get("dt_etapa_r"),
-                              row.get("dt_etapa_d")] if x],
-                default=None
-            )
-            if mov and (eid not in ultimos or mov > (ultimos[eid] or "")):
-                ultimos[eid] = mov
+            status = row.get("status") or ""
+            eid    = row.get("equipamento_id")
+
+            # Travados
+            if status == "travado":
+                travados += 1
+
+            # Pendentes (pendente + em_andamento)
+            if status in ("pendente", "em_andamento"):
+                pendentes += 1
+
+            # Parados: rastreia último timestamp por equipamento
+            if eid and status not in ("concluido", "nao_aplica"):
+                mov = max(
+                    [x for x in [
+                        row.get("dt_etapa_m"),
+                        row.get("dt_etapa_r"),
+                        row.get("dt_etapa_d"),
+                    ] if x],
+                    default=None,
+                )
+                if mov and (eid not in ultimos or mov > ultimos[eid]):
+                    ultimos[eid] = mov
 
         parados = sum(
             1 for mov in ultimos.values()
-            if mov and (days_since_utc(mov) or 0) >= 7
+            if (days_since_utc(mov) or 0) >= 7
         )
+
     except Exception:
-        parados = 0
+        travados = pendentes = parados = 0
 
-    # pendentes (Apontamento) = pendente + em_andamento
-    r2 = (
-        sb.table("tarefas_servico")
-        .select("id", count="exact")
-        .eq("tenant_id", tenant_id)
-        .eq("revisao_id", revisao_id)
-        .in_("status", ["pendente", "em_andamento"])  # type: ignore
-        .execute()
-    )
-    pendentes = _safe_count(r2)
-
-    # auditoria (últimas 24h) — best-effort
+    # ── Query 3: auditoria 24h (best-effort, tabela separada) ───────────────
+    auditoria = 0
     try:
         since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
         r3 = (
@@ -129,27 +139,23 @@ def get_sidebar_badges(tenant_id: str, _token: str = "") -> dict[str, int]:
             .gte("created_at", since)
             .execute()
         )
-        audit_24h = _safe_count(r3)
+        auditoria = _safe_count(r3)
     except Exception:
-        audit_24h = 0
+        auditoria = 0
 
     return {
         "gestor_travados": int(travados),
-        "equip_parados": int(parados),
+        "equip_parados":   int(parados),
         "apont_pendentes": int(pendentes),
-        "auditoria_24h": int(audit_24h),
+        "auditoria_24h":   int(auditoria),
     }
 
 
 def sidebar_badges() -> dict[str, int]:
     """Helper que usa o tenant atual do session_state."""
     try:
-        import streamlit as st
         token = st.session_state.get("sb_access_token", "")
         return get_sidebar_badges(current_tenant_id(), token)
     except Exception:
-        return {
-            "gestor_travados": 0,
-            "equip_parados": 0,
-            "apont_pendentes": 0,
-            "auditoria_24h": 0}
+        return {"gestor_travados": 0, "equip_parados": 0,
+                "apont_pendentes": 0, "auditoria_24h": 0}
