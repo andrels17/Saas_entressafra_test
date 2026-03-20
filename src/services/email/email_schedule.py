@@ -220,7 +220,7 @@ def should_dispatch_now(
             ).astimezone(BRT)
             hours_since = (now - last).total_seconds() / 3600
             # Mínimo de horas entre disparos por periodicidade
-            min_hours = 23 * 24 if cfg.periodicidade == "quinzenal" else 23
+            min_hours = 13 * 24 if cfg.periodicidade == "quinzenal" else 23
             if hours_since < min_hours:
                 return False
         except Exception:
