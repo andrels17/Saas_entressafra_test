@@ -4,6 +4,12 @@ from src.ui.admin_components.utils import inject_enterprise_css, pager, safe_rer
 
 from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_role
 from src.db.supabase_client import get_supabase_anon
+from src.auth.audit import (
+    audit_departamento_criado,
+    audit_departamento_atualizado,
+    audit_departamento_deletado,
+    audit_departamento_toggle,
+)
 
 from src.ui.core.styles import page_header as _ph
 
@@ -439,8 +445,10 @@ def render_admin_departamentos() -> None:
                 st.warning("Informe um nome.")
                 st.stop()
             try:
-                sb.table("departamentos").insert(
+                res = sb.table("departamentos").insert(
                     {"tenant_id": tenant_id, "nome": nn, "ativo": True}).execute()
+                new_id = (res.data or [{}])[0].get("id", "")
+                audit_departamento_criado(new_id, nn)
                 st.success("Departamento criado.")
                 safe_rerun()
             except Exception as e:
@@ -599,6 +607,7 @@ def render_admin_departamentos() -> None:
                         try:
                             sb.table("departamentos").update({"nome": nn}).eq(
                                 "tenant_id", tenant_id).eq("id", did).execute()
+                            audit_departamento_atualizado(did, {"nome_novo": nn, "nome_anterior": d.get("nome")})
                             st.toast(
                                 "✓ Atualizado", icon=":material/check_circle:")
                             safe_rerun()
@@ -611,8 +620,10 @@ def render_admin_departamentos() -> None:
                             key=f"dep_toggle_{did}",
                             use_container_width=True):
                         try:
-                            sb.table("departamentos").update({"ativo": (not d.get("ativo"))}).eq(
+                            novo_ativo = not d.get("ativo")
+                            sb.table("departamentos").update({"ativo": novo_ativo}).eq(
                                 "tenant_id", tenant_id).eq("id", did).execute()
+                            audit_departamento_toggle(did, d.get("nome", ""), novo_ativo)
                             st.toast("✓ Ok", icon=":material/check_circle:")
                             safe_rerun()
                         except Exception as e:
@@ -637,6 +648,7 @@ def render_admin_departamentos() -> None:
                             try:
                                 sb.table("departamentos").delete().eq(
                                     "tenant_id", tenant_id).eq("id", did).execute()
+                                audit_departamento_deletado(did, d.get("nome", ""))
                                 st.success("Departamento excluído.")
                                 safe_rerun()
                             except Exception as e:

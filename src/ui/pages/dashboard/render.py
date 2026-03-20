@@ -27,6 +27,7 @@ from src.utils.kpi_engine import get_group_kpis
 from src.utils.nav import set_current_revisao
 from src.utils.supabase_helpers import current_tenant_id, sb_for_user
 from src.db.supabase_client import get_supabase_anon
+from src.utils.observability import log_error
 
 
 def _sb_from_token(token: str = ""):
@@ -75,12 +76,14 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
             .execute()
             .data
         ) or []
-    except Exception:
+    except Exception as exc:
+        log_error(exc, context="dashboard._load_base_cached", table="mv_matriz_base")
         raw = []
     try:
         eq_meta = sb.table("equipamentos").select("id,frota,modelo,departamento_id").eq(
             "tenant_id", tenant_id).eq("ativo", True).execute().data or []
-    except Exception:
+    except Exception as exc:
+        log_error(exc, context="dashboard._load_base_cached", table="equipamentos")
         eq_meta = []
     return raw, eq_meta
 
@@ -111,7 +114,8 @@ def _load_departamentos(tenant_id: str, ver: str = "0", _token: str = "") -> lis
             .execute()
             .data or []
         )
-    except Exception:
+    except Exception as exc:
+        log_error(exc, context="dashboard._load_departamentos", table="departamentos")
         return []
 
 
@@ -128,7 +132,8 @@ def _load_grupos(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]
             .execute()
             .data or []
         )
-    except Exception:
+    except Exception as exc:
+        log_error(exc, context="dashboard._load_grupos", table="equip_grupos")
         return []
 
 

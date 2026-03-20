@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from src.utils.supabase_helpers import sb_for_user
+from src.utils.observability import log_error
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -23,9 +24,9 @@ def load_revision(
             .execute()
             .data
         ) or []
-    except Exception:
+    except Exception as exc:
+        log_error(exc, context="home_overview.load_revision", table="revisoes")
         return None
-    if not revs:
         return None
     for r in revs:
         if str(
@@ -83,17 +84,9 @@ def load_snapshots(
             .execute()
             .data
         ) or []
-    except Exception:
+    except Exception as exc:
+        log_error(exc, context="home_overview.load_snapshots", table="kpi_snapshots")
         rows = []
-    if not rows:
-        return pd.DataFrame()
-    df = pd.DataFrame(rows)
-    for c in [
-        "week_number",
-        "pct",
-        "done_steps",
-        "expected_steps",
-            "backlog_steps"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
     return df
@@ -114,7 +107,9 @@ def load_group_sector_view(
             .execute()
             .data
         ) or []
-    except Exception:
+    except Exception as exc:
+        log_error(exc, context="home_overview.load_group_sector_view",
+                  table="vw_revisao_grupo_setores")
         rows = []
     return {
         str(r["grupo_id"]): {

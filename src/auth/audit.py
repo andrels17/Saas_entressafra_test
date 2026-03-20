@@ -10,6 +10,10 @@ Eventos auditados:
   - tenant_created
   - equipment_deleted / equipment_moved
   - password_reset_requested
+  - departamento_criado / departamento_atualizado / departamento_deletado
+  - departamento_ativado / departamento_desativado
+  - grupo_criado / grupo_atualizado / grupo_deletado
+  - grupo_ativado / grupo_desativado
 
 Schema esperado da tabela `audit_logs`:
     id           uuid DEFAULT gen_random_uuid() PRIMARY KEY
@@ -206,4 +210,83 @@ def audit_password_reset(email: str) -> None:
         "password_reset_requested",
         actor_email=email,
         metadata={"email": email},
+    )
+
+
+# ── Departamentos ────────────────────────────────────────────────────────────
+
+def audit_departamento_criado(dep_id: str, nome: str) -> None:
+    audit_log(
+        "departamento_criado",
+        target_type="departamento",
+        target_id=dep_id,
+        metadata={"nome": nome},
+    )
+
+
+def audit_departamento_atualizado(dep_id: str, changes: dict) -> None:
+    audit_log(
+        "departamento_atualizado",
+        target_type="departamento",
+        target_id=dep_id,
+        metadata=changes,
+    )
+
+
+def audit_departamento_deletado(dep_id: str, nome: str) -> None:
+    audit_log(
+        "departamento_deletado",
+        target_type="departamento",
+        target_id=dep_id,
+        metadata={"nome": nome},
+    )
+
+
+def audit_departamento_toggle(dep_id: str, nome: str, ativo: bool) -> None:
+    audit_log(
+        "departamento_ativado" if ativo else "departamento_desativado",
+        target_type="departamento",
+        target_id=dep_id,
+        metadata={"nome": nome, "ativo": ativo},
+    )
+
+
+# ── Grupos ───────────────────────────────────────────────────────────────────
+
+def audit_grupo_criado(grupo_id: str, nome: str,
+                       departamento_id: str | None = None) -> None:
+    audit_log(
+        "grupo_criado",
+        target_type="grupo",
+        target_id=grupo_id,
+        metadata={"nome": nome, "departamento_id": departamento_id},
+    )
+
+
+def audit_grupo_atualizado(grupo_id: str, nome: str, changes: dict) -> None:
+    audit_log(
+        "grupo_atualizado",
+        target_type="grupo",
+        target_id=grupo_id,
+        metadata={"nome": nome, **changes},
+    )
+
+
+def audit_grupo_deletado(grupo_id: str, nome: str,
+                         equipamentos_desvinculados: int = 0) -> None:
+    audit_log(
+        "grupo_deletado",
+        target_type="grupo",
+        target_id=grupo_id,
+        metadata={"nome": nome,
+                  "equipamentos_desvinculados": equipamentos_desvinculados},
+    )
+
+
+def audit_grupo_toggle(grupo_id: str, nome: str, ativo: bool) -> None:
+    audit_log(
+        "grupo_ativado" if ativo else "grupo_desativado",
+        target_type="grupo",
+        target_id=grupo_id,
+        metadata={"nome": nome, "ativo": ativo},
     )

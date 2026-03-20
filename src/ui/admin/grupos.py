@@ -4,6 +4,12 @@ from src.ui.admin_components.layout import admin_block, admin_divider
 from src.ui.admin_components.utils import inject_enterprise_css, pager, safe_rerun, norm_name
 from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_role
 from src.db.supabase_client import get_supabase_anon
+from src.auth.audit import (
+    audit_grupo_criado,
+    audit_grupo_atualizado,
+    audit_grupo_deletado,
+    audit_grupo_toggle,
+)
 
 
 # ── Funções de leitura cacheadas ─────────────────────────────────────────────
@@ -495,11 +501,13 @@ def render_admin_grupos() -> None:
                 if dep_sel and dep_sel != "(sem departamento)":
                     payload["departamento_id"] = dep_map.get(dep_sel)
                 try:
-                    sb.table("equip_grupos").insert(payload).execute()
+                    res = sb.table("equip_grupos").insert(payload).execute()
                 except Exception:
                     # Fallback: se a coluna departamento_id não existir ainda
                     payload.pop("departamento_id", None)
-                    sb.table("equip_grupos").insert(payload).execute()
+                    res = sb.table("equip_grupos").insert(payload).execute()
+                new_id = (res.data or [{}])[0].get("id", "")
+                audit_grupo_criado(new_id, nome_norm, payload.get("departamento_id"))
                 st.success("Grupo criado.")
                 safe_rerun()
             except Exception as e:
@@ -665,6 +673,7 @@ def render_admin_grupos() -> None:
                                 payload.pop("departamento_id", None)
                                 sb.table("equip_grupos").update(payload).eq(
                                     "tenant_id", tenant_id).eq("id", gid).execute()
+                            audit_grupo_atualizado(gid, g.get("nome", ""), payload)
                             st.toast(
                                 "✓ Atualizado", icon=":material/check_circle:")
                             safe_rerun()
@@ -678,8 +687,10 @@ def render_admin_grupos() -> None:
                             key=f"toggle_{gid}",
                             use_container_width=True):
                         try:
-                            sb.table("equip_grupos").update({"ativo": (not g.get("ativo"))}).eq(
+                            novo_ativo = not g.get("ativo")
+                            sb.table("equip_grupos").update({"ativo": novo_ativo}).eq(
                                 "tenant_id", tenant_id).eq("id", gid).execute()
+                            audit_grupo_toggle(gid, g.get("nome", ""), novo_ativo)
                             st.toast("✓ Ok", icon=":material/check_circle:")
                             safe_rerun()
                         except Exception as e:
@@ -706,6 +717,8 @@ def render_admin_grupos() -> None:
                             try:
                                 sb.table("equip_grupos").delete().eq(
                                     "tenant_id", tenant_id).eq("id", gid).execute()
+                                audit_grupo_deletado(gid, g.get("nome", ""),
+                                                     equipamentos_desvinculados=eq_cnt)
                                 st.success("Grupo excluído.")
                                 safe_rerun()
                             except Exception as e:
