@@ -13,21 +13,24 @@ def render_login() -> None:
         <style>
         section[data-testid="stSidebar"] { display: none !important; }
 
-        /* Wrapper que centraliza o card em qualquer largura */
-        .login-wrap {
-            display: flex;
-            justify-content: center;
-            padding: 2rem 1rem 1rem;
+        /* Centraliza toda a página de login */
+        section.main .block-container {
+            max-width: 480px !important;
+            padding-left: 1.5rem !important;
+            padding-right: 1.5rem !important;
+            padding-top: 2rem !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
         }
+
         .login-card {
             width: 100%;
-            max-width: 420px;
             background: linear-gradient(145deg, #161B22, #0D1117);
             border: 1px solid rgba(220, 38, 38, 0.25);
             border-radius: 20px;
-            padding: 2.8rem 2.6rem 2.2rem;
+            padding: 2.4rem 2.2rem 2rem;
             box-shadow: 0 0 60px rgba(220,38,38,0.07), 0 20px 60px rgba(0,0,0,0.5);
-            margin-bottom: 1.2rem;
+            margin-bottom: 1.4rem;
         }
         .login-logo-icon {
             width: 44px; height: 44px;
@@ -48,47 +51,39 @@ def render_login() -> None:
         }
         .login-tagline {
             font-size: 0.83rem; color: #6B7280;
-            padding-bottom: 1.6rem; border-bottom: 1px solid rgba(255,255,255,0.06);
-            margin-bottom: 1.6rem; line-height: 1.5;
+            padding-bottom: 1.4rem; border-bottom: 1px solid rgba(255,255,255,0.06);
+            margin-bottom: 1.4rem; line-height: 1.5;
         }
-        .login-footer { text-align: center; color: #374151; font-size: 0.72rem; margin-top: 1.4rem; }
+        .login-footer {
+            text-align: center; color: #374151;
+            font-size: 0.72rem; margin-top: 1.2rem;
+        }
         [data-testid="stForm"] {
             border: none !important;
             padding: 0 !important;
             background: transparent !important;
-        }
-
-        /* Restringe a largura dos widgets abaixo do card também */
-        section.main .block-container {
-            max-width: 460px !important;
-            margin-left: auto !important;
-            margin-right: auto !important;
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    # Card de identidade — centralizado por CSS, funciona em qualquer largura
+    # Card de identidade
     st.markdown(
         """
-        <div class="login-wrap">
-          <div class="login-card">
-            <div class="login-logo-icon">🌾</div>
-            <div class="login-brand">Agro<span>Safra</span></div>
-            <div class="login-badge">⬤&nbsp; ENTERPRISE</div>
-            <div class="login-tagline">
-              Plataforma de gestão de entressafra.<br>Acesse sua conta para continuar.
-            </div>
+        <div class="login-card">
+          <div class="login-logo-icon">🌾</div>
+          <div class="login-brand">Agro<span>Safra</span></div>
+          <div class="login-badge">⬤&nbsp; ENTERPRISE</div>
+          <div class="login-tagline">
+            Plataforma de gestão de entressafra.<br>Acesse sua conta para continuar.
           </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    # Formulário — Streamlit widgets nativos, sem colunas externas
+    # Formulário
     with st.form("login_form", clear_on_submit=False):
         st.markdown("**E-mail**")
         email = st.text_input(
