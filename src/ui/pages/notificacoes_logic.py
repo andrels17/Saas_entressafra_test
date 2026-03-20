@@ -1,4 +1,3 @@
-
 """Lógica e geração de artefatos da página de notificações."""
 from __future__ import annotations
 
@@ -33,7 +32,7 @@ def with_fallback(action, default, *, context: str):
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def load_data(_tid: str, _rev_id: str, _ver: str = "0", _token: str = "") -> dict:
+def load_data(tid: str, rev_id: str, ver: str = "0", _token: str = "") -> dict:
     """Carrega todos os dados necessários para os alertas em uma só query."""
     sb = sb_for_user()
     tarefas = with_fallback(
@@ -47,26 +46,26 @@ def load_data(_tid: str, _rev_id: str, _ver: str = "0", _token: str = "") -> dic
                 "equipamentos(id,frota,modelo,grupo_id,"
                 "equip_grupos(id,nome,departamento_id))"
             )
-            .eq("tenant_id", _tid)
-            .eq("revisao_id", _rev_id)
+            .eq("tenant_id", tid)
+            .eq("revisao_id", rev_id)
             .execute()
             .data
         ) or [],
         [],
-        context=f"Falha ao carregar tarefas de notificações da revisão {_rev_id}",
+        context=f"Falha ao carregar tarefas de notificações da revisão {rev_id}",
     )
 
     revisao_rows = with_fallback(
         lambda: (
             sb.table("revisoes")
             .select("id,titulo,data_inicio,semanas_total,status")
-            .eq("id", _rev_id)
+            .eq("id", rev_id)
             .limit(1)
             .execute()
             .data
         ),
         [],
-        context=f"Falha ao carregar revisão {_rev_id} nas notificações",
+        context=f"Falha ao carregar revisão {rev_id} nas notificações",
     )
     revisao = revisao_rows[0] if revisao_rows else {}
 
