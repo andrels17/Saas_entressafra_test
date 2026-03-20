@@ -1062,11 +1062,49 @@ def render_matriz() -> None:
                     by=["%", "Concluidos"],
                     ascending=[True, True],
                 ).head(10)[["Equipamento", "%", "Concluidos", "Total", "Risco"]]
-                st.dataframe(
-                    critical_equipment_df,
-                    use_container_width=True,
-                    hide_index=True,
+
+                # Gráfico de barras horizontais sincronizado com a tabela
+                _chart_df = critical_equipment_df[["Equipamento", "%", "Risco"]].copy()
+                _chart_df["cor"] = _chart_df["Risco"].map(
+                    {"alto": "#EF4444", "medio": "#F59E0B", "baixo": "#12B76A"}
                 )
+                _bar = (
+                    alt.Chart(_chart_df)
+                    .mark_bar(height=18, cornerRadiusEnd=3)
+                    .encode(
+                        x=alt.X(
+                            "%:Q",
+                            scale=alt.Scale(domain=[0, 100]),
+                            axis=alt.Axis(title="% concluído", grid=True, gridOpacity=0.15),
+                        ),
+                        y=alt.Y(
+                            "Equipamento:N",
+                            sort=alt.SortField(field="%", order="ascending"),
+                            axis=alt.Axis(title=None, labelLimit=220),
+                        ),
+                        color=alt.Color(
+                            "cor:N",
+                            scale=None,
+                            legend=None,
+                        ),
+                        tooltip=[
+                            alt.Tooltip("Equipamento:N", title="Equipamento"),
+                            alt.Tooltip("%:Q", title="% concluído", format=".0f"),
+                            alt.Tooltip("Risco:N", title="Risco"),
+                        ],
+                    )
+                    .properties(height=max(180, len(_chart_df) * 32))
+                    .configure_view(strokeWidth=0)
+                    .configure_axis(domainOpacity=0.3)
+                )
+                st.altair_chart(_bar, use_container_width=True)
+
+                with st.expander("📋 Ver tabela detalhada", expanded=False):
+                    st.dataframe(
+                        critical_equipment_df,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
 
             st.markdown("#### Lead time médio entre etapas")
             if view_agg.empty:
