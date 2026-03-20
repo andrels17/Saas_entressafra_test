@@ -1,86 +1,102 @@
-"""Detecção de mobile via JavaScript — sem toggle manual.
+/* ── Mobile / Responsive CSS
+   Aplicado em TODAS as sessões (desktop + mobile).
+   Os blocos @media ativam apenas em telas <= 768px.
+   O CSS sem @media é seguro para desktop (não altera nada visualmente).
+   ──────────────────────────────────────────────────────────────────── */
 
-Estratégia:
-  1. Na primeira visita, um snippet JS mede window.innerWidth e grava
-     em session_state via st.query_params (?_mw=<largura>).
-  2. A partir do segundo rerun, is_mobile() lê essa largura.
-  3. Fallback: query param ?mobile=1 força o modo (atalho para
-     criar link direto para operadores de campo).
+/* ── Sidebar: esconde automaticamente em tela pequena ──────────── */
+@media (max-width: 768px) {
+    section[data-testid="stSidebar"] { display: none !important; }
+}
 
-Threshold: <= 768px = mobile (padrão da indústria para celular/tablet pequeno).
-"""
-from __future__ import annotations
+/* ── Padding e largura máxima ───────────────────────────────────── */
+@media (max-width: 768px) {
+    .block-container {
+        padding-left: 0.75rem !important;
+        padding-right: 0.75rem !important;
+        padding-bottom: 5.5rem !important; /* respiro para polegar */
+        max-width: 100% !important;
+    }
+}
 
-import streamlit as st
-import streamlit.components.v1 as components
+/* ── Tipografia ─────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .stMarkdown, .stText, .stCaption, p, div {
+        -webkit-text-size-adjust: 100%;
+    }
+    h1 { font-size: 1.4rem !important; }
+    h2 { font-size: 1.15rem !important; }
+    h3 { font-size: 1rem !important; }
+}
 
-_MOBILE_THRESHOLD = 768
-_SESSION_KEY = "__screen_width__"
+/* ── Alvos de toque — inputs e botões ───────────────────────────── */
+@media (max-width: 768px) {
+    div[data-testid="stTextInput"] input,
+    div[data-testid="stNumberInput"] input,
+    div[data-testid="stDateInput"] input,
+    div[data-testid="stTextArea"] textarea,
+    div[data-testid="stSelectbox"] div[role="combobox"],
+    div[data-testid="stMultiSelect"] div[role="combobox"] {
+        min-height: 48px !important;
+        font-size: 1rem !important;
+    }
 
+    .stButton > button {
+        min-height: 48px !important;
+        padding: 0.7rem 1rem !important;
+        font-size: 1rem !important;
+        border-radius: 14px !important;
+    }
 
-def _inject_width_detector() -> None:
-    """Injeta snippet JS que mede a largura e reescreve o query param _mw.
+    /* Checkboxes e toggles maiores */
+    div[data-testid="stCheckbox"] label,
+    div[data-testid="stToggle"] label {
+        font-size: 1rem !important;
+        padding: 6px 0 !important;
+    }
+    div[data-testid="stCheckbox"] svg,
+    div[data-testid="stToggle"] svg {
+        width: 22px !important;
+        height: 22px !important;
+    }
+}
 
-    Executado uma vez por sessão. Usa st.components para JS puro.
-    O rerun é disparado automaticamente via window.location após a medição.
-    """
-    if st.session_state.get("__width_detected__"):
-        return
+/* ── Dataframes: scroll horizontal ─────────────────────────────── */
+@media (max-width: 768px) {
+    div[data-testid="stDataFrame"] {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch;
+    }
+}
 
-    # Lê largura atual da URL se já foi gravada antes
-    try:
-        mw = st.query_params.get("_mw")
-        if mw and str(mw).isdigit():
-            st.session_state[_SESSION_KEY] = int(mw)
-            st.session_state["__width_detected__"] = True
-            return
-    except Exception:
-        pass
+/* ── Colunas: evita compressão excessiva de métricas ────────────── */
+@media (max-width: 768px) {
+    [data-testid="column"]:has(.stMetric) {
+        min-width: 110px !important;
+    }
+    /* st.columns com 3+ colunas viram scroll horizontal */
+    div[data-testid="stHorizontalBlock"] {
+        overflow-x: auto !important;
+        flex-wrap: nowrap !important;
+        -webkit-overflow-scrolling: touch;
+    }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+        min-width: 140px !important;
+    }
+}
 
-    # Injeta JS que mede e redireciona com ?_mw=<largura>
-    # height=0 para não ocupar espaço na página
-    components.html(
-        """
-        <script>
-        (function() {
-            var w = window.innerWidth || document.documentElement.clientWidth || 768;
-            var url = new URL(window.location.href);
-            if (url.searchParams.get('_mw') !== String(w)) {
-                url.searchParams.set('_mw', w);
-                window.location.replace(url.toString());
-            }
-        })();
-        </script>
-        """,
-        height=0,
-    )
+/* ── Plotly charts: sem overflow ────────────────────────────────── */
+@media (max-width: 768px) {
+    div[data-testid="stPlotlyChart"] {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch;
+    }
+}
 
-
-def is_mobile() -> bool:
-    """Retorna True se a tela for menor ou igual a 768px.
-
-    Detecta automaticamente via JS na primeira visita.
-    Fallback: ?mobile=1 na URL força o modo mobile.
-    """
-    # Override manual via URL (útil para atalhos no campo)
-    try:
-        qp = st.query_params
-        if str(qp.get("mobile", "")).lower() in ("1", "true", "yes", "on"):
-            return True
-    except Exception:
-        pass
-
-    width = st.session_state.get(_SESSION_KEY)
-    if width is not None:
-        return int(width) <= _MOBILE_THRESHOLD
-
-    # Ainda não mediu — chuta False (será corrigido após primeiro rerun)
-    return False
-
-
-def detect_screen_width() -> None:
-    """Chama o detector JS. Deve ser chamado no início do app (antes do login).
-
-    Substitui render_mobile_toggle() — sem UI exposta ao usuário.
-    """
-    _inject_width_detector()
+/* ── Pills / segmented control: wrap em telas pequenas ──────────── */
+@media (max-width: 768px) {
+    div[data-testid="stPills"] {
+        flex-wrap: wrap !important;
+        gap: 6px !important;
+    }
+}
