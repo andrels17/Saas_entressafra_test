@@ -167,7 +167,6 @@ def _df_to_changes(
 
 # ── Fragment: seletor de contexto (reroda só esta parte ao mudar) ───────
 
-@st.fragment
 def _fragment_seletores(
         revisoes: list[dict]) -> tuple[dict | None, str | None, str | None]:
     """Seletor de revisão + grupo + equipamento em fragment isolado."""
@@ -270,13 +269,6 @@ def _fragment_seletores(
     st.session_state["_apt_grupo_nome"] = grupo_nome or "Grupo"
     st.session_state["_apt_eq_label"] = eq_label or "Equipamento"
     st.session_state["_apt_equipamento_id"] = equipamento_id
-
-    # Força rerun completo se o equipamento mudou — garante que _fragment_editor
-    # receba o equipamento_id correto sem depender do rerun do fragment pai
-    _prev_eq = st.session_state.get("_apt_prev_eq_id")
-    if _prev_eq != equipamento_id:
-        st.session_state["_apt_prev_eq_id"] = equipamento_id
-        st.rerun()
 
     return revisao, revisao_id, equipamento_id
 
