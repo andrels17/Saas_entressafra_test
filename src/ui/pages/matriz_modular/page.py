@@ -969,10 +969,12 @@ def render_matriz() -> None:
                         sb=sb,
                         tenant_id=tenant_id,
                         revisao_id=revisao_id,
+                        grupo_id=grupo_id,
                         setor_to_services=setor_to_services,
                         eq_label_short=eq_label_short,
                         task_map=task_map,
                         semana_sugerida=_semana_sugerida,
+                        eq_ocultos_set=_eq_ocultos_set,
                     )
                 else:
                     render_bulk_editor(
