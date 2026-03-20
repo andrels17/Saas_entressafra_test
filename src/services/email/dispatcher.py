@@ -485,11 +485,18 @@ def _build_payload(
             ultima_semana_eq = None
             for t in tasks:
                 status = t.get("status") or "pendente"
-                updated = _best_ts(
+                # Usa apenas timestamps de etapas reais (D/R/M) para detectar
+                # inatividade — updated_at é tocado na criação e não indica trabalho real
+                etapa_ts = _best_ts(
                     t.get("dt_etapa_m"),
                     t.get("dt_etapa_r"),
                     t.get("dt_etapa_d"),
-                    t.get("updated_at"))
+                )
+                # Fallback para updated_at só se alguma etapa foi marcada
+                if _sum_done_steps(t) > 0:
+                    updated = etapa_ts or t.get("updated_at")
+                else:
+                    updated = etapa_ts  # sem etapa concluída → sem timestamp real
                 dias = _dias_desde(updated)
                 if updated and (
                         ultima_mov_eq is None or updated > ultima_mov_eq):
