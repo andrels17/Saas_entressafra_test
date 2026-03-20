@@ -24,7 +24,7 @@ from src.auth.audit import audit_logout
 from src.utils.config import validate_config_or_stop
 
 # ── Utils ─────────────────────────────────────────────────────────────────────
-from src.utils.mobile import is_mobile, render_mobile_toggle
+from src.utils.mobile import is_mobile, detect_screen_width
 from src.utils.supabase_helpers import sb_for_user
 from src.auth.scope import get_user_scope
 from src.auth.permissions import can_view_all_data
@@ -274,9 +274,8 @@ def main():
     # Valida configuração obrigatória antes de qualquer lógica
     validate_config_or_stop()
 
-    render_mobile_toggle()
-    if is_mobile():
-        inject_mobile_css()
+    detect_screen_width()
+    inject_mobile_css()  # sempre ativo — CSS é responsivo por media query
 
     if not st.session_state.get("sb_access_token"):
         render_login()
