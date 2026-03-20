@@ -334,13 +334,17 @@ def _fragment_editor(
     user_id = current_user_id()
 
     # ── Filtros ───────────────────────────────────────────────────────────────
+    # Chave única por contexto para evitar conflito de default entre mobile/desktop
+    _pending_key = "apt_pending_mobile" if mobile else "apt_pending_desktop"
+    _pending_default = True if mobile else False
+
     if mobile:
-        show_pending = st.toggle("Somente pendentes/travados", value=True, key="apt_pending_toggle")
+        show_pending = st.toggle("Somente pendentes/travados", value=_pending_default, key=_pending_key)
         semana_val = semana_default
     else:
         col_f1, col_f2 = st.columns([0.6, 0.4])
         with col_f1:
-            show_pending = st.toggle("Somente pendentes/travados", value=False, key="apt_pending_toggle")
+            show_pending = st.toggle("Somente pendentes/travados", value=_pending_default, key=_pending_key)
         with col_f2:
             semana_val = st.number_input(
                 "Semana (sugestão)", min_value=0, value=semana_default,
