@@ -692,6 +692,25 @@ def render_matriz() -> None:
             tab_labels.append("✏️ Editar célula")
         tab_labels.append("⬇️ Exportar")
         _tabs = st.tabs(tab_labels)
+
+        # Redireciona para a aba Matriz quando um botão de Analytics foi acionado.
+        # Streamlit não persiste a aba ativa entre reruns — injetamos JS para
+        # clicar programaticamente no botão da aba correta.
+        _goto_matriz = st.session_state.pop(f"_mtz_goto_matriz_{grupo_id}", False)
+        if _goto_matriz:
+            # Índice da aba Matriz: 1 (Resumo=0, Matriz=1)
+            st.markdown(
+                """<script>
+                (function() {
+                    const tabs = window.parent.document.querySelectorAll(
+                        'button[data-baseweb="tab"]'
+                    );
+                    if (tabs && tabs.length > 1) { tabs[1].click(); }
+                })();
+                </script>""",
+                unsafe_allow_html=True,
+            )
+
         if can_edit:
             tab_resumo, tab_matriz, tab_evolucao, tab_analytics, tab_tempos, tab_editor, tab_exportar = _tabs
         else:
@@ -1005,9 +1024,10 @@ def render_matriz() -> None:
                             _sector_set_open(revisao_id, grupo_id, str(item.get("setor_nome")), True)
                             opened += 1
                     if opened:
-                        st.toast(f"{opened} setor(es) críticos preparados na aba Matriz.")
+                        st.toast(f"{opened} setor(es) críticos abertos na aba Matriz.")
+                        st.session_state[f"_mtz_goto_matriz_{grupo_id}"] = True
                     else:
-                        st.toast("Nenhum setor crítico para abrir.")
+                        st.toast("Nenhum setor crítico encontrado.")
                     st.rerun()
             with b2:
                 if st.button("Abrir top 3 prioridades", key=f"mtz_auto_open_top3_{grupo_id}", use_container_width=True):
@@ -1016,7 +1036,8 @@ def render_matriz() -> None:
                         _sector_set_open(revisao_id, grupo_id, str(item.get("setor_nome")), True)
                         opened += 1
                     if opened:
-                        st.toast(f"Top {opened} prioridades preparadas na aba Matriz.")
+                        st.toast(f"Top {opened} prioridades abertas na aba Matriz.")
+                        st.session_state[f"_mtz_goto_matriz_{grupo_id}"] = True
                     st.rerun()
             with b3:
                 if st.button("Fechar setores sob controle", key=f"mtz_auto_close_low_{grupo_id}", use_container_width=True):
@@ -1026,7 +1047,8 @@ def render_matriz() -> None:
                             _sector_set_open(revisao_id, grupo_id, str(item.get("setor_nome")), False)
                             closed += 1
                     if closed:
-                        st.toast(f"{closed} setor(es) sob controle fechados.")
+                        st.toast(f"{closed} setor(es) sob controle fechados na aba Matriz.")
+                        st.session_state[f"_mtz_goto_matriz_{grupo_id}"] = True
                     st.rerun()
             st.markdown("#### Equipamentos que exigem atenção")
             if resumo_df.empty:
