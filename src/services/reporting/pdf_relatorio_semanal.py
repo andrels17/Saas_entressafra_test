@@ -614,8 +614,10 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
             col = status_colors.get(eq.status, RED)
             c.setFillColor(FG)
             c.setFont("Helvetica-Bold", 8.5)
-            label = f"{eq.frota}  —  {eq.modelo or ''}"
-            c.drawString(16 * mm, y, label[:42])
+            _frota_c = str(eq.frota or "—")[:8]
+            _modelo_c = str(eq.modelo or "")[:22]
+            label = f"{_frota_c}  —  {_modelo_c}" if _modelo_c else _frota_c
+            c.drawString(16 * mm, y, label)
             c.setFillColor(MUTED)
             c.setFont("Helvetica", 7.5)
             c.drawString(16 * mm, y - 4 * mm,
@@ -944,8 +946,8 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
                     y -= 6 * mm
 
                 pct = int(eq.get("pct", 0))
-                frota = str(eq.get("frota") or "—")[:10]
-                modelo = str(eq.get("modelo") or "")[:28]
+                frota = str(eq.get("frota") or "—")[:8]
+                modelo = str(eq.get("modelo") or "")[:24]
                 col = _risk_color(pct)
                 status = eq.get("status", "")
 
