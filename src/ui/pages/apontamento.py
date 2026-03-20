@@ -230,6 +230,19 @@ def _fragment_seletores(
     )
     if not grupo_id:
         return None, None, None
+
+    # Reseta equipamento quando o grupo muda
+    prev_grupo = st.session_state.get("_apt_prev_grupo_id")
+    grupo_mudou = prev_grupo and prev_grupo != grupo_id
+    if grupo_mudou:
+        # Remove o valor antigo E limpa o query param para evitar
+        # que o selectbox herde o equipamento do grupo anterior
+        st.session_state.pop("apt_eq_sel", None)
+        try:
+            del st.query_params["eq"]
+        except Exception:
+            pass
+    st.session_state["_apt_prev_grupo_id"] = grupo_id
     st.query_params["grupo"] = grupo_id  # sincroniza URL
 
     # Equipamento
@@ -238,11 +251,14 @@ def _fragment_seletores(
         st.info("Nenhum equipamento neste grupo.")
         return None, None, None
 
-    qp_eq = st.query_params.get("eq")
+    # Só usa qp_eq se pertence ao grupo atual; se o grupo mudou ignora qp_eq
+    qp_eq = None if grupo_mudou else st.query_params.get("eq")
+    eq_ids_no_grupo = {e["id"] for e in equips if e.get("id")}
+    default_eq = qp_eq if qp_eq in eq_ids_no_grupo else None
     eq_label, equipamento_id = select_equipamento(
         equips,
         key="apt_eq_sel",
-        default_id=qp_eq,
+        default_id=default_eq,
     )
     if not equipamento_id:
         return None, None, None
