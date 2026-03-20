@@ -63,17 +63,17 @@ def _load_revisao(sb, tenant_id: str) -> dict | None:
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def _load_base_cached(_tenant_id: str, _revisao_id: str, _token: str = "",
-                      _ver: str = "0") -> tuple[list, list]:
+def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
+                      ver: str = "0") -> tuple[list, list]:
     sb = _sb_from_token(_token)
     try:
         raw = sb.table("mv_matriz_base").select("*").eq("tenant_id",
-                                                        _tenant_id).eq("revisao_id", _revisao_id).execute().data or []
+                                                        tenant_id).eq("revisao_id", revisao_id).execute().data or []
     except Exception:
         raw = []
     try:
         eq_meta = sb.table("equipamentos").select("id,frota,modelo,departamento_id").eq(
-            "tenant_id", _tenant_id).eq("ativo", True).execute().data or []
+            "tenant_id", tenant_id).eq("ativo", True).execute().data or []
     except Exception:
         eq_meta = []
     return raw, eq_meta
@@ -93,13 +93,13 @@ def _load_base(sb,
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _load_departamentos(_tenant_id: str, _ver: str = "0", _token: str = "") -> list[dict]:
+def _load_departamentos(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]:
     sb = _sb_from_token(_token)
     try:
         return (
             sb.table("departamentos")
             .select("id,nome")
-            .eq("tenant_id", _tenant_id)
+            .eq("tenant_id", tenant_id)
             .eq("ativo", True)
             .order("nome")
             .execute()
@@ -110,13 +110,13 @@ def _load_departamentos(_tenant_id: str, _ver: str = "0", _token: str = "") -> l
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _load_grupos(_tenant_id: str, _ver: str = "0", _token: str = "") -> list[dict]:
+def _load_grupos(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]:
     sb = _sb_from_token(_token)
     try:
         return (
             sb.table("equip_grupos")
             .select("id,nome,departamento_id")
-            .eq("tenant_id", _tenant_id)
+            .eq("tenant_id", tenant_id)
             .eq("ativo", True)
             .order("nome")
             .execute()
