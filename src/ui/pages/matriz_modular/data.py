@@ -16,6 +16,7 @@ def _sb_from_token(token: str = ""):
         sb.postgrest.auth(token)
     return sb
 
+@st.cache_data(ttl=60, show_spinner=False)
 def _group_kpis(_tid, _rev_id, _ver="0", _token=""):
     _sb = _sb_from_token(_token)
     _gids = [
@@ -64,8 +65,8 @@ def _group_kpis(_tid, _rev_id, _ver="0", _token=""):
     for gid in _gids:
         eqc = len(grp_eq.get(gid) or [])
         svc = len(grp_svc.get(gid) or set())
-        pct = int(round((done.get(gid, 0) / max(eqc * svc * 3, 1))
-                  * 100)) if (eqc > 0 and svc > 0) else 0
+        expected = eqc * svc * 3
+        pct = int(round((done.get(gid, 0) / expected) * 100)) if (eqc > 0 and svc > 0 and expected > 0) else 0
         out[gid] = {
             "eq_count": eqc, "svc_count": svc, "pct": max(
                 0, min(
@@ -126,5 +127,3 @@ def _all_dept_names(_tid, _ver="0", _token=""):
         return {r["id"]: r.get("nome", "") for r in rows}
     except BaseException:
         return {}
-
-
