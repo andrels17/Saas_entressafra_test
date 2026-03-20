@@ -126,7 +126,9 @@ def load_group_sector_view(
     }
 
 
-def snapshots_supported() -> bool:
+@st.cache_data(ttl=300, show_spinner=False)
+def snapshots_supported(tenant_id: str = "", ver: str = "0") -> bool:
+    """Verifica se a tabela kpi_snapshots existe — cacheado por 5 minutos."""
     try:
         sb_for_user().table("kpi_snapshots").select("id").limit(1).execute()
         return True

@@ -226,6 +226,12 @@ def _resolve_scope(tenant_id: str, user_id: str, role: str) -> None:
     """Obtém e armazena o escopo (dept/grupos) do usuário na sessão."""
     sig      = f"{user_id}:{tenant_id}:{role}"
     prev_sig = st.session_state.get("_scope_signature")
+
+    if prev_sig == sig:
+        # Mesma assinatura: escopo já calculado, nada a fazer.
+        # Evita 2–3 queries ao banco a cada rerun sem mudança de contexto.
+        return
+
     if prev_sig and prev_sig != sig:
         for k in ("__current_page", "__nav_to", "__menu", "menu"):
             st.session_state.pop(k, None)
@@ -348,16 +354,34 @@ def main():
         render_login()
         return
 
-    if not ensure_valid_token():
-        hard_logout()
-        return
+    # Verifica expiração do JWT localmente antes de ir ao servidor.
+    # O token Supabase tem campo 'exp' no payload — parse em base64 custa ~0ms.
+    # Só chama ensure_valid_token() (request HTTP) quando o token está próximo
+    # de expirar (< 60s) ou quando a verificação local falha por qualquer razão.
+    import base64 as _b64, json as _json
+    def _token_expires_soon(tok: str, buffer: int = 60) -> bool:
+        try:
+            part = tok.split(".")[1]
+            part += "=" * (-len(part) % 4)  # padding correto
+            payload = _json.loads(_b64.b64decode(part))
+            import time as _time
+            return payload.get("exp", 0) - _time.time() < buffer
+        except Exception:
+            return True  # falha no parse → valida no servidor por segurança
+
+    _tok = st.session_state.get("sb_access_token", "")
+    if _token_expires_soon(_tok):
+        if not ensure_valid_token():
+            hard_logout()
+            return
 
     current_uid = st.session_state.get("sb_user_id") or ""
     _handle_identity_guard(current_uid)
 
     require_login()
     ensure_tenant_selected()
-    refresh_current_role()
+    # Não chamar refresh_current_role() aqui — ensure_tenant_selected() já
+    # revalida o role com TTL de 120s, evitando uma query extra a cada rerun.
 
     role      = st.session_state.get("current_role", "") or ""
     user_id   = st.session_state.get("sb_user_id",   "") or ""

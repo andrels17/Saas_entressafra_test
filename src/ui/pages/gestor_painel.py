@@ -26,6 +26,70 @@ from src.utils.mobile import is_mobile
 from src.auth.scope import get_user_scope
 from src.auth.roles import Role
 from src.ui.core.cache import bump_data_version
+from src.db.supabase_client import get_supabase_anon
+
+
+# ── Funções de dados cacheadas ────────────────────────────────────────────────
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _load_revisao_ativa(tenant_id: str, _token: str = "") -> dict | None:
+    """Revisão ativa do tenant — TTL curto para refletir mudanças rapidamente."""
+    sb = get_supabase_anon()
+    if _token:
+        sb.postgrest.auth(_token)
+    rows = (
+        sb.table("revisoes")
+        .select("id,titulo,status")
+        .eq("tenant_id", tenant_id)
+        .eq("status", "ativa")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+        .data
+    ) or []
+    return rows[0] if rows else None
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _load_grupos_gestor(
+    tenant_id: str,
+    scope_dept_ids: tuple | None,
+    scope_grp_ids: tuple | None,
+    _token: str = "",
+) -> list[dict]:
+    """Grupos ativos para os filtros do painel — TTL 2min."""
+    sb = get_supabase_anon()
+    if _token:
+        sb.postgrest.auth(_token)
+    q = (
+        sb.table("equip_grupos")
+        .select("id,nome,departamento_id")
+        .eq("tenant_id", tenant_id)
+        .eq("ativo", True)
+        .order("nome")
+    )
+    if scope_dept_ids:
+        q = q.in_("departamento_id", list(scope_dept_ids))
+    if scope_grp_ids is not None:
+        q = q.in_("id", list(scope_grp_ids))
+    return q.execute().data or []
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_setores_gestor(tenant_id: str, _token: str = "") -> list[dict]:
+    """Setores ativos para os filtros — TTL 5min (raramente mudam)."""
+    sb = get_supabase_anon()
+    if _token:
+        sb.postgrest.auth(_token)
+    return (
+        sb.table("setores")
+        .select("id,nome")
+        .eq("tenant_id", tenant_id)
+        .eq("ativo", True)
+        .order("nome")
+        .execute()
+        .data
+    ) or []
 
 
 # ── Constantes ────────────────────────────────────────────────────────────────
@@ -355,21 +419,12 @@ def render_gestor_painel() -> None:
     tenant_id = current_tenant_id()
     sb = sb_for_user()
     user_id = st.session_state.get("sb_user_id") or ""
+    token   = st.session_state.get("sb_access_token", "")
 
     scope_dept_ids, scope_grp_ids = get_user_scope(sb, tenant_id, user_id, role=role)
 
-    # Revisão ativa
-    with st.spinner("", show_time=False):
-        rev = (
-            sb.table("revisoes")
-            .select("id,titulo,status")
-            .eq("tenant_id", tenant_id)
-            .eq("status", "ativa")
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-            .data
-        ) or []
+    # Revisão ativa — cacheada TTL=30s
+    rev = _load_revisao_ativa(tenant_id, _token=token)
 
     if not rev:
         empty_state(
@@ -382,40 +437,22 @@ def render_gestor_painel() -> None:
         )
         return
 
-    revisao_id = rev[0]["id"]
+    revisao_id = rev["id"]
 
     # Cabeçalho da revisão + botão atualizar
     h1, h2 = st.columns([4, 1])
     with h1:
-        status_badge(rev[0].get("status", "ativa"))
-        st.caption(f"Revisão ativa: **{rev[0]['titulo']}**")
+        status_badge(rev.get("status", "ativa"))
+        st.caption(f"Revisão ativa: **{rev['titulo']}**")
     with h2:
         if refresh_button("gp_refresh", help="Recarrega as pendências"):
             bump_data_version()
             st.rerun()
 
-    # Grupos e setores para os filtros
-    gq = (
-        sb.table("equip_grupos")
-        .select("id,nome,departamento_id")
-        .eq("tenant_id", tenant_id)
-        .eq("ativo", True)
-        .order("nome")
-    )
-    if scope_dept_ids:
-        gq = gq.in_("departamento_id", scope_dept_ids)
-    if scope_grp_ids is not None:
-        gq = gq.in_("id", scope_grp_ids)
-    grupos = gq.execute().data or []
-
-    setores = (
-        sb.table("setores")
-        .select("id,nome")
-        .eq("tenant_id", tenant_id)
-        .eq("ativo", True)
-        .order("nome")
-        .execute()
-        .data
-    ) or []
+    # Grupos e setores — cacheados TTL=120s e 300s
+    scope_dept_tuple = tuple(scope_dept_ids) if scope_dept_ids else None
+    scope_grp_tuple  = tuple(scope_grp_ids)  if scope_grp_ids is not None else None
+    grupos  = _load_grupos_gestor(tenant_id, scope_dept_tuple, scope_grp_tuple, _token=token)
+    setores = _load_setores_gestor(tenant_id, _token=token)
 
     _fragment_painel(tenant_id, revisao_id, scope_dept_ids, scope_grp_ids, grupos, setores)

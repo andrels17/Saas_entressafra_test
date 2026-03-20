@@ -241,7 +241,7 @@ def _fragment_tendencia(
     week: int,
     scope: pd.DataFrame,
 ) -> None:
-    if not snapshots_supported():
+    if not snapshots_supported(tenant_id, ver):
         empty_message(
             "Tabela **kpi_snapshots** não encontrada.",
             "Rode o SQL de próximos passos para habilitar tendência semanal.",
