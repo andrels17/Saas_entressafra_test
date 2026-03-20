@@ -248,6 +248,18 @@ def _build_payload(
     svc_por_grupo = _load_grupo_template(sb, tenant_id, grupo_ids)
     eq_por_grupo = _load_equipamentos_ativos(sb, tenant_id, grupo_ids)
 
+    # Exclui equipamentos ocultos nesta revisão
+    try:
+        from src.utils.eq_oculto import get_ocultos
+        _ocultos = get_ocultos(sb, tenant_id, revisao.get("id", ""))
+        if _ocultos:
+            eq_por_grupo = {
+                gid: [e for e in eqs if e.get("id") not in _ocultos]
+                for gid, eqs in eq_por_grupo.items()
+            }
+    except Exception:
+        pass
+
     # Nomes dos grupos direto da tabela (independente de ter tarefas)
     grupo_nomes: dict[str, str] = {}
     gnrows = _with_fallback(

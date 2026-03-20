@@ -118,7 +118,7 @@ def _mv_to_df(mv_rows: list[dict]) -> pd.DataFrame:
         )
         return pd.DataFrame()
 
-    df["expected_steps"] = df["expected_raw"].clip(lower=1).astype(int)
+    df["expected_steps"] = df["expected_raw"].clip(lower=0).astype(int)
     df["backlog_steps"] = (
         df["expected_steps"] -
         df["done_steps"]).clip(
@@ -180,6 +180,18 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
         gid, sid = r.get("grupo_id"), r.get("servico_id")
         if gid and sid:
             grp_to_services[gid].add(sid)
+
+    # Exclui equipamentos ocultos nesta revisão
+    if revisao_id:
+        try:
+            from src.utils.eq_oculto import get_ocultos
+            ocultos = get_ocultos(sb, tenant_id, revisao_id)
+            if ocultos:
+                for gid in list(grp_to_eq.keys()):
+                    grp_to_eq[gid] = [e for e in grp_to_eq[gid] if e not in ocultos]
+                eq_to_gid = {e: g for e, g in eq_to_gid.items() if e not in ocultos}
+        except Exception:
+            pass  # fallback seguro — inclui todos
 
     all_eq_ids = list(eq_to_gid.keys())
     done_by_gid: dict[str, int] = defaultdict(int)
@@ -263,4 +275,4 @@ def _get_group_kpis_concluded(
         df = _mv_to_df(mv_rows)
         if not df.empty:
             return df
-    return _compute_from_raw(tenant_id, revisao_id)
+    return _compute_from_raw(tenant_id, revisao_id, _token)

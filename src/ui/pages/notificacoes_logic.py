@@ -1,3 +1,4 @@
+
 """Lógica e geração de artefatos da página de notificações."""
 from __future__ import annotations
 

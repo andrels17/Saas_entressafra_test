@@ -55,6 +55,54 @@ def render_editor_tab(
         st.info("Selecione um setor e serviço válidos para continuar.")
         return
 
+    # ── Botão ocultar/revelar equipamento desta revisão ────────────────────
+    # Só aparece se nenhuma etapa foi concluída (equipamento intocado)
+    # Revela automaticamente no banco via trigger quando etapa for marcada
+    try:
+        from src.utils.eq_oculto import get_ocultos, ocultar_equipamento, revelar_equipamento
+        from src.utils.supabase_helpers import current_user_id
+        _ocultos_set = get_ocultos(sb, tenant_id, revisao_id)
+        _eq_oculto = equip_sel in _ocultos_set
+
+        # Verifica se o equipamento tem alguma etapa marcada nesta revisão
+        _any_done_rows = (
+            sb.table("tarefas_servico")
+            .select("id")
+            .eq("tenant_id", tenant_id)
+            .eq("revisao_id", revisao_id)
+            .eq("equipamento_id", equip_sel)
+            .eq("etapa_d", True)
+            .limit(1)
+            .execute()
+            .data
+        ) or []
+        _has_etapa = bool(_any_done_rows)
+
+        with st.expander("⚙️ Visibilidade nesta revisão", expanded=False):
+            if _eq_oculto:
+                st.caption("Este equipamento está **oculto** — não entra nos KPIs nem no Dashboard.")
+                if st.button("👁 Revelar equipamento", key=f"revelar_{equip_sel}",
+                             use_container_width=True, type="primary"):
+                    revelar_equipamento(sb, tenant_id, revisao_id, equip_sel)
+                    from src.ui.core.cache import bump_data_version
+                    bump_data_version()
+                    st.toast("Equipamento revelado ✅")
+                    st.rerun()
+            elif not _has_etapa:
+                st.caption("Nenhuma etapa marcada. Oculte enquanto o equipamento não parar para manutenção.")
+                if st.button("⊘ Ocultar desta revisão", key=f"ocultar_{equip_sel}",
+                             use_container_width=True):
+                    ocultar_equipamento(sb, tenant_id, revisao_id, equip_sel,
+                                        current_user_id())
+                    from src.ui.core.cache import bump_data_version
+                    bump_data_version()
+                    st.toast("Equipamento ocultado ✅ — será revelado automaticamente quando uma etapa for marcada.")
+                    st.rerun()
+            else:
+                st.caption("✅ Equipamento com progresso — não pode ser ocultado.")
+    except Exception:
+        pass  # falha silenciosa — não bloqueia o editor
+
     # Item 9: mostrar toast de confirmação após rerun pós-save
     _saved_key = f"mat_just_saved_{equip_sel}_{svc_sel}"
     if st.session_state.pop(_saved_key, False):

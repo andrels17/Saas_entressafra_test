@@ -36,6 +36,15 @@ def _group_kpis(tid, rev_id, ver="0", _token=""):
             True).in_(
                 "grupo_id",
             _gids).execute().data) or []
+
+    # Exclui equipamentos ocultos nesta revisão
+    try:
+        from src.utils.eq_oculto import get_ocultos
+        _ocultos = get_ocultos(_sb, tid, rev_id)
+        if _ocultos:
+            eq_rows = [r for r in eq_rows if r.get("id") not in _ocultos]
+    except Exception:
+        pass
     grp_eq = defaultdict(list)
     for r in eq_rows:
         if r.get("grupo_id") and r.get("id"):
@@ -88,6 +97,17 @@ def _load_payload(tid, gid, rid, lim, ver="0", _token=""):
                     int(lim)).execute().data) or []
     if not _eqs:
         return {"eqs": [], "s2s": {}, "all_s": [], "tarefas": []}
+
+    # Exclui equipamentos ocultos nesta revisão
+    try:
+        from src.utils.eq_oculto import get_ocultos
+        _ocultos = get_ocultos(_sb, tid, rid)
+        if _ocultos:
+            _eqs = [e for e in _eqs if e.get("id") not in _ocultos]
+        if not _eqs:
+            return {"eqs": [], "s2s": {}, "all_s": [], "tarefas": []}
+    except Exception:
+        pass
     _s2s, _all_s = _fetch_template(_sb, tid, gid)
     if not _all_s:
         return {"eqs": _eqs, "s2s": {}, "all_s": [], "tarefas": []}
@@ -127,3 +147,5 @@ def _all_dept_names(tid, ver="0", _token=""):
         return {r["id"]: r.get("nome", "") for r in rows}
     except BaseException:
         return {}
+
+

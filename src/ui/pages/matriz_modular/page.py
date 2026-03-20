@@ -358,20 +358,32 @@ def render_matriz() -> None:
             st.info("Nenhum equipamento no grupo.")
             if st.button("Voltar", key="mtz_back_noeq"):
                 st.session_state["matriz_view"] = "select"
+
                 st.rerun()
             return
+
+        # Carrega equipamentos ocultos desta revisão (para marcar visualmente)
+        try:
+            from src.utils.eq_oculto import get_ocultos as _get_ocultos
+            _eq_ocultos_set = _get_ocultos(sb, tenant_id, revisao_id)
+        except Exception:
+            _eq_ocultos_set = set()
 
         eq_ids = [e["id"] for e in eqs]
         # eq_label: descricao completa — Resumo e PDF
         eq_label = {
-            e["id"]: f"{
-                e.get(
-                    'frota',
-                    '')} — {
-                e.get('modelo') or ''}".strip(" —") for e in eqs}
+            e["id"]: (
+                f"⊘ {e.get('frota', '')} — {e.get('modelo') or ''}".strip(" —")
+                if e["id"] in _eq_ocultos_set
+                else f"{e.get('frota', '')} — {e.get('modelo') or ''}".strip(" —")
+            ) for e in eqs}
         # eq_label_short: apenas o numero/frota — Matriz, Tempos, Editor
-        eq_label_short = {e["id"]: (str(e.get("frota") or "")).strip() or str(
-            e.get("id", "")) for e in eqs}
+        eq_label_short = {
+            e["id"]: (
+                f"⊘ {(str(e.get('frota') or '')).strip() or str(e.get('id', ''))}"
+                if e["id"] in _eq_ocultos_set
+                else (str(e.get("frota") or "")).strip() or str(e.get("id", ""))
+            ) for e in eqs}
         setor_to_services = payload.get("s2s") or {}
         all_services = payload.get("all_s") or []
 

@@ -55,8 +55,17 @@ _EMPTY_GLOBAL: GlobalKPI = {
 # ── Funções puras ───────────────────────────────────────────────────────
 
 def calc_expected(eq_count: int, svc_count: int) -> int:
-    """Calcula o total esperado de etapas para um grupo."""
-    return max(int(eq_count) * int(svc_count) * 3, 1)
+    """Calcula o total esperado de etapas para um grupo.
+
+    Retorna 0 se não há equipamentos ou serviços configurados (grupo sem template
+    ou sem equipamentos ativos). O valor mínimo de 1 anterior causava backlog
+    incorreto (backlog=1) para grupos vazios.
+    """
+    eq = int(eq_count)
+    svc = int(svc_count)
+    if eq <= 0 or svc <= 0:
+        return 0
+    return eq * svc * 3
 
 
 def calc_pct(eq_count: int, svc_count: int, done: int) -> int:
@@ -67,6 +76,8 @@ def calc_pct(eq_count: int, svc_count: int, done: int) -> int:
     if eq_count <= 0 or svc_count <= 0:
         return 0
     expected = calc_expected(eq_count, svc_count)
+    if expected <= 0:
+        return 0
     raw = int(round(done / expected * 100))
     return max(0, min(100, raw))
 
