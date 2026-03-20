@@ -4,10 +4,8 @@
    O CSS sem @media é seguro para desktop (não altera nada visualmente).
    ──────────────────────────────────────────────────────────────────── */
 
-/* ── Sidebar: esconde automaticamente em tela pequena ──────────── */
-@media (max-width: 768px) {
-    section[data-testid="stSidebar"] { display: none !important; }
-}
+/* Sidebar: escondida via Python quando is_mobile() é True.
+   Não usar CSS para esconder — causaria tela em branco na primeira visita. */
 
 /* ── Padding e largura máxima ───────────────────────────────────── */
 @media (max-width: 768px) {
