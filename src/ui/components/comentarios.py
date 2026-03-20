@@ -27,16 +27,16 @@ from src.utils.supabase_helpers import sb_for_user, current_user_id
 
 @st.cache_data(ttl=30, show_spinner=False)
 def _load_comentarios(
-        _tenant_id: str,
-        _tarefa_id: str,
-        _ver: str = "0") -> list[dict]:
+        tenant_id: str,
+        tarefa_id: str,
+        ver: str = "0") -> list[dict]:
     try:
         sb = sb_for_user()
         rows = (
             sb.table("tarefa_comentarios")
             .select("id,texto,user_nome,created_at")
-            .eq("tenant_id", _tenant_id)
-            .eq("tarefa_id", _tarefa_id)
+            .eq("tenant_id", tenant_id)
+            .eq("tarefa_id", tarefa_id)
             .order("created_at", desc=False)
             .execute()
             .data
