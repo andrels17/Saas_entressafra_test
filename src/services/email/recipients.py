@@ -13,10 +13,13 @@ Tabela necessária no Supabase (criar se não existir):
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
 from src.db.supabase_client import get_supabase_service
+
+log = logging.getLogger("saas.recipients")
 
 TIPO_GESTOR = "gestor"
 TIPO_EXECUTIVO = "executivo"
@@ -72,8 +75,14 @@ def _fetch_user_emails(svc, user_ids: set[str]) -> dict[str, str]:
             if len(users_page) < 1000:
                 break
             page += 1
-    except Exception:
-        pass  # ignorado — operação opcional
+    except Exception as exc:
+        # Falha aqui significa que nenhum e-mail será resolvido →
+        # todos os disparos do tenant falharão silenciosamente.
+        log.error(
+            "_fetch_user_emails: falha ao listar usuários via auth.admin "
+            "(tenant com %d user_ids esperados): %s",
+            len(user_ids), exc,
+        )
     return out
 
 
@@ -285,7 +294,12 @@ def save_email_pref(
             "ativo": False if tipo_relatorio == "nenhum" else ativo,
         }, on_conflict="tenant_id,user_id").execute()
         return True
-    except Exception:
+    except Exception as exc:
+        log.error(
+            "save_email_pref: falha ao salvar preferência "
+            "user=%s tenant=%s tipo=%s: %s",
+            user_id, tenant_id, tipo_relatorio, exc,
+        )
         return False
 
 

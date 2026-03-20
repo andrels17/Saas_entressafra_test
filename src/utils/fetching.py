@@ -6,9 +6,12 @@ fetch_all é mantido para auditoria.py que precisa de joins e .order() dinâmico
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable
 
 from supabase import Client
+
+log = logging.getLogger("saas.fetching")
 
 
 def fetch_all(
@@ -30,7 +33,9 @@ def fetch_all(
         max_rows: Limite máximo de linhas retornadas para evitar OOM (default 50 000).
 
     Returns:
-        Lista de dicts com as linhas encontradas.
+        Lista de dicts com as linhas encontradas. Em caso de erro durante a
+        paginação, retorna os dados coletados até o momento e registra o erro
+        em log — nunca falha silenciosamente com dados parciais não sinalizados.
     """
     rows: list[dict[str, Any]] = []
     start = 0
@@ -41,8 +46,16 @@ def fetch_all(
             q = sb.table(table).select(select)
             q = filters_fn(q)
             batch = (q.range(start, end).execute().data) or []
-        except Exception:
-            break  # retorna o que foi coletado até agora
+        except Exception as exc:
+            # Registra o erro com contexto antes de retornar parcial.
+            # Dados retornados até aqui podem estar incompletos — o chamador
+            # deve tratar resultados vazios ou menores que o esperado.
+            log.warning(
+                "[%s] Erro na página %d–%d: %s. "
+                "Retornando %d linha(s) coletadas até agora.",
+                table, start, end, exc, len(rows),
+            )
+            break
         rows.extend(batch)
 
         if len(batch) < page_size or len(rows) >= max_rows:

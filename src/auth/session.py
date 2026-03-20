@@ -7,6 +7,9 @@ Responsabilidades:
 """
 from __future__ import annotations
 
+import logging
+import time
+
 import streamlit as st
 
 # ── Chaves de sessão ────────────────────────────────────────────────────
@@ -153,9 +156,33 @@ def ensure_valid_token() -> bool:
 
     except Exception as e:
         msg = str(e).lower()
-        if any(k in msg for k in ("invalid", "expired", "jwt", "401")):
+        # Erros de autenticação explícitos → tentar refresh ou logout
+        if any(k in msg for k in ("invalid", "expired", "jwt", "401", "403")):
             return try_refresh_session() or (
                 clear_auth_session() or False)  # type: ignore[func-returns-value]
-        return True  # erro transitório, mantém sessão
 
+        # Erros transitórios de rede (timeout, 500, conexão recusada):
+        # mantém a sessão, mas registra e rastreia a duração da falha.
+        # Se o banco ficar indisponível por mais de 5 minutos consecutivos,
+        # força logout para não deixar sessões em estado indefinido.
+        _log = logging.getLogger("saas.session")
+        _log.warning("ensure_valid_token: erro transitório: %s", e)
+
+        _TRANSIENT_ERROR_KEY = "_token_transient_error_since"
+        now = time.time()
+        if "_token_transient_error_since" not in st.session_state:
+            st.session_state[_TRANSIENT_ERROR_KEY] = now
+        elif now - st.session_state[_TRANSIENT_ERROR_KEY] > 300:
+            # Banco indisponível há mais de 5 min → logout seguro
+            _log.error(
+                "ensure_valid_token: banco indisponível por >5 min. "
+                "Forçando logout."
+            )
+            clear_auth_session()
+            return False
+
+        return True  # erro transitório recente, mantém sessão
+
+    # Chegou aqui sem retornar True dentro do try → token sem user válido
+    st.session_state.pop("_token_transient_error_since", None)
     return False

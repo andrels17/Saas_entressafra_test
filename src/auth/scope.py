@@ -7,9 +7,12 @@ Convencao:
 
 from __future__ import annotations
 
+import logging
 from typing import Iterable
 
 from src.auth.permissions import can_view_all_data
+
+log = logging.getLogger("saas.auth.scope")
 
 
 def _to_id(value) -> str | None:
@@ -45,7 +48,14 @@ def _load_scope_rows(sb, table: str, tenant_id: str, user_id: str) -> list[dict]
             .execute()
             .data
         ) or []
-    except Exception:
+    except Exception as exc:
+        # Falha aqui retorna escopo vazio → usuário sem acesso.
+        # Logar para diagnóstico — é preferível negar acesso do que concedê-lo
+        # erroneamente, mas o erro precisa ser visível para operações.
+        log.warning(
+            "_load_scope_rows [%s] user=%s tenant=%s: %s",
+            table, user_id, tenant_id, exc,
+        )
         return []
 
 
@@ -62,7 +72,11 @@ def _derive_groups_from_departments(sb, tenant_id: str, dept_ids: list[str]) -> 
             .data
         ) or []
         return _uniq(r.get("id") for r in rows)
-    except Exception:
+    except Exception as exc:
+        log.warning(
+            "_derive_groups_from_departments tenant=%s depts=%s: %s",
+            tenant_id, dept_ids, exc,
+        )
         return []
 
 
@@ -79,7 +93,11 @@ def _derive_departments_from_groups(sb, tenant_id: str, grp_ids: list[str]) -> l
             .data
         ) or []
         return _uniq(r.get("departamento_id") for r in rows)
-    except Exception:
+    except Exception as exc:
+        log.warning(
+            "_derive_departments_from_groups tenant=%s groups=%s: %s",
+            tenant_id, grp_ids, exc,
+        )
         return []
 
 

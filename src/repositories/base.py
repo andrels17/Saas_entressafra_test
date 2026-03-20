@@ -119,12 +119,20 @@ def fetch_grupo_template(sb, tenant_id: str, grupo_id: str):
     """
     from collections import defaultdict
 
-    for select, setor_fn in [
-        ("servico_id, servicos(id,nome,setor_id,setores(nome))",
-         lambda sv: (sv.get("setores") or {}).get("nome") or "Setor"),
-        ("servico_id, servicos(id,nome,setor)",
-         lambda sv: sv.get("setor") or "Setor"),
-    ]:
+    _FORMATS = [
+        (
+            "servico_id, servicos(id,nome,setor_id,setores(nome))",
+            lambda sv: (sv.get("setores") or {}).get("nome") or "Setor",
+            "join setor_id+setores",
+        ),
+        (
+            "servico_id, servicos(id,nome,setor)",
+            lambda sv: sv.get("setor") or "Setor",
+            "campo setor direto",
+        ),
+    ]
+
+    for select, setor_fn, fmt_label in _FORMATS:
         try:
             tpl = (
                 sb.table("grupo_servicos").select(select)
@@ -143,24 +151,52 @@ def fetch_grupo_template(sb, tenant_id: str, grupo_id: str):
                 all_s.append(sv)
             if all_s:
                 return s2s, all_s
-        except Exception:
-            pass  # ignorado — tenta próximo formato
+        except Exception as exc:
+            log_error(
+                exc,
+                context=f"repositories.fetch_grupo_template[{fmt_label}]",
+                table="grupo_servicos",
+                extra={"grupo_id": grupo_id, "tenant_id": tenant_id},
+            )
+            # Continua para o próximo formato
+
     # Fallback: busca IDs sem join e carrega nomes separadamente
-    tpl = (
-        sb.table("grupo_servicos").select("servico_id")
-        .eq("tenant_id", tenant_id)
-        .eq("grupo_id", grupo_id)
-        .execute().data
-    ) or []
+    try:
+        tpl = (
+            sb.table("grupo_servicos").select("servico_id")
+            .eq("tenant_id", tenant_id)
+            .eq("grupo_id", grupo_id)
+            .execute().data
+        ) or []
+    except Exception as exc:
+        log_error(
+            exc,
+            context="repositories.fetch_grupo_template[fallback-ids]",
+            table="grupo_servicos",
+            extra={"grupo_id": grupo_id, "tenant_id": tenant_id},
+        )
+        return defaultdict(list), []
+
     ids = [r.get("servico_id") for r in tpl if r.get("servico_id")]
     if not ids:
         return defaultdict(list), []
-    svs = (
-        sb.table("servicos").select("id,nome,setor")
-        .eq("tenant_id", tenant_id)
-        .in_("id", ids)
-        .execute().data
-    ) or []
+
+    try:
+        svs = (
+            sb.table("servicos").select("id,nome,setor")
+            .eq("tenant_id", tenant_id)
+            .in_("id", ids)
+            .execute().data
+        ) or []
+    except Exception as exc:
+        log_error(
+            exc,
+            context="repositories.fetch_grupo_template[fallback-names]",
+            table="servicos",
+            extra={"grupo_id": grupo_id, "tenant_id": tenant_id},
+        )
+        return defaultdict(list), []
+
     s2s = defaultdict(list)
     all_s = []
     for sv in svs:

@@ -87,12 +87,60 @@ def _semana_atual(data_inicio_str: str | None, semanas_total: int) -> int:
 
 # ── Carregamento de dados ───────────────────────────────────────────────
 
-def _load_tarefas(sb, tenant_id: str, revisao_id: str,
-                  grupo_ids: list[str]) -> list[dict]:
-    """Carrega tarefas de uma lista de grupos para um tenant/revisão."""
+def _load_tarefas_all(
+        sb, tenant_id: str, revisao_id: str) -> dict[str, list[dict]]:
+    """Carrega TODAS as tarefas da revisão de uma vez e indexa por grupo_id.
+
+    Use antes de loops por departamento para evitar N queries idênticas.
+    Retorna: {grupo_id: [tarefa, ...]}
+    """
+    rows = _with_fallback(
+        lambda: (
+            sb.table("tarefas_servico")
+            .select(
+                "id,equipamento_id,servico_id,status,semana,"
+                "etapa_d,etapa_r,etapa_m,observacao,updated_at,"
+                "dt_etapa_d,dt_etapa_r,dt_etapa_m,"
+                "equipamentos(id,frota,modelo,grupo_id,"
+                "equip_grupos(id,nome,departamento_id))"
+            )
+            .eq("tenant_id", tenant_id)
+            .eq("revisao_id", revisao_id)
+            .execute()
+            .data
+        ) or [],
+        [],
+        context=f"Erro ao pré-carregar tarefas da revisão {revisao_id}",
+    )
+    index: dict[str, list[dict]] = {}
+    for t in rows:
+        gid = (t.get("equipamentos") or {}).get("grupo_id")
+        if gid:
+            index.setdefault(gid, []).append(t)
+    return index
+
+
+def _load_tarefas(
+        sb, tenant_id: str, revisao_id: str,
+        grupo_ids: list[str],
+        _tarefas_index: "dict[str, list[dict]] | None" = None,
+) -> list[dict]:
+    """Retorna tarefas para os grupo_ids fornecidos.
+
+    Se _tarefas_index for passado (pré-carregado via _load_tarefas_all),
+    apenas fatia em memória — sem nova query ao banco.
+    Se omitido, executa a query diretamente (compatibilidade retroativa).
+    """
     if not grupo_ids:
         return []
 
+    if _tarefas_index is not None:
+        out: list[dict] = []
+        for gid in grupo_ids:
+            out.extend(_tarefas_index.get(gid, []))
+        return out
+
+    # Fallback: query direta (chamadas avulsas fora do loop do dispatcher)
     rows = _with_fallback(
         lambda: (
             sb.table("tarefas_servico")
@@ -669,10 +717,17 @@ def dispatch_relatorio_semanal(
 
     _log(f"Iniciando disparo para {len(groups)} departamento(s)…")
 
+    # Pré-carrega todas as tarefas uma única vez — evita N queries idênticas
+    # (uma por departamento) que antes buscavam o mesmo conjunto do banco.
+    tarefas_index = _load_tarefas_all(sb, tenant_id, revisao_id)
+
     for grp in groups:
         _log(f"  → Processando departamento: {grp.departamento_nome}")
         try:
-            tarefas = _load_tarefas(sb, tenant_id, revisao_id, grp.grupo_ids)
+            tarefas = _load_tarefas(
+                sb, tenant_id, revisao_id, grp.grupo_ids,
+                _tarefas_index=tarefas_index,
+            )
             # Não pula departamentos sem tarefas — podem ter equipamentos com
             # 0% ainda sem início
 
@@ -787,7 +842,9 @@ def dispatch_relatorio_semanal(
             for grp in all_dept_groups:  # TODOS os deptos, não só os com gestores
                 try:
                     tarefas_g = _load_tarefas(
-                        sb, tenant_id, revisao_id, grp.grupo_ids)
+                        sb, tenant_id, revisao_id, grp.grupo_ids,
+                        _tarefas_index=tarefas_index,
+                    )
                     p, eq_list_g = _build_payload(
                         tarefas=tarefas_g, revisao=revisao,
                         departamento_nome=grp.departamento_nome,

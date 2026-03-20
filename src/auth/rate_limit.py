@@ -6,6 +6,18 @@ implementação usa st.cache_resource para persistir entre reruns da mesma
 instância. Para ambientes multi-instância (k8s, etc.), substitua o
 _store por Redis.
 
+⚠️  LIMITAÇÃO IMPORTANTE — PERSISTÊNCIA EM MEMÓRIA
+    O estado de bloqueio é perdido ao reiniciar o processo (deploy, crash,
+    scale-to-zero). Um atacante que aguarda um redeploy zera o contador.
+    Para produção com múltiplas instâncias ou requisitos de segurança rígidos,
+    substitua _get_store() por uma implementação Redis:
+
+        import redis, os
+        _redis = redis.from_url(os.environ["REDIS_URL"])
+
+        def record_failure(key): _redis.incr(key); _redis.expire(key, WINDOW_SECONDS)
+        def check_rate_limit(key): return _redis.get(key) ...
+
 Limites padrão:
   - MAX_ATTEMPTS = 5 tentativas por janela
   - WINDOW_SECONDS = 300 (5 minutos)
@@ -29,11 +41,14 @@ Uso:
 """
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Tuple
 
 import streamlit as st
+
+log = logging.getLogger("saas.rate_limit")
 
 MAX_ATTEMPTS = 5
 WINDOW_SECONDS = 300   # janela deslizante de 5 min

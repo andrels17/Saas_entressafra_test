@@ -107,13 +107,29 @@ def render_editor_tab(
         if not _already_oculto and not _any_done_rows:
             if st.button("⊘ Ocultar desta revisão", key=f"ocultar_{equip_sel}",
                          help="Oculta o equipamento dos KPIs enquanto não parar para manutenção."):
-                ocultar_equipamento(sb, tenant_id, revisao_id, equip_sel, current_user_id())
-                from src.ui.core.cache import bump_data_version
-                bump_data_version()
-                st.toast("Equipamento ocultado ✅ — será revelado automaticamente quando uma etapa for marcada.")
-                st.rerun()
-    except Exception:
-        pass
+                try:
+                    ocultar_equipamento(sb, tenant_id, revisao_id, equip_sel, current_user_id())
+                    from src.ui.core.cache import bump_data_version
+                    bump_data_version()
+                    st.toast("Equipamento ocultado ✅ — será revelado automaticamente quando uma etapa for marcada.")
+                    st.rerun()
+                except Exception as _write_exc:
+                    from src.utils.observability import log_error
+                    log_error(
+                        _write_exc,
+                        context="editor_tab.ocultar_equipamento",
+                        table="eq_ocultos",
+                        extra={"equipamento_id": equip_sel, "revisao_id": revisao_id},
+                    )
+                    st.error("Não foi possível ocultar o equipamento. Tente novamente.")
+    except Exception as _setup_exc:
+        # Erros de setup (importação, query de verificação) — não exibir botão
+        from src.utils.observability import log_error
+        log_error(
+            _setup_exc,
+            context="editor_tab.ocultar_setup",
+            extra={"equipamento_id": equip_sel},
+        )
 
     # Item 9: mostrar toast de confirmação após rerun pós-save
     _saved_key = f"mat_just_saved_{equip_sel}_{svc_sel}"

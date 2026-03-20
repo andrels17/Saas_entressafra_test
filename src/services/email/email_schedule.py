@@ -17,11 +17,14 @@ Esquema da tabela (ver sql/migration_email_schedule.sql):
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
 from src.utils.timezone import BRT, now_utc_iso
+
+log = logging.getLogger("saas.email_schedule")
 
 DIAS_SEMANA_LABELS = [
     "Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira",
@@ -149,8 +152,14 @@ def load_schedule_config(tenant_id: str) -> ScheduleConfig:
         )
         if rows:
             return _row_to_config(rows[0])
-    except Exception:
-        pass  # ignorado — operação opcional
+    except Exception as exc:
+        # Scheduler continuará com configuração default — logar para diagnóstico
+        # (sem este log, disparos em horário errado são impossíveis de depurar)
+        log.warning(
+            "load_schedule_config: falha ao carregar config do tenant %s, "
+            "usando defaults: %s",
+            tenant_id, exc,
+        )
     return ScheduleConfig(tenant_id=tenant_id)
 
 
@@ -177,7 +186,11 @@ def save_schedule_config(cfg: ScheduleConfig) -> bool:
         else:
             sb.table("email_schedule_config").insert(payload).execute()
         return True
-    except Exception:
+    except Exception as exc:
+        log.error(
+            "save_schedule_config: falha ao salvar agendamento do tenant %s: %s",
+            cfg.tenant_id, exc,
+        )
         return False
 
 
@@ -247,7 +260,8 @@ def mark_dispatched(tenant_id: str) -> None:
           .update({"last_dispatched_at": now_utc_iso()}) \
           .eq("tenant_id", tenant_id) \
           .execute()
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(
-            "Falha ao registrar last_dispatched_at para tenant %s: %s", tenant_id, e)
+    except Exception as exc:
+        log.warning(
+            "mark_dispatched: falha ao registrar last_dispatched_at "
+            "para tenant %s: %s", tenant_id, exc,
+        )
