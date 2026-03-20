@@ -266,6 +266,7 @@ def calc_prazo(
         PrazoKPI com todos os campos preenchidos.
     """
     from datetime import date, datetime
+    from src.utils.timezone import now_brt as _now_brt
 
     _empty = PrazoKPI(
         dias_restantes=0,
@@ -293,7 +294,7 @@ def calc_prazo(
         except ValueError:
             return None
 
-    hoje = date.today()
+    hoje = _now_brt().date()  # BRT — evita discrepância de 3h/dia quando servidor roda em UTC
     dt_fim = _parse(data_fim)
     dt_inicio = _parse(data_inicio) if data_inicio else None
 
