@@ -271,6 +271,13 @@ def _fragment_seletores(
     st.session_state["_apt_eq_label"] = eq_label or "Equipamento"
     st.session_state["_apt_equipamento_id"] = equipamento_id
 
+    # Força rerun completo se o equipamento mudou — garante que _fragment_editor
+    # receba o equipamento_id correto sem depender do rerun do fragment pai
+    _prev_eq = st.session_state.get("_apt_prev_eq_id")
+    if _prev_eq != equipamento_id:
+        st.session_state["_apt_prev_eq_id"] = equipamento_id
+        st.rerun()
+
     return revisao, revisao_id, equipamento_id
 
 
