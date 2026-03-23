@@ -35,8 +35,22 @@ def get_supabase_anon() -> Client:
 get_supabase_anon_fresh = get_supabase_anon
 
 
-@st.cache_resource
 def get_supabase_service() -> Client:
-    """Service role: seguro para cache pois não carrega token de usuário."""
-    url, _, svc = _supabase_config()
-    return create_client(url, svc)
+    """Service role.
+
+    Fora do contexto Streamlit (scheduler, GitHub Actions) o decorator
+    @st.cache_resource não funciona corretamente — o cliente era criado
+    com credenciais vazias e todas as queries retornavam [] silenciosamente.
+    Cache manual via módulo garante uma única instância em qualquer contexto.
+    """
+    return _get_supabase_service_cached()
+
+
+def _get_supabase_service_cached() -> Client:
+    if _get_supabase_service_cached._client is None:
+        url, _, svc = _supabase_config()
+        _get_supabase_service_cached._client = create_client(url, svc)
+    return _get_supabase_service_cached._client
+
+
+_get_supabase_service_cached._client = None
