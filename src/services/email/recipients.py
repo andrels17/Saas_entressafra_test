@@ -1,438 +1,47 @@
-"""Busca destinatários de e-mail com suporte a tipo de relatório.
-
-Tipos de relatório:
-  "gestor"    — PDF completo por departamento (gestores/coordenadores)
-  "executivo" — PDF consolidado cross-departamentos (supervisores/diretores)
-
-Lógica de tipo:
-  1. Verifica preferência salva em `tenant_email_prefs` (override manual)
-  2. Fallback pelo role: supervisor/admin → executivo, gestor → gestor
-
-Tabela necessária no Supabase (criar se não existir):
-  tenant_email_prefs(tenant_id, user_id, tipo_relatorio text, ativo bool)
-"""
-from __future__ import annotations
-
-import logging
-from dataclasses import dataclass, field
-from typing import Any
-
-from src.db.supabase_client import get_supabase_service
-
-log = logging.getLogger("saas.recipients")
-
-TIPO_GESTOR = "gestor"
-TIPO_EXECUTIVO = "executivo"
-ROLE_DEFAULT: dict[str, str] = {
-    "gestor": TIPO_GESTOR,
-    "supervisor": TIPO_EXECUTIVO,
-    "admin": TIPO_EXECUTIVO,
-    "superadmin": TIPO_EXECUTIVO,
-}
+from typing import List, Dict, Any
 
 
-@dataclass
-class Recipient:
-    user_id: str
-    email: str
-    nome: str
-    tipo_relatorio: str = TIPO_GESTOR
+def get_recipients(supabase, tenant_id: str) -> List[Dict[str, Any]]:
+    print("🔍 Iniciando busca de recipients...")
 
-
-@dataclass
-class RecipientGroup:
-    departamento_id: str
-    departamento_nome: str
-    recipients: list[Recipient]
-    grupo_ids: list[str]
-    dados: dict[str, Any] = field(default_factory=dict)
-
-
-def _load_active_departments_or_group_fallback(svc, tenant_id: str) -> tuple[list[dict[str, Any]], bool]:
-    """Carrega departamentos ativos.
-
-    Fallback operacional: alguns tenants antigos ainda não possuem registros em
-    `departamentos`, mas já trabalham apenas com `equip_grupos`. Nesse caso,
-    cada grupo ativo passa a ser tratado como um pseudo-departamento apenas para
-    fins de relatório/disparo.
-
-    Retorna (rows, using_group_fallback).
-    """
-    try:
-        deps = (
-            svc.table("departamentos")
-            .select("id,nome")
-            .eq("tenant_id", tenant_id)
-            .is_("ativo", "true")
-            .execute()
-            .data
-        ) or []
-        if deps:
-            return deps, False
-    except Exception as exc:
-        log.warning("_load_active_departments_or_group_fallback.departamentos tenant=%s: %s", tenant_id, exc)
-
-    try:
-        grupos = (
-            svc.table("equip_grupos")
-            .select("id,nome,ativo")
-            .eq("tenant_id", tenant_id)
-            .execute()
-            .data
-        ) or []
-        grupos = [g for g in grupos if g.get("ativo", True)]
-        if grupos:
-            log.warning(
-                "Tenant %s sem departamentos ativos; usando %d grupo(s) ativo(s) como fallback para e-mail.",
-                tenant_id,
-                len(grupos),
-            )
-            return [{"id": g["id"], "nome": g.get("nome") or "Grupo"} for g in grupos if g.get("id")], True
-    except Exception as exc:
-        log.warning("_load_active_departments_or_group_fallback.equip_grupos tenant=%s: %s", tenant_id, exc)
-
-    return [], False
-
-
-def _fetch_user_emails(svc, user_ids: set[str]) -> dict[str, str]:
-    out: dict[str, str] = {}
-    if not user_ids:
-        return out
-    try:
-        page = 1
-        while True:
-            resp = svc.auth.admin.list_users(page=page, per_page=1000)
-            users_page = resp if isinstance(
-                resp, list) else getattr(
-                resp, "users", [])
-            if not users_page:
-                break
-            for u in users_page:
-                uid = getattr(
-                    u, "id", None) or (
-                    u.get("id") if isinstance(
-                        u, dict) else None)
-                email = getattr(
-                    u, "email", None) or (
-                    u.get("email") if isinstance(
-                        u, dict) else None)
-                if uid and email and uid in user_ids:
-                    out[uid] = email
-            if len(users_page) < 1000:
-                break
-            page += 1
-    except Exception as exc:
-        # Falha aqui significa que nenhum e-mail será resolvido →
-        # todos os disparos do tenant falharão silenciosamente.
-        log.error(
-            "_fetch_user_emails: falha ao listar usuários via auth.admin "
-            "(tenant com %d user_ids esperados): %s",
-            len(user_ids), exc,
-        )
-    return out
-
-
-def _fetch_profiles(svc, user_ids: list[str]) -> dict[str, str]:
-    if not user_ids:
-        return {}
-    try:
-        rows = (
-            svc.table("user_profiles")
-            .select("user_id,nome")
-            .in_("user_id", user_ids)
-            .execute()
-            .data
-        ) or []
-        return {r["user_id"]: r.get("nome") or "" for r in rows}
-    except Exception:
-        return {}
-
-
-def _fetch_email_prefs(svc, tenant_id: str) -> dict[str, str]:
-    """Retorna {user_id: tipo_relatorio} para todos os registros salvos.
-    Usuários com ativo=False ficam mapeados como 'nenhum' para serem excluídos.
-    """
-    try:
-        rows = (
-            svc.table("tenant_email_prefs")
-            .select("user_id,tipo_relatorio,ativo")
-            .eq("tenant_id", tenant_id)
-            .execute()
-            .data
-        ) or []
-        out = {}
-        for r in rows:
-            uid = r.get("user_id")
-            tipo = r.get("tipo_relatorio") or ""
-            ativo = r.get("ativo", True)
-            if uid:
-                # ativo=False significa "não enviar" — marca como nenhum
-                out[uid] = tipo if ativo else "nenhum"
-        return out
-    except Exception:
-        return {}
-
-
-def _resolve_tipo(user_id: str, role: str, prefs: dict[str, str]) -> str:
-    """Resolve tipo_relatorio. 'nenhum' = não enviar (override explícito)."""
-    if user_id in prefs:
-        return prefs[user_id]   # pode ser 'gestor', 'executivo' ou 'nenhum'
-    return ROLE_DEFAULT.get(role or "", TIPO_GESTOR)
-
-
-def _nome_from(uid: str, profiles: dict, email: str) -> str:
-    nome = profiles.get(uid) or ""
-    if nome:
-        return nome
-    return email.split("@")[0].replace(".", " ").replace("_", " ").title()
-
-
-def get_recipient_groups(tenant_id: str) -> list[RecipientGroup]:
-    """Retorna grupos de departamento com destinatários tipo gestor."""
-    svc = get_supabase_service()
-    prefs = _fetch_email_prefs(svc, tenant_id)
-
-    deps, using_group_fallback = _load_active_departments_or_group_fallback(svc, tenant_id)
-    if not deps:
-        return []
-    dep_map = {d["id"]: d["nome"] for d in deps}
-
-    grupos = (
-        svc.table("equip_grupos")
-        .select("id,departamento_id")
+    # 1. Buscar preferências
+    prefs = (
+        supabase.table("tenant_email_prefs")
+        .select("user_id, tipo_relatorio, ativo")
         .eq("tenant_id", tenant_id)
+        .eq("ativo", True)
         .execute()
         .data
-    ) or []
-    dep_to_grupos: dict[str, list[str]] = {}
-    if using_group_fallback:
-        for d in deps:
-            dep_to_grupos[d["id"]] = [d["id"]]
-    else:
-        for g in grupos:
-            did = g.get("departamento_id")
-            if did:
-                dep_to_grupos.setdefault(did, []).append(g["id"])
+    )
 
-    links: list[dict[str, Any]] = []
-    try:
-        links.extend((
-            svc.table("tenant_user_departamentos")
-            .select("user_id,departamento_id,grupo_id")
-            .eq("tenant_id", tenant_id)
-            .execute()
-            .data
-        ) or [])
-    except Exception:
-        pass
-    try:
-        links.extend((
-            svc.table("tenant_user_scope")
-            .select("user_id,departamento_id,grupo_id")
-            .eq("tenant_id", tenant_id)
-            .execute()
-            .data
-        ) or [])
-    except Exception:
-        pass
+    print("DEBUG prefs:", prefs)
 
-    try:
-        tu_rows = (
-            svc.table("tenant_users")
-            .select("user_id,role")
-            .eq("tenant_id", tenant_id)
-            .execute()
-            .data
-        ) or []
-    except Exception:
-        tu_rows = []
-    user_roles = {r["user_id"]: r.get("role", "") for r in tu_rows}
-
-    dep_to_users: dict[str, set[str]] = {}
-    for lk in links:
-        uid = lk.get("user_id")
-        did = lk.get("departamento_id")
-        gid = lk.get("grupo_id")
-        alvo_id = gid if using_group_fallback and gid in dep_map else did
-        if not (uid and alvo_id):
-            continue
-        role = user_roles.get(uid, "")
-        tipo = _resolve_tipo(uid, role, prefs)
-        if tipo == TIPO_GESTOR:
-            dep_to_users.setdefault(alvo_id, set()).add(uid)
-
-    all_uids = {uid for uids in dep_to_users.values() for uid in uids}
-    profiles = _fetch_profiles(svc, list(all_uids))
-    emails = _fetch_user_emails(svc, all_uids)
-
-    groups: list[RecipientGroup] = []
-    for dep_id, dep_nome in dep_map.items():
-        uids = dep_to_users.get(dep_id, set())
-        recipients = []
-        for uid in uids:
-            email = emails.get(uid, "")
-            if not email:
-                continue
-            recipients.append(Recipient(
-                user_id=uid, email=email,
-                nome=_nome_from(uid, profiles, email),
-                tipo_relatorio=TIPO_GESTOR,
-            ))
-        if not recipients:
-            continue
-        groups.append(RecipientGroup(
-            departamento_id=dep_id,
-            departamento_nome=dep_nome,
-            recipients=recipients,
-            grupo_ids=dep_to_grupos.get(dep_id, []),
-        ))
-    return groups
-
-
-def get_executive_recipients(tenant_id: str) -> list[Recipient]:
-    """Retorna destinatários do relatório executivo (supervisores, admins, overrides)."""
-    svc = get_supabase_service()
-    prefs = _fetch_email_prefs(svc, tenant_id)
-
-    try:
-        tu_rows = (
-            svc.table("tenant_users")
-            .select("user_id,role")
-            .eq("tenant_id", tenant_id)
-            .execute()
-            .data
-        ) or []
-    except Exception:
+    if not prefs:
+        print("⚠️ Nenhuma preferência encontrada")
         return []
 
-    exec_uids: set[str] = set()
-    for r in tu_rows:
-        uid = r.get("user_id", "")
-        role = r.get("role", "")
-        if _resolve_tipo(uid, role, prefs) == TIPO_EXECUTIVO:
-            exec_uids.add(uid)
+    user_ids = [p["user_id"] for p in prefs]
+    print("DEBUG user_ids:", user_ids)
 
-    if not exec_uids:
-        return []
-
-    profiles = _fetch_profiles(svc, list(exec_uids))
-    emails = _fetch_user_emails(svc, exec_uids)
-
-    return [
-        Recipient(
-            user_id=uid, email=emails.get(uid, ""),
-            nome=_nome_from(uid, profiles, emails.get(uid, "")),
-            tipo_relatorio=TIPO_EXECUTIVO,
-        )
-        for uid in exec_uids if emails.get(uid)
-    ]
-
-
-def get_admin_recipients(tenant_id: str) -> list[Recipient]:
-    """Compat retroativa — retorna executivos."""
-    return get_executive_recipients(tenant_id)
-
-
-def save_email_pref(
-        tenant_id: str,
-        user_id: str,
-        tipo_relatorio: str,
-        ativo: bool = True) -> bool:
-    """Salva override manual de tipo de relatório para um usuário.
-    Se tipo_relatorio == 'nenhum', salva com ativo=False automaticamente.
-    """
-    svc = get_supabase_service()
-    try:
-        svc.table("tenant_email_prefs").upsert({
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "tipo_relatorio": tipo_relatorio,
-            "ativo": False if tipo_relatorio == "nenhum" else ativo,
-        }, on_conflict="tenant_id,user_id").execute()
-        return True
-    except Exception as exc:
-        log.error(
-            "save_email_pref: falha ao salvar preferência "
-            "user=%s tenant=%s tipo=%s: %s",
-            user_id, tenant_id, tipo_relatorio, exc,
-        )
-        return False
-
-
-def get_all_users_with_prefs(tenant_id: str) -> list[dict]:
-    """Todos os usuários do tenant com role, email e tipo_relatorio resolvido.
-    Usado pela UI de configuração de destinatários.
-    """
-    svc = get_supabase_service()
-    prefs = _fetch_email_prefs(svc, tenant_id)
-
-    try:
-        tu_rows = (
-            svc.table("tenant_users")
-            .select("user_id,role")
-            .eq("tenant_id", tenant_id)
-            .execute()
-            .data
-        ) or []
-    except Exception:
-        return []
-
-    all_uids = {r["user_id"] for r in tu_rows}
-    profiles = _fetch_profiles(svc, list(all_uids))
-    emails = _fetch_user_emails(svc, all_uids)
-
-    result = []
-    for r in tu_rows:
-        uid = r.get("user_id", "")
-        role = r.get("role", "")
-        email = emails.get(uid, "")
-        if not email:
-            continue
-        result.append({
-            "user_id": uid,
-            "nome": _nome_from(uid, profiles, email),
-            "email": email,
-            "role": role,
-            "tipo_relatorio": _resolve_tipo(uid, role, prefs),
-            "override": uid in prefs,
-        })
-    return sorted(result, key=lambda x: (x["role"], x["nome"]))
-
-
-def _build_all_dept_groups(tenant_id: str) -> list[RecipientGroup]:
-    """Retorna RecipientGroup para TODOS os departamentos ativos do tenant,
-    independente de terem gestores vinculados. Usado pelo relatório executivo
-    para garantir que todos os deptos apareçam no PDF consolidado.
-    """
-    svc = get_supabase_service()
-
-    deps, using_group_fallback = _load_active_departments_or_group_fallback(svc, tenant_id)
-    if not deps:
-        return []
-
-    grupos = (
-        svc.table("equip_grupos")
-        .select("id,departamento_id")
-        .eq("tenant_id", tenant_id)
+    # 2. Buscar usuários direto (SEM depender de departamento)
+    users = (
+        supabase.table("users")
+        .select("id, email, nome")
+        .in_("id", user_ids)
         .execute()
         .data
-    ) or []
-    dep_to_grupos: dict[str, list[str]] = {}
-    if using_group_fallback:
-        for d in deps:
-            dep_to_grupos[d["id"]] = [d["id"]]
-    else:
-        for g in grupos:
-            did = g.get("departamento_id")
-            if did:
-                dep_to_grupos.setdefault(did, []).append(g["id"])
+    )
 
-    return [
-        RecipientGroup(
-            departamento_id=d["id"],
-            departamento_nome=d["nome"],
-            recipients=[],          # sem destinatários — só para montar snapshot
-            grupo_ids=dep_to_grupos.get(d["id"], []),
-        )
-        for d in deps
-    ]
+    print("DEBUG users:", users)
+
+    if not users:
+        print("⚠️ Nenhum usuário encontrado")
+        return []
+
+    # 3. Filtrar quem tem email
+    recipients = [u for u in users if u.get("email")]
+
+    print("DEBUG recipients:", recipients)
+    print("TOTAL recipients:", len(recipients))
+
+    return recipients
