@@ -198,6 +198,15 @@ def _group_signature(base_ctx) -> tuple[str, str, str, str]:
     return tenant_id, revisao_id, group_id, data_version
 
 
+def _group_signature_from_ctx(base_ctx, group_ctx) -> tuple[str, str, str, str]:
+    return (
+        str(getattr(base_ctx, "tenant_id", "") or ""),
+        str(getattr(group_ctx, "revisao_id", "") or ""),
+        str(getattr(group_ctx, "grupo_id", "") or ""),
+        str(st.session_state.get("data_version", "0")),
+    )
+
+
 def _purge_stale_group_cache(active_sig: tuple[str, str, str, str]) -> None:
     store = _group_cache_store()
     stale_keys = [k for k in store if k != active_sig]
@@ -221,24 +230,14 @@ def _get_cached_group_context(base_ctx):
     if not group_ctx:
         return None
 
-    sig_after = (
-        str(getattr(base_ctx, "tenant_id", "") or ""),
-        str(getattr(group_ctx, "revisao_id", "") or st.session_state.get("matriz_revisao_id") or ""),
-        str(getattr(group_ctx, "grupo_id", "") or _guess_selected_group_id()),
-        str(st.session_state.get("data_version", "0")),
-    )
+    sig_after = _group_signature_from_ctx(base_ctx, group_ctx)
     _purge_stale_group_cache(sig_after)
     store[sig_after] = deepcopy(group_ctx)
     return group_ctx
 
 
-def _get_cached_resumo_json(group_ctx) -> str:
-    sig = (
-        "",
-        str(getattr(group_ctx, "revisao_id", "") or ""),
-        str(getattr(group_ctx, "grupo_id", "") or ""),
-        str(st.session_state.get("data_version", "0")),
-    )
+def _get_cached_resumo_json(base_ctx, group_ctx) -> str:
+    sig = _group_signature_from_ctx(base_ctx, group_ctx)
     store = _resumo_cache_store()
     cached = store.get(sig)
     if cached is not None:
@@ -252,11 +251,57 @@ def _get_cached_resumo_json(group_ctx) -> str:
 def _invalidate_matrix_perf_cache() -> None:
     _group_cache_store().clear()
     _resumo_cache_store().clear()
+    st.session_state.pop("_mtz_prewarm_sig", None)
     for fn in (_build_evo_chart_data, _build_cached_analytics):
         try:
             fn.clear()
         except Exception:
             pass
+
+
+def _build_default_evo_inputs(group_ctx):
+    seen = set()
+    svc_ids_rank = []
+    for s in group_ctx.all_services:
+        sid = s.get("id")
+        if sid and sid not in seen:
+            seen.add(sid)
+            svc_ids_rank.append(sid)
+    total_cells_rank = int(len(group_ctx.eqs) * max(len(svc_ids_rank), 1) * 3)
+    rev_start = pd.to_datetime(
+        (group_ctx.rev_row or {}).get("data_inicio") or (group_ctx.rev_row or {}).get("created_at"),
+        errors="coerce",
+        utc=True,
+    )
+    if pd.isna(rev_start):
+        rev_start = pd.Timestamp(_now_utc()).normalize()
+    return tuple(svc_ids_rank), total_cells_rank, str(rev_start)
+
+
+def _prewarm_matrix_caches(base_ctx, group_ctx) -> None:
+    sig = _group_signature_from_ctx(base_ctx, group_ctx)
+    if st.session_state.get("_mtz_prewarm_sig") == sig:
+        return
+
+    try:
+        _prepare_analytics(base_ctx, group_ctx)
+    except Exception:
+        pass
+
+    try:
+        svc_ids_rank, total_cells_rank, rev_start_iso = _build_default_evo_inputs(group_ctx)
+        if group_ctx.tarefas:
+            _build_evo_chart_data(
+                tarefas_json=json.dumps(group_ctx.tarefas, default=str),
+                svc_ids_rank=svc_ids_rank,
+                total_cells_rank=total_cells_rank,
+                semanas_total=int((group_ctx.rev_row or {}).get("semanas_total") or 1),
+                rev_start_iso=rev_start_iso,
+            )
+    except Exception:
+        pass
+
+    st.session_state["_mtz_prewarm_sig"] = sig
 
 
 def _render_altair_evo(pc: pd.DataFrame, ps: pd.DataFrame, meta: pd.Series) -> None:
@@ -438,7 +483,7 @@ def _render_missing_services_alert(group_ctx):
     )
 
 
-def _prepare_analytics(group_ctx):
+def _prepare_analytics(base_ctx, group_ctx):
     return _build_cached_analytics(
         eqs_json=json.dumps(group_ctx.eqs, default=str, sort_keys=True),
         setor_to_services_json=json.dumps(group_ctx.setor_to_services, default=str, sort_keys=True),
@@ -446,7 +491,7 @@ def _prepare_analytics(group_ctx):
         atraso_dias_json=json.dumps(group_ctx.group_atraso_dias, default=str, sort_keys=True),
         rev_start_iso=str(group_ctx.group_rev_start),
         pct_geral=float(group_ctx.pct_geral),
-        resumo_json=_get_cached_resumo_json(group_ctx),
+        resumo_json=_get_cached_resumo_json(base_ctx, group_ctx),
         semanas_total=int((group_ctx.rev_row or {}).get("semanas_total") or 1),
         now_ref_iso=str(pd.Timestamp(_now_utc()).floor("min")),
     )
@@ -749,7 +794,7 @@ def _render_group_overview(base_ctx, group_ctx, header_placeholder) -> dict:
         grupo_id=group_ctx.grupo_id,
     )
 
-    return _prepare_analytics(group_ctx)
+    return _prepare_analytics(base_ctx, group_ctx)
 
 
 def _get_sections(can_edit: bool) -> list[str]:
@@ -944,6 +989,7 @@ def render_matriz() -> None:
             return
 
         analytics_data = _render_group_overview(base_ctx, group_ctx, header_placeholder)
+        _prewarm_matrix_caches(base_ctx, group_ctx)
         _render_sections(base_ctx, group_ctx, analytics_data)
     except Exception as e:
         st.error("Erro ao renderizar a Matriz.")
