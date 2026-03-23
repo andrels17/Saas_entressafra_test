@@ -447,6 +447,210 @@ def _render_analytics_tab(group_ctx, analytics_data):
 
 
 
+def _render_group_legend_and_alerts(group_ctx) -> None:
+    if st.session_state.get('matriz_show_legend'):
+        st.markdown('**Legenda:** pendente · em andamento · concluido · travado · nao aplica')
+    _render_missing_services_alert(group_ctx)
+
+
+def _render_group_main_header(header_placeholder, group_ctx) -> None:
+    render_group_header(
+        placeholder=header_placeholder,
+        grupo_nome=group_ctx.grupo_nome,
+        titulo=group_ctx.titulo,
+        eqs=group_ctx.eqs,
+        pct_geral=group_ctx.pct_geral,
+        eq100_g=group_ctx.eq100_g,
+        setor_rows=group_ctx.setor_rows,
+        revisao_id=group_ctx.revisao_id,
+        grupo_id=group_ctx.grupo_id,
+    )
+
+
+def _build_tab_labels(can_edit: bool) -> list[str]:
+    labels = ['📊 Resumo', '⚙️ Matriz', '📈 Evolução', '🧠 Analytics', '⏱️ Tempos']
+    if can_edit:
+        labels.append('✏️ Editar célula')
+    labels.append('⬇️ Exportar')
+    return labels
+
+
+def _open_matriz_tab_when_requested(group_ctx) -> None:
+    goto_matriz = st.session_state.pop(f'_mtz_goto_matriz_{group_ctx.grupo_id}', False)
+    if goto_matriz:
+        st.markdown(
+            """<script>(function(){const tabs=window.parent.document.querySelectorAll('button[data-baseweb=\"tab\"]'); if(tabs&&tabs.length>1){tabs[1].click();}})();</script>""",
+            unsafe_allow_html=True,
+        )
+
+
+def _unpack_tabs(tabs, can_edit: bool):
+    if can_edit:
+        tab_resumo, tab_matriz, tab_evolucao, tab_analytics, tab_tempos, tab_editor, tab_exportar = tabs
+        return tab_resumo, tab_matriz, tab_evolucao, tab_analytics, tab_tempos, tab_editor, tab_exportar
+
+    tab_resumo, tab_matriz, tab_evolucao, tab_analytics, tab_tempos, tab_exportar = tabs
+    return tab_resumo, tab_matriz, tab_evolucao, tab_analytics, tab_tempos, None, tab_exportar
+
+
+def _sync_pdf_export_signature(base_ctx, group_ctx) -> None:
+    early_signature = (str(base_ctx.tenant_id), str(group_ctx.grupo_id), str(group_ctx.revisao_id))
+    if st.session_state.get('_mtz_pdf_grupo_sig') != early_signature:
+        st.session_state.pop('mtz_pdf_export_bytes', None)
+        st.session_state.pop('mtz_pdf_export_signature', None)
+        st.session_state['_mtz_pdf_grupo_sig'] = early_signature
+
+
+def _render_matriz_core_tab(base_ctx, group_ctx) -> None:
+    from .matrix_tab import render_matrix_tab
+
+    render_matrix_tab(
+        sb=base_ctx.sb,
+        revisao_id=group_ctx.revisao_id,
+        grupo_id=group_ctx.grupo_id,
+        group_atraso_dias=group_ctx.group_atraso_dias,
+        semanas_disp=group_ctx.semanas_disp,
+        semana_sugerida=group_ctx.semana_sugerida,
+        group_rev_start=group_ctx.group_rev_start,
+        setor_to_services=group_ctx.setor_to_services,
+        tarefas=group_ctx.tarefas,
+        eqs=group_ctx.eqs,
+        task_map=group_ctx.task_map,
+        eq_label_short=group_ctx.eq_label_short,
+    )
+
+
+def _render_tempos_content(base_ctx, group_ctx) -> None:
+    from .tempos_tab import render_tempos_tab
+
+    render_tempos_tab(
+        sb=base_ctx.sb,
+        tenant_id=base_ctx.tenant_id,
+        revisao_id=group_ctx.revisao_id,
+        eq_ids=group_ctx.eq_ids,
+        tarefas=group_ctx.tarefas,
+        svc_ids_rank=[],
+        svc_ids_all=group_ctx.svc_ids_all,
+        all_services=group_ctx.all_services,
+        eq_label_short=group_ctx.eq_label_short,
+        eq_label=group_ctx.eq_label,
+    )
+
+
+def _render_editor_content(base_ctx, group_ctx) -> None:
+    from .editor_tab import render_bulk_editor, render_editor_tab
+
+    edit_mode = st.radio(
+        'Modo de edição',
+        ['✏️ Célula individual', '⚡ Lote por serviço'],
+        horizontal=True,
+        key='mat_edit_mode',
+    )
+    st.divider()
+
+    if edit_mode == '✏️ Célula individual':
+        render_editor_tab(
+            sb=base_ctx.sb,
+            tenant_id=base_ctx.tenant_id,
+            revisao_id=group_ctx.revisao_id,
+            grupo_id=group_ctx.grupo_id,
+            setor_to_services=group_ctx.setor_to_services,
+            eq_label_short=group_ctx.eq_label_short,
+            task_map=group_ctx.task_map,
+            semana_sugerida=group_ctx.semana_sugerida,
+            eq_ocultos_set=group_ctx.eq_ocultos_set,
+        )
+        return
+
+    render_bulk_editor(
+        sb=base_ctx.sb,
+        tenant_id=base_ctx.tenant_id,
+        revisao_id=group_ctx.revisao_id,
+        setor_to_services=group_ctx.setor_to_services,
+        task_map=group_ctx.task_map,
+        eqs=group_ctx.eqs,
+        eq_label_short=group_ctx.eq_label_short,
+        semana_sugerida=group_ctx.semana_sugerida,
+    )
+
+
+def _render_export_content(base_ctx, group_ctx) -> None:
+    from .export_tab import render_export_tab
+
+    render_export_tab(
+        tenant_id=base_ctx.tenant_id,
+        grupo_id=group_ctx.grupo_id,
+        revisao_id=group_ctx.revisao_id,
+        titulo=group_ctx.titulo,
+        grupo_nome=group_ctx.grupo_nome,
+        resumo_df=group_ctx.resumo_df,
+        view_agg=group_ctx.view_agg,
+        sector_tables_for_export=group_ctx.sector_tables_for_export,
+        data_version=st.session_state.get('data_version', '0'),
+    )
+
+
+def _render_group_tabs(base_ctx, group_ctx, analytics_data) -> None:
+    tabs = st.tabs(_build_tab_labels(base_ctx.can_edit))
+    _open_matriz_tab_when_requested(group_ctx)
+
+    (
+        tab_resumo,
+        tab_matriz,
+        tab_evolucao,
+        tab_analytics,
+        tab_tempos,
+        tab_editor,
+        tab_exportar,
+    ) = _unpack_tabs(tabs, base_ctx.can_edit)
+
+    _sync_pdf_export_signature(base_ctx, group_ctx)
+
+    with tab_resumo:
+        render_summary_tab(resumo_df=group_ctx.resumo_df)
+
+    with tab_matriz:
+        _render_matriz_core_tab(base_ctx, group_ctx)
+
+    with tab_evolucao:
+        _render_evolucao_tab(group_ctx, base_ctx)
+
+    with tab_analytics:
+        _render_analytics_tab(group_ctx, analytics_data)
+
+    with tab_tempos:
+        _render_tempos_content(base_ctx, group_ctx)
+
+    if tab_editor is not None:
+        with tab_editor:
+            _render_editor_content(base_ctx, group_ctx)
+
+    with tab_exportar:
+        _render_export_content(base_ctx, group_ctx)
+
+
+def _build_selected_group_context(base_ctx, search: str, status_filter: str, sort_by: str):
+    if render_selection_screen(
+        tenant_id=base_ctx.tenant_id,
+        revisao_id=st.session_state.get('matriz_revisao_id'),
+        grupos=base_ctx.grupos,
+        search=search,
+        status_filter=status_filter,
+        sort_by=sort_by,
+        data_version=st.session_state.get('data_version', '0'),
+    ):
+        return None
+
+    return build_group_context(base_ctx)
+
+
+def _render_group_workspace(base_ctx, header_placeholder, group_ctx) -> None:
+    _render_group_legend_and_alerts(group_ctx)
+    _render_group_main_header(header_placeholder, group_ctx)
+    analytics_data = _prepare_analytics(group_ctx)
+    _render_group_tabs(base_ctx, group_ctx, analytics_data)
+
+
 def render_matriz() -> None:
     try:
         _inject_css()
@@ -457,145 +661,11 @@ def render_matriz() -> None:
             return
 
         header_placeholder, search, status_filter, sort_by = _render_toolbar(base_ctx)
-        if render_selection_screen(
-            tenant_id=base_ctx.tenant_id,
-            revisao_id=st.session_state.get('matriz_revisao_id'),
-            grupos=base_ctx.grupos,
-            search=search,
-            status_filter=status_filter,
-            sort_by=sort_by,
-            data_version=st.session_state.get('data_version', '0'),
-        ):
-            return
-
-        group_ctx = build_group_context(base_ctx)
+        group_ctx = _build_selected_group_context(base_ctx, search, status_filter, sort_by)
         if not group_ctx:
             return
 
-        if st.session_state.get('matriz_show_legend'):
-            st.markdown('**Legenda:** pendente · em andamento · concluido · travado · nao aplica')
-
-        _render_missing_services_alert(group_ctx)
-
-        render_group_header(
-            placeholder=header_placeholder,
-            grupo_nome=group_ctx.grupo_nome,
-            titulo=group_ctx.titulo,
-            eqs=group_ctx.eqs,
-            pct_geral=group_ctx.pct_geral,
-            eq100_g=group_ctx.eq100_g,
-            setor_rows=group_ctx.setor_rows,
-            revisao_id=group_ctx.revisao_id,
-            grupo_id=group_ctx.grupo_id,
-        )
-
-        analytics_data = _prepare_analytics(group_ctx)
-
-        tab_labels = ['📊 Resumo', '⚙️ Matriz', '📈 Evolução', '🧠 Analytics', '⏱️ Tempos']
-        if base_ctx.can_edit:
-            tab_labels.append('✏️ Editar célula')
-        tab_labels.append('⬇️ Exportar')
-        tabs = st.tabs(tab_labels)
-
-        goto_matriz = st.session_state.pop(f'_mtz_goto_matriz_{group_ctx.grupo_id}', False)
-        if goto_matriz:
-            st.markdown("""<script>(function(){const tabs=window.parent.document.querySelectorAll('button[data-baseweb="tab"]'); if(tabs&&tabs.length>1){tabs[1].click();}})();</script>""", unsafe_allow_html=True)
-
-        if base_ctx.can_edit:
-            tab_resumo, tab_matriz, tab_evolucao, tab_analytics, tab_tempos, tab_editor, tab_exportar = tabs
-        else:
-            tab_resumo, tab_matriz, tab_evolucao, tab_analytics, tab_tempos, tab_exportar = tabs
-            tab_editor = None
-
-        early_signature = (str(base_ctx.tenant_id), str(group_ctx.grupo_id), str(group_ctx.revisao_id))
-        if st.session_state.get('_mtz_pdf_grupo_sig') != early_signature:
-            st.session_state.pop('mtz_pdf_export_bytes', None)
-            st.session_state.pop('mtz_pdf_export_signature', None)
-            st.session_state['_mtz_pdf_grupo_sig'] = early_signature
-
-        with tab_resumo:
-            render_summary_tab(resumo_df=group_ctx.resumo_df)
-
-        with tab_matriz:
-            from .matrix_tab import render_matrix_tab
-            render_matrix_tab(
-                sb=base_ctx.sb,
-                revisao_id=group_ctx.revisao_id,
-                grupo_id=group_ctx.grupo_id,
-                group_atraso_dias=group_ctx.group_atraso_dias,
-                semanas_disp=group_ctx.semanas_disp,
-                semana_sugerida=group_ctx.semana_sugerida,
-                group_rev_start=group_ctx.group_rev_start,
-                setor_to_services=group_ctx.setor_to_services,
-                tarefas=group_ctx.tarefas,
-                eqs=group_ctx.eqs,
-                task_map=group_ctx.task_map,
-                eq_label_short=group_ctx.eq_label_short,
-            )
-
-        with tab_evolucao:
-            _render_evolucao_tab(group_ctx, base_ctx)
-
-        with tab_analytics:
-            _render_analytics_tab(group_ctx, analytics_data)
-
-        with tab_tempos:
-            from .tempos_tab import render_tempos_tab
-            render_tempos_tab(
-                sb=base_ctx.sb,
-                tenant_id=base_ctx.tenant_id,
-                revisao_id=group_ctx.revisao_id,
-                eq_ids=group_ctx.eq_ids,
-                tarefas=group_ctx.tarefas,
-                svc_ids_rank=[],
-                svc_ids_all=group_ctx.svc_ids_all,
-                all_services=group_ctx.all_services,
-                eq_label_short=group_ctx.eq_label_short,
-                eq_label=group_ctx.eq_label,
-            )
-
-        if tab_editor is not None:
-            with tab_editor:
-                from .editor_tab import render_bulk_editor, render_editor_tab
-                edit_mode = st.radio('Modo de edição', ['✏️ Célula individual', '⚡ Lote por serviço'], horizontal=True, key='mat_edit_mode')
-                st.divider()
-                if edit_mode == '✏️ Célula individual':
-                    render_editor_tab(
-                        sb=base_ctx.sb,
-                        tenant_id=base_ctx.tenant_id,
-                        revisao_id=group_ctx.revisao_id,
-                        grupo_id=group_ctx.grupo_id,
-                        setor_to_services=group_ctx.setor_to_services,
-                        eq_label_short=group_ctx.eq_label_short,
-                        task_map=group_ctx.task_map,
-                        semana_sugerida=group_ctx.semana_sugerida,
-                        eq_ocultos_set=group_ctx.eq_ocultos_set,
-                    )
-                else:
-                    render_bulk_editor(
-                        sb=base_ctx.sb,
-                        tenant_id=base_ctx.tenant_id,
-                        revisao_id=group_ctx.revisao_id,
-                        setor_to_services=group_ctx.setor_to_services,
-                        task_map=group_ctx.task_map,
-                        eqs=group_ctx.eqs,
-                        eq_label_short=group_ctx.eq_label_short,
-                        semana_sugerida=group_ctx.semana_sugerida,
-                    )
-
-        with tab_exportar:
-            from .export_tab import render_export_tab
-            render_export_tab(
-                tenant_id=base_ctx.tenant_id,
-                grupo_id=group_ctx.grupo_id,
-                revisao_id=group_ctx.revisao_id,
-                titulo=group_ctx.titulo,
-                grupo_nome=group_ctx.grupo_nome,
-                resumo_df=group_ctx.resumo_df,
-                view_agg=group_ctx.view_agg,
-                sector_tables_for_export=group_ctx.sector_tables_for_export,
-                data_version=st.session_state.get('data_version', '0'),
-            )
+        _render_group_workspace(base_ctx, header_placeholder, group_ctx)
     except Exception as e:
         st.error('Erro ao renderizar a Matriz.')
         st.exception(e)
