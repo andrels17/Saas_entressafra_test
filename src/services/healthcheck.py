@@ -150,8 +150,7 @@ def check_critical_tables() -> CheckResult:
                 f"Tabelas inacessíveis: {', '.join(missing)}",
             )
         return CheckResult(
-            "critical_tables", CheckStatus.OK, f"{
-                len(TABLES)} tabelas OK.")
+            "critical_tables", CheckStatus.OK, f"{len(TABLES)} tabelas OK.")
     except Exception as exc:
         return CheckResult("critical_tables", CheckStatus.FAIL, f"Erro: {exc}")
 
