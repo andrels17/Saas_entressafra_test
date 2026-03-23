@@ -9,7 +9,8 @@ import streamlit as st
 
 from src.auth.permissions import can_edit_matriz, can_view_all_data
 from src.auth.scope import get_my_scope
-from src.ui.core.cache import bump_data_version, clear_cached_functions
+from src.ui.core.cache import clear_cached_functions
+from src.ui.core.cache_matrix import invalidate_matriz_cache
 from src.utils.supabase_helpers import current_role, current_tenant_id, sb_for_user
 from src.utils.timezone import now_brt as _now_brt
 from src.utils.weeks import week_from_revisao as _week_from_revisao
@@ -133,7 +134,7 @@ def load_matrix_base_context() -> MatrixBaseContext | None:
 
 
 def handle_toolbar_reload() -> None:
-    bump_data_version()
+    invalidate_matriz_cache()
     clear_cached_functions(
         _load_payload,
         _group_kpis,
@@ -222,7 +223,7 @@ def _ensure_template(base_ctx: MatrixBaseContext, grupo_id: str, payload: dict[s
     try:
         s2s2, all2 = _fetch_template(base_ctx.sb, base_ctx.tenant_id, grupo_id)
         if all2:
-            bump_data_version()
+            invalidate_matriz_cache()
             clear_cached_functions(_load_payload, _group_kpis, _all_dept_names, _build_group_context_cached)
             st.session_state.pop("_mtz_payload_cache", None)
             return s2s2, all2
