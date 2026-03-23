@@ -2,7 +2,7 @@ name: Relatório Semanal
 
 on:
   schedule:
-    - cron: "0 11 * * 1"
+    - cron: "0 14 * * 1"
   workflow_dispatch:
     inputs:
       dry_run:
