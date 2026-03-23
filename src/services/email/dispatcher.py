@@ -907,8 +907,7 @@ def dispatch_relatorio_semanal(
                             alertas_parados["atencao"] += 1
                 except Exception as e_g:
                     _log(
-                        f"    ↳ Aviso: erro ao montar snapshot de {
-                            grp.departamento_nome}: {e_g}")
+                        f"    ↳ Aviso: erro ao montar snapshot de {grp.departamento_nome}: {e_g}")
 
             if dept_snapshots:
                 # pct_global ponderado: sum(done_steps) / sum(expected_steps)
@@ -996,8 +995,7 @@ def dispatch_relatorio_semanal(
                         _log("    ↳ ✅ Executivo enviado.")
                     except Exception as e_send:
                         result.failed += 1
-                        msg = f"Falha ao enviar executivo para {
-                            rec.email}: {e_send}"
+                        msg = f"Falha ao enviar executivo para {rec.email}: {e_send}"
                         result.errors.append(msg)
                         _log(f"    ↳ ❌ {msg}")
             else:
@@ -1009,8 +1007,5 @@ def dispatch_relatorio_semanal(
         _log(f"  ⚠️ Erro ao gerar executivo: {e_exec}")
 
     _log(
-        f"Concluído: {
-            result.sent} enviados, {
-            result.failed} falhas, {
-                result.skipped} pulados.")
+        f"Concluído: {result.sent} enviados, {result.failed} falhas, {result.skipped} pulados.")
     return result
