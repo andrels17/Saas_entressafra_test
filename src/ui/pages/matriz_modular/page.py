@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 
 import altair as alt
 import pandas as pd
@@ -127,12 +128,7 @@ def _build_cached_analytics(
     try:
         elapsed_days = max(
             0,
-            int(
-                (
-                    pd.Timestamp(now_ref_iso, tz="UTC")
-                    - pd.to_datetime(rev_start_iso, utc=True)
-                ).days
-            ),
+            int((pd.Timestamp(now_ref_iso, tz="UTC") - pd.to_datetime(rev_start_iso, utc=True)).days),
         )
     except Exception:
         elapsed_days = 0
@@ -170,6 +166,97 @@ def _build_cached_analytics(
 def _serialize_task_map(task_map) -> str:
     payload = {f"{eid}||{sid}": value for (eid, sid), value in task_map.items()}
     return json.dumps(payload, default=str, sort_keys=True)
+
+
+def _group_cache_store() -> dict:
+    return st.session_state.setdefault("_mtz_group_ctx_cache", {})
+
+
+def _resumo_cache_store() -> dict:
+    return st.session_state.setdefault("_mtz_resumo_cache", {})
+
+
+def _guess_selected_group_id() -> str:
+    for key in (
+        "matriz_grupo_id",
+        "matriz_selected_grupo_id",
+        "grupo_id",
+        "selected_group_id",
+        "selected_grupo_id",
+    ):
+        value = st.session_state.get(key)
+        if value:
+            return str(value)
+    return ""
+
+
+def _group_signature(base_ctx) -> tuple[str, str, str, str]:
+    tenant_id = str(getattr(base_ctx, "tenant_id", "") or "")
+    revisao_id = str(st.session_state.get("matriz_revisao_id") or "")
+    group_id = _guess_selected_group_id()
+    data_version = str(st.session_state.get("data_version", "0"))
+    return tenant_id, revisao_id, group_id, data_version
+
+
+def _purge_stale_group_cache(active_sig: tuple[str, str, str, str]) -> None:
+    store = _group_cache_store()
+    stale_keys = [k for k in store if k != active_sig]
+    for key in stale_keys:
+        store.pop(key, None)
+
+    resumo_store = _resumo_cache_store()
+    stale_resumo = [k for k in resumo_store if k != active_sig]
+    for key in stale_resumo:
+        resumo_store.pop(key, None)
+
+
+def _get_cached_group_context(base_ctx):
+    sig_before = _group_signature(base_ctx)
+    store = _group_cache_store()
+    cached = store.get(sig_before)
+    if cached is not None:
+        return deepcopy(cached)
+
+    group_ctx = build_group_context(base_ctx)
+    if not group_ctx:
+        return None
+
+    sig_after = (
+        str(getattr(base_ctx, "tenant_id", "") or ""),
+        str(getattr(group_ctx, "revisao_id", "") or st.session_state.get("matriz_revisao_id") or ""),
+        str(getattr(group_ctx, "grupo_id", "") or _guess_selected_group_id()),
+        str(st.session_state.get("data_version", "0")),
+    )
+    _purge_stale_group_cache(sig_after)
+    store[sig_after] = deepcopy(group_ctx)
+    return group_ctx
+
+
+def _get_cached_resumo_json(group_ctx) -> str:
+    sig = (
+        "",
+        str(getattr(group_ctx, "revisao_id", "") or ""),
+        str(getattr(group_ctx, "grupo_id", "") or ""),
+        str(st.session_state.get("data_version", "0")),
+    )
+    store = _resumo_cache_store()
+    cached = store.get(sig)
+    if cached is not None:
+        return cached
+
+    resumo_json = group_ctx.resumo_df.to_json(orient="records", date_format="iso") if not group_ctx.resumo_df.empty else "[]"
+    store[sig] = resumo_json
+    return resumo_json
+
+
+def _invalidate_matrix_perf_cache() -> None:
+    _group_cache_store().clear()
+    _resumo_cache_store().clear()
+    for fn in (_build_evo_chart_data, _build_cached_analytics):
+        try:
+            fn.clear()
+        except Exception:
+            pass
 
 
 def _render_altair_evo(pc: pd.DataFrame, ps: pd.DataFrame, meta: pd.Series) -> None:
@@ -326,6 +413,7 @@ def _render_toolbar(base_ctx):
             st.session_state["matriz_departamento_id"] = None
             st.rerun()
         if reload_data:
+            _invalidate_matrix_perf_cache()
             handle_toolbar_reload()
             st.rerun()
 
@@ -358,7 +446,7 @@ def _prepare_analytics(group_ctx):
         atraso_dias_json=json.dumps(group_ctx.group_atraso_dias, default=str, sort_keys=True),
         rev_start_iso=str(group_ctx.group_rev_start),
         pct_geral=float(group_ctx.pct_geral),
-        resumo_json=group_ctx.resumo_df.to_json(orient="records", date_format="iso") if not group_ctx.resumo_df.empty else "[]",
+        resumo_json=_get_cached_resumo_json(group_ctx),
         semanas_total=int((group_ctx.rev_row or {}).get("semanas_total") or 1),
         now_ref_iso=str(pd.Timestamp(_now_utc()).floor("min")),
     )
@@ -640,7 +728,7 @@ def _resolve_selected_group(base_ctx, search: str, status_filter: str, sort_by: 
     ):
         return None
 
-    return build_group_context(base_ctx)
+    return _get_cached_group_context(base_ctx)
 
 
 def _render_group_overview(base_ctx, group_ctx, header_placeholder) -> dict:
