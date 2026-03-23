@@ -150,7 +150,7 @@ def get_recipient_groups(tenant_id: str) -> list[RecipientGroup]:
         svc.table("departamentos")
         .select("id,nome")
         .eq("tenant_id", tenant_id)
-        .eq("ativo", "true")
+        .eq("ativo", True)
         .execute()
         .data
     ) or []
@@ -354,7 +354,7 @@ def _build_all_dept_groups(tenant_id: str) -> list[RecipientGroup]:
         svc.table("departamentos")
         .select("id,nome")
         .eq("tenant_id", tenant_id)
-        .eq("ativo", "true")
+        .eq("ativo", True)
         .execute()
         .data
     ) or []
