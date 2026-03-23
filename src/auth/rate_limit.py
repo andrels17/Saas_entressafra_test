@@ -1,44 +1,44 @@
 """Rate limit simples para tentativas de login.
 
-Mantém compatibilidade com o app atual e com testes antigos.
+Compatível com o app atual:
+- check_rate_limit(key) -> (allowed, message, wait_secs)
+e também com testes legados:
+- _get_store()
+- _bucket(key)
 """
 
 from __future__ import annotations
 
+import math
 import time
 from collections import defaultdict
-from typing import DefaultDict, List
+from typing import DefaultDict
 
 import streamlit as st
 
-# Armazena timestamps de falhas por chave
-_STORE: DefaultDict[str, List[float]] = defaultdict(list)
+_STORE: DefaultDict[str, list[float]] = defaultdict(list)
 
-# Janela e limite padrão
 WINDOW_SECONDS = 15 * 60
 MAX_FAILURES = 5
 
 
 def _get_store():
-    """Compatibilidade com testes legados."""
     return _STORE
 
 
 def _bucket(key: str):
-    """Compatibilidade com testes legados."""
     return _STORE.setdefault(key, [])
 
 
-def _prune(key: str, now: float | None = None) -> List[float]:
+def _prune(key: str, now: float | None = None, *, window_seconds: int = WINDOW_SECONDS) -> list[float]:
     now = now if now is not None else time.time()
-    limit = now - WINDOW_SECONDS
-    bucket = [ts for ts in _STORE.get(key, []) if ts >= limit]
+    cutoff = now - window_seconds
+    bucket = [ts for ts in _STORE.get(key, []) if ts >= cutoff]
     _STORE[key] = bucket
     return bucket
 
 
 def get_rate_limit_key(identifier: str | None = None) -> str:
-    """Gera chave de rate limit por identificador ou sessão."""
     if identifier:
         return f"login:{str(identifier).strip().lower()}"
 
@@ -51,20 +51,29 @@ def get_rate_limit_key(identifier: str | None = None) -> str:
     return f"login:{str(session_user).strip().lower()}"
 
 
-def check_rate_limit(key: str, *, max_failures: int = MAX_FAILURES, window_seconds: int = WINDOW_SECONDS) -> bool:
-    """Retorna True se a chave ainda pode tentar login."""
-    global WINDOW_SECONDS
-    previous_window = WINDOW_SECONDS
-    WINDOW_SECONDS = window_seconds
-    try:
-        bucket = _prune(key)
-        return len(bucket) < max_failures
-    finally:
-        WINDOW_SECONDS = previous_window
+def check_rate_limit(
+    key: str,
+    *,
+    max_failures: int = MAX_FAILURES,
+    window_seconds: int = WINDOW_SECONDS,
+) -> tuple[bool, str, int]:
+    """Retorna (allowed, message, wait_secs)."""
+    now = time.time()
+    bucket = _prune(key, now, window_seconds=window_seconds)
+
+    if len(bucket) < max_failures:
+        return True, "", 0
+
+    oldest_relevant = bucket[0]
+    wait_secs = max(0, int(math.ceil((oldest_relevant + window_seconds) - now)))
+    msg = (
+        f"Muitas tentativas de login. Tente novamente em {wait_secs} "
+        f"segundo{'s' if wait_secs != 1 else ''}."
+    )
+    return False, msg, wait_secs
 
 
 def record_failure(key: str) -> int:
-    """Registra uma falha e retorna a quantidade de falhas válidas na janela."""
     bucket = _prune(key)
     bucket.append(time.time())
     _STORE[key] = bucket
@@ -72,5 +81,4 @@ def record_failure(key: str) -> int:
 
 
 def record_success(key: str) -> None:
-    """Limpa histórico de falhas após login bem-sucedido."""
     _STORE.pop(key, None)
