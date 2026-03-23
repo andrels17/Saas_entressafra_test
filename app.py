@@ -25,8 +25,8 @@ from src.auth.guard import require_login, require_role, require_tenant_selected
 from src.auth.permissions import can_view_all_data
 from src.auth.roles import Role
 from src.auth.scope import get_user_scope
-from src.auth.session import ensure_valid_token, hard_logout
-from src.auth.tenant import ensure_tenant_selected
+from src.auth.session import clear_derived_state, ensure_valid_token, hard_logout
+from src.auth.tenant import ensure_tenant_selected, refresh_current_role
 from src.utils.config import validate_config_or_stop
 
 # ── Utils ─────────────────────────────────────────────────────────────────────
@@ -68,6 +68,17 @@ def _escape(value: object) -> str:
     return html.escape(str(value or ""))
 
 
+def _normalize_role(value: object) -> str:
+    role = str(getattr(value, "value", value) or "").strip().lower()
+    aliases = {
+        "manager": "gestor",
+        "executor": "user",
+        "usuario": "user",
+        "member": "user",
+    }
+    return aliases.get(role, role)
+
+
 def _inject_sidebar_css() -> None:
     css_path = Path(__file__).parent / "src" / "ui" / "core" / "sidebar.css"
     st.markdown(f"<style>{css_path.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
@@ -83,21 +94,38 @@ def _safe_clear_streamlit_caches() -> None:
                 pass
 
 
+def _purge_login_screen_state() -> None:
+    """Evita herança de estado visual/derivado quando não há token ativo."""
+    clear_derived_state()
+    for key in (
+        "_identity_user_id",
+        "_role_identity_signature",
+        "_sidebar_badges_cache",
+        "_sidebar_rev_titulo",
+        "_sidebar_rev_semana",
+        "tenant_logo_url",
+    ):
+        st.session_state.pop(key, None)
+
+
 def _handle_identity_guard(current_uid: str) -> None:
     """Limpa estado derivado quando o usuário muda na mesma sessão do servidor."""
     prev_uid = st.session_state.get("_identity_user_id") or ""
     if prev_uid and current_uid and prev_uid != current_uid:
-        try:
-            from src.auth.session import clear_derived_state
-            clear_derived_state()
-        except Exception:
-            pass
+        clear_derived_state()
+        for key in (
+            "_role_identity_signature",
+            "_sidebar_badges_cache",
+            "_sidebar_rev_titulo",
+            "_sidebar_rev_semana",
+            "tenant_logo_url",
+        ):
+            st.session_state.pop(key, None)
         _safe_clear_streamlit_caches()
     st.session_state["_identity_user_id"] = current_uid
 
 
 def _token_expires_soon(token: str, buffer_seconds: int = 60) -> bool:
-    """Verifica localmente se o JWT expira em breve."""
     try:
         part = token.split(".")[1]
         part += "=" * (-len(part) % 4)
@@ -108,7 +136,6 @@ def _token_expires_soon(token: str, buffer_seconds: int = 60) -> bool:
 
 
 def _ensure_authenticated_session() -> bool:
-    """Prepara a sessão autenticada. Retorna False quando o fluxo já foi encerrado."""
     st.session_state.setdefault("sb_access_token", None)
     validate_config_or_stop()
     detect_screen_width()
@@ -116,6 +143,7 @@ def _ensure_authenticated_session() -> bool:
 
     token = st.session_state.get("sb_access_token")
     if not token:
+        _purge_login_screen_state()
         render_login()
         return False
 
@@ -129,7 +157,6 @@ def _ensure_authenticated_session() -> bool:
 
 
 def _resolve_scope(tenant_id: str, user_id: str, role: str) -> None:
-    """Obtém e armazena o escopo (dept/grupos) do usuário na sessão."""
     signature = f"{user_id}:{tenant_id}:{role}"
     prev_signature = st.session_state.get("_scope_signature")
 
@@ -153,16 +180,35 @@ def _resolve_scope(tenant_id: str, user_id: str, role: str) -> None:
 
 
 def _load_navigation_context() -> tuple[str, str, str]:
-    """Valida tenant/contexto e devolve role, user_id, tenant_id."""
+    """Valida tenant/contexto e devolve role, user_id, tenant_id já revalidados."""
     ensure_tenant_selected()
 
-    role = str(st.session_state.get("current_role", "") or "")
     user_id = str(st.session_state.get("sb_user_id", "") or "")
     tenant_id = str(st.session_state.get("current_tenant_id", "") or "")
 
     require_tenant_selected()
-    _resolve_scope(tenant_id, user_id, role)
-    return role, user_id, tenant_id
+
+    identity_signature = f"{user_id}:{tenant_id}"
+    prev_identity_signature = st.session_state.get("_role_identity_signature")
+    current_role = _normalize_role(st.session_state.get("current_role", ""))
+
+    must_refresh_role = (
+        not current_role
+        or prev_identity_signature != identity_signature
+    )
+
+    if must_refresh_role:
+        refreshed_role = _normalize_role(refresh_current_role())
+        if refreshed_role:
+            current_role = refreshed_role
+            st.session_state["current_role"] = current_role
+        st.session_state["_role_identity_signature"] = identity_signature
+        st.session_state.pop("_sidebar_badges_cache", None)
+    else:
+        st.session_state["current_role"] = current_role
+
+    _resolve_scope(tenant_id, user_id, current_role)
+    return current_role, user_id, tenant_id
 
 
 def _store_available_pages(role: str) -> tuple[list[str], list[str]]:
@@ -184,21 +230,31 @@ def _sync_current_page(pages: list[str], menu_pages: list[str]) -> str:
     return st.session_state["__current_page"]
 
 
-def _safe_sidebar_badges() -> dict[str, int]:
+def _safe_sidebar_badges(user_id: str, tenant_id: str, role: str) -> dict[str, int]:
+    sig = f"{user_id}:{tenant_id}:{role}"
+    now = time.time()
+    cached = st.session_state.get("_sidebar_badges_cache") or {}
+    if cached.get("sig") == sig and (now - float(cached.get("at", 0))) < 20:
+        return cached.get("data") or {"gestor_travados": 0, "apont_pendentes": 0, "auditoria_24h": 0}
+
     try:
-        return sidebar_badges()
+        data = sidebar_badges()
     except Exception:
-        return {"gestor_travados": 0, "apont_pendentes": 0, "auditoria_24h": 0}
+        data = {"gestor_travados": 0, "apont_pendentes": 0, "auditoria_24h": 0}
+
+    st.session_state["_sidebar_badges_cache"] = {"sig": sig, "at": now, "data": data}
+    return data
 
 
 def _render_sidebar_header(app_name: str, tenant_id: str, user_id: str, role: str) -> None:
     tenant_name, user_name = get_display_names(tenant_id, user_id)
     role_text = role_label(role)
-    role_norm = (role or "").strip().lower()
+    role_norm = _normalize_role(role)
     role_css = {
         "admin": "role-admin",
         "superadmin": "role-superadmin",
         "gestor": "role-gestor",
+        "supervisor": "role-gestor",
     }.get(role_norm, "role-user")
     avatar = (user_name[:1] or "U").upper()
     logo_url = st.session_state.get("tenant_logo_url")
@@ -336,7 +392,7 @@ def _render_sidebar(pages: list[str], current_page: str, role: str, user_id: str
     with st.sidebar:
         _inject_sidebar_css()
         _render_sidebar_header(st.secrets.get("APP_NAME", "AgroSafra"), tenant_id, user_id, role)
-        badges = _safe_sidebar_badges()
+        badges = _safe_sidebar_badges(user_id, tenant_id, role)
         _render_sidebar_logout(mobile)
         selected = _render_sidebar_navigation(pages, current_page, badges)
     return selected
@@ -365,11 +421,7 @@ def _render_mobile_nav(menu_pages: list[str], current: str) -> None:
 
     with c_out:
         if st.button("⎋", key="mob_logout_btn", help="Sair", use_container_width=True):
-            try:
-                hard_logout()
-            except Exception:
-                st.session_state.clear()
-                st.rerun()
+            hard_logout()
 
     if picked != current:
         st.session_state["__current_page"] = picked
