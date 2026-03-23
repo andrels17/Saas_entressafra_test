@@ -111,9 +111,7 @@ class ScheduleConfig:
 
     def descricao_humana(self) -> str:
         if self.periodicidade == "mensal":
-            return f"Mensal — todo dia {
-                self.dia_mes} às {
-                self.hora_envio} (Brasília)"
+            return f"Mensal — todo dia {self.dia_mes} às {self.hora_envio} (Brasília)"
         dia = DIAS_SEMANA_LABELS[self.dia_semana % 7]
         per = "Semanal" if self.periodicidade == "semanal" else "Quinzenal"
         return f"{per} — toda {dia} às {self.hora_envio} (Brasília)"
