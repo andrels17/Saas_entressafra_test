@@ -135,10 +135,7 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
         c.drawString(16 * mm, h - 14 * mm, payload.tenant_nome)
         c.setFont("Helvetica", 9)
         c.setFillColor(colors.Color(1, 1, 1, .6))
-        period = f"{
-            payload.revisao_titulo}  ·  Semana {
-            payload.semana_atual}/{
-            payload.semanas_total}"
+        period = f"{payload.revisao_titulo}  ·  Semana {payload.semana_atual}/{payload.semanas_total}"
         c.drawString(16 * mm, h - 20 * mm, period)
         # título da página
         c.setFillColor(FG)
@@ -150,8 +147,7 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
         c.drawString(
             16 * mm,
             h - 45 * mm,
-            f"Departamento: {
-                payload.departamento_nome}")
+            f"Departamento: {payload.departamento_nome}")
         # divider
         c.setStrokeColor(BORDER)
         c.setLineWidth(0.8)
@@ -173,8 +169,7 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
         c.drawRightString(
             w - 16 * mm,
             9 * mm,
-            f"{now_str}  ·  pág. {
-                page_no[0]}")
+            f"{now_str}  ·  pág. {page_no[0]}")
 
     def section_title(txt: str, y: float) -> float:
         c.setFillColor(FG)
@@ -829,12 +824,7 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
             c.setFillColor(colors.Color(0.5, 0.55, 0.62))
             c.setFont("Helvetica", 8)
             c.drawString(
-                16 * mm, h - 10 * mm, f"{
-                    payload.tenant_nome}  ›  {
-                    payload.departamento_nome}  ›  {
-                    payload.revisao_titulo}  ·  Semana {
-                    payload.semana_atual}/{
-                        payload.semanas_total}")
+                16 * mm, h - 10 * mm, f"{payload.tenant_nome}  ›  {payload.departamento_nome}  ›  {payload.revisao_titulo}  ·  Semana {payload.semana_atual}/{payload.semanas_total}")
 
             # Nome do grupo grande
             c.setFillColor(WHITE)
