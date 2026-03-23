@@ -142,7 +142,18 @@ def _nome_from(uid: str, profiles: dict, email: str) -> str:
 
 
 def get_recipient_groups(tenant_id: str) -> list[RecipientGroup]:
-    """Retorna grupos de departamento com destinatários tipo gestor."""
+    """Retorna grupos de departamento com destinatários.
+
+    Comportamento por tipo_relatorio:
+      - "gestor"    → recebe apenas os departamentos vinculados em
+                      tenant_user_departamentos.
+      - "executivo" → recebe TODOS os departamentos ativos do tenant
+                      (visão consolidada).
+      - "nenhum"    → excluído do envio.
+
+    Isso garante que usuários executivos recebam o relatório semanal
+    automaticamente, sem precisar de vínculo por departamento.
+    """
     svc = get_supabase_service()
     prefs = _fetch_email_prefs(svc, tenant_id)
 
@@ -194,7 +205,10 @@ def get_recipient_groups(tenant_id: str) -> list[RecipientGroup]:
         tu_rows = []
     user_roles = {r["user_id"]: r.get("role", "") for r in tu_rows}
 
-    dep_to_users: dict[str, set[str]] = {}
+    # Separa gestores (por departamento) e executivos (todos os deptos)
+    dep_to_gestores: dict[str, set[str]] = {}
+    exec_uids: set[str] = set()
+
     for lk in links:
         uid = lk.get("user_id")
         did = lk.get("departamento_id")
@@ -203,17 +217,27 @@ def get_recipient_groups(tenant_id: str) -> list[RecipientGroup]:
         role = user_roles.get(uid, "")
         tipo = _resolve_tipo(uid, role, prefs)
         if tipo == TIPO_GESTOR:
-            dep_to_users.setdefault(did, set()).add(uid)
+            dep_to_gestores.setdefault(did, set()).add(uid)
 
-    all_uids = {uid for uids in dep_to_users.values() for uid in uids}
+    # Executivos: varre tenant_users (não precisam de vínculo por depto)
+    for r in tu_rows:
+        uid = r.get("user_id", "")
+        role = r.get("role", "")
+        tipo = _resolve_tipo(uid, role, prefs)
+        if tipo == TIPO_EXECUTIVO:
+            exec_uids.add(uid)
+
+    all_uids = {uid for uids in dep_to_gestores.values()
+                for uid in uids} | exec_uids
     profiles = _fetch_profiles(svc, list(all_uids))
     emails = _fetch_user_emails(svc, all_uids)
 
     groups: list[RecipientGroup] = []
     for dep_id, dep_nome in dep_map.items():
-        uids = dep_to_users.get(dep_id, set())
         recipients = []
-        for uid in uids:
+
+        # Gestores vinculados a este departamento
+        for uid in dep_to_gestores.get(dep_id, set()):
             email = emails.get(uid, "")
             if not email:
                 continue
@@ -222,6 +246,21 @@ def get_recipient_groups(tenant_id: str) -> list[RecipientGroup]:
                 nome=_nome_from(uid, profiles, email),
                 tipo_relatorio=TIPO_GESTOR,
             ))
+
+        # Executivos recebem todos os departamentos
+        for uid in exec_uids:
+            email = emails.get(uid, "")
+            if not email:
+                continue
+            # Evita duplicar se o executivo também está vinculado como gestor
+            if any(r.user_id == uid for r in recipients):
+                continue
+            recipients.append(Recipient(
+                user_id=uid, email=email,
+                nome=_nome_from(uid, profiles, email),
+                tipo_relatorio=TIPO_EXECUTIVO,
+            ))
+
         if not recipients:
             continue
         groups.append(RecipientGroup(
