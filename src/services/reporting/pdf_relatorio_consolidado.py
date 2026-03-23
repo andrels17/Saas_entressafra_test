@@ -122,10 +122,7 @@ def build_consolidated_pdf(payload: RelatorioConsolidadoPayload) -> bytes:
         c.drawString(16 * mm, h - 14 * mm, payload.tenant_nome)
         c.setFont("Helvetica", 9)
         c.setFillColor(colors.Color(1, 1, 1, .6))
-        period = f"{
-            payload.revisao_titulo}  ·  Semana {
-            payload.semana_atual}/{
-            payload.semanas_total}"
+        period = f"{payload.revisao_titulo}  ·  Semana {payload.semana_atual}/{payload.semanas_total}"
         c.drawString(16 * mm, h - 20 * mm, period)
         c.setFillColor(FG)
         c.setFont("Helvetica-Bold", 15)
@@ -152,8 +149,7 @@ def build_consolidated_pdf(payload: RelatorioConsolidadoPayload) -> bytes:
         c.drawRightString(
             w - 16 * mm,
             9 * mm,
-            f"{now_str}  ·  pág. {
-                page_no[0]}")
+            f"{now_str}  ·  pág. {page_no[0]}")
 
     def section_title(txt: str, y: float) -> float:
         c.setFillColor(FG)
@@ -340,8 +336,7 @@ def build_consolidated_pdf(payload: RelatorioConsolidadoPayload) -> bytes:
     for dept in depts_sorted:
         new_page(
             dept.nome,
-            f"Detalhe do departamento · Semana {
-                payload.semana_atual}")
+            f"Detalhe do departamento · Semana {payload.semana_atual}")
         y = h - 52 * mm
 
         # KPIs do departamento
