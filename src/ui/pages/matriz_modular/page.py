@@ -7,7 +7,7 @@ import streamlit as st
 
 from src.ui.core.styles import page_header as _ph
 from src.utils.timezone import now_utc as _now_utc
-from src.ui.pages.matriz_runtime import _sector_set_open
+from src.ui.pages.matriz_runtime import sector_set_open as _sector_set_open
 
 from .context import build_group_context, handle_toolbar_reload, load_matrix_base_context
 from .header import render_group_header
