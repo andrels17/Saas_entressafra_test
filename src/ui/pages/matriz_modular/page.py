@@ -1,13 +1,15 @@
 """Renderização principal da Matriz Operacional (módulo modularizado)."""
 from __future__ import annotations
 
+import json
+
 import altair as alt
 import pandas as pd
 import streamlit as st
 
 from src.ui.core.styles import page_header as _ph
-from src.utils.timezone import now_utc as _now_utc
 from src.ui.pages.matriz_runtime import sector_set_open as _sector_set_open
+from src.utils.timezone import now_utc as _now_utc
 
 from .context import build_group_context, handle_toolbar_reload, load_matrix_base_context
 from .header import render_group_header
@@ -30,8 +32,6 @@ def _build_evo_chart_data(
     semanas_total: int,
     rev_start_iso: str,
 ) -> dict | None:
-    import json
-
     tarefas = json.loads(tarefas_json)
     df = pd.DataFrame(tarefas)
     if df.empty:
@@ -88,6 +88,88 @@ def _build_evo_chart_data(
         return {"mode": "semana_col", "cum_vals": cum_vals}
 
     return None
+
+
+@st.cache_data(ttl=90, show_spinner=False)
+def _build_cached_analytics(
+    *,
+    eqs_json: str,
+    setor_to_services_json: str,
+    task_map_json: str,
+    atraso_dias_json: str,
+    rev_start_iso: str,
+    pct_geral: float,
+    resumo_json: str,
+    semanas_total: int,
+    now_ref_iso: str,
+) -> dict:
+    eqs = json.loads(eqs_json)
+    setor_to_services = json.loads(setor_to_services_json)
+    task_map_raw = json.loads(task_map_json)
+    atraso_dias = json.loads(atraso_dias_json)
+    resumo_rows = json.loads(resumo_json)
+
+    task_map = {}
+    for key, value in task_map_raw.items():
+        if "||" in key:
+            eid, sid = key.split("||", 1)
+            task_map[(eid, sid)] = value
+
+    analytics_sector_intelligence = _build_group_sector_intelligence(
+        equipamentos=eqs,
+        setor_to_services=setor_to_services,
+        task_map=task_map,
+        atraso_dias=atraso_dias,
+        rev_start=pd.to_datetime(rev_start_iso, utc=True),
+    )
+    analytics_priority_sorted = sorted(analytics_sector_intelligence, key=_sector_priority_sort_key)
+
+    try:
+        elapsed_days = max(
+            0,
+            int(
+                (
+                    pd.Timestamp(now_ref_iso, tz="UTC")
+                    - pd.to_datetime(rev_start_iso, utc=True)
+                ).days
+            ),
+        )
+    except Exception:
+        elapsed_days = 0
+
+    current_week_no = int(elapsed_days // 7 + 1)
+    total_weeks_plan = int(semanas_total or current_week_no or 1)
+    expected_pct_now = round(min(100.0, (current_week_no / max(total_weeks_plan, 1)) * 100), 1)
+    progresso_atual_pct = float(pct_geral)
+
+    resumo_df = pd.DataFrame(resumo_rows)
+    critical_eq_count = int((resumo_df["%"] < 50).sum()) if not resumo_df.empty and "%" in resumo_df.columns else 0
+    no_start_eq_count = int((resumo_df["%"] == 0).sum()) if not resumo_df.empty and "%" in resumo_df.columns else 0
+
+    automation_insights = _build_automation_insights(
+        sector_intelligence=analytics_sector_intelligence,
+        progresso_atual=progresso_atual_pct,
+        meta_atual=expected_pct_now,
+        critical_eq_count=critical_eq_count,
+        no_start_eq_count=no_start_eq_count,
+    )
+
+    return {
+        "analytics_sector_intelligence": analytics_sector_intelligence,
+        "analytics_priority_sorted": analytics_priority_sorted,
+        "expected_pct_now": expected_pct_now,
+        "progresso_atual_pct": progresso_atual_pct,
+        "delta_vs_expected_now": round(progresso_atual_pct - expected_pct_now, 1),
+        "critical_eq_count": critical_eq_count,
+        "automation_insights": automation_insights,
+        "current_week_no": current_week_no,
+        "total_weeks_plan": total_weeks_plan,
+    }
+
+
+def _serialize_task_map(task_map) -> str:
+    payload = {f"{eid}||{sid}": value for (eid, sid), value in task_map.items()}
+    return json.dumps(payload, default=str, sort_keys=True)
 
 
 def _render_altair_evo(pc: pd.DataFrame, ps: pd.DataFrame, meta: pd.Series) -> None:
@@ -269,43 +351,17 @@ def _render_missing_services_alert(group_ctx):
 
 
 def _prepare_analytics(group_ctx):
-    analytics_sector_intelligence = _build_group_sector_intelligence(
-        equipamentos=group_ctx.eqs,
-        setor_to_services=group_ctx.setor_to_services,
-        task_map=group_ctx.task_map,
-        atraso_dias=group_ctx.group_atraso_dias,
-        rev_start=group_ctx.group_rev_start,
+    return _build_cached_analytics(
+        eqs_json=json.dumps(group_ctx.eqs, default=str, sort_keys=True),
+        setor_to_services_json=json.dumps(group_ctx.setor_to_services, default=str, sort_keys=True),
+        task_map_json=_serialize_task_map(group_ctx.task_map),
+        atraso_dias_json=json.dumps(group_ctx.group_atraso_dias, default=str, sort_keys=True),
+        rev_start_iso=str(group_ctx.group_rev_start),
+        pct_geral=float(group_ctx.pct_geral),
+        resumo_json=group_ctx.resumo_df.to_json(orient="records", date_format="iso") if not group_ctx.resumo_df.empty else "[]",
+        semanas_total=int((group_ctx.rev_row or {}).get("semanas_total") or 1),
+        now_ref_iso=str(pd.Timestamp(_now_utc()).floor("min")),
     )
-    analytics_priority_sorted = sorted(analytics_sector_intelligence, key=_sector_priority_sort_key)
-    try:
-        elapsed_days = max(0, int((pd.Timestamp(_now_utc()).tz_convert("UTC") - group_ctx.group_rev_start).days))
-    except Exception:
-        elapsed_days = 0
-    current_week_no = int(elapsed_days // 7 + 1)
-    total_weeks_plan = int((group_ctx.rev_row or {}).get("semanas_total") or current_week_no or 1)
-    expected_pct_now = round(min(100.0, (current_week_no / max(total_weeks_plan, 1)) * 100), 1)
-    progresso_atual_pct = float(group_ctx.pct_geral)
-    delta_vs_expected_now = round(progresso_atual_pct - expected_pct_now, 1)
-    critical_eq_count = int((group_ctx.resumo_df["%"] < 50).sum()) if not group_ctx.resumo_df.empty else 0
-    no_start_eq_count = int((group_ctx.resumo_df["%"] == 0).sum()) if not group_ctx.resumo_df.empty else 0
-    automation_insights = _build_automation_insights(
-        sector_intelligence=analytics_sector_intelligence,
-        progresso_atual=progresso_atual_pct,
-        meta_atual=expected_pct_now,
-        critical_eq_count=critical_eq_count,
-        no_start_eq_count=no_start_eq_count,
-    )
-    return {
-        "analytics_sector_intelligence": analytics_sector_intelligence,
-        "analytics_priority_sorted": analytics_priority_sorted,
-        "expected_pct_now": expected_pct_now,
-        "progresso_atual_pct": progresso_atual_pct,
-        "delta_vs_expected_now": delta_vs_expected_now,
-        "critical_eq_count": critical_eq_count,
-        "automation_insights": automation_insights,
-        "current_week_no": current_week_no,
-        "total_weeks_plan": total_weeks_plan,
-    }
 
 
 def _render_evolucao_tab(group_ctx, base_ctx):
@@ -365,10 +421,8 @@ def _render_evolucao_tab(group_ctx, base_ctx):
         st.info("Sem tarefas para esta revisão/grupo.")
         return
 
-    import json as _json
-
     evo = _build_evo_chart_data(
-        tarefas_json=_json.dumps(group_ctx.tarefas, default=str),
+        tarefas_json=json.dumps(group_ctx.tarefas, default=str),
         svc_ids_rank=tuple(svc_ids_rank),
         total_cells_rank=total_cells_rank,
         semanas_total=int((group_ctx.rev_row or {}).get("semanas_total") or 1),
@@ -493,7 +547,7 @@ def _render_analytics_tab(group_ctx, analytics_data):
 
     b1, b2, b3 = st.columns(3)
     with b1:
-        if st.button(f"Abrir setores críticos", key=f"mtz_auto_open_high_{group_ctx.grupo_id}", use_container_width=True):
+        if st.button("Abrir setores críticos", key=f"mtz_auto_open_high_{group_ctx.grupo_id}", use_container_width=True):
             opened = 0
             for item in analytics_data["analytics_priority_sorted"]:
                 if item.get("risk") == "alto":
@@ -506,7 +560,7 @@ def _render_analytics_tab(group_ctx, analytics_data):
                 st.toast("Nenhum setor crítico encontrado.")
             st.rerun()
     with b2:
-        if st.button(f"Abrir top 3 prioridades", key=f"mtz_auto_open_top3_{group_ctx.grupo_id}", use_container_width=True):
+        if st.button("Abrir top 3 prioridades", key=f"mtz_auto_open_top3_{group_ctx.grupo_id}", use_container_width=True):
             opened = 0
             for item in analytics_data["analytics_priority_sorted"][:3]:
                 _sector_set_open(group_ctx.revisao_id, group_ctx.grupo_id, str(item.get("setor_nome")), True)
@@ -516,7 +570,7 @@ def _render_analytics_tab(group_ctx, analytics_data):
                 st.session_state[f"_mtz_goto_matriz_{group_ctx.grupo_id}"] = True
             st.rerun()
     with b3:
-        if st.button(f"Fechar setores sob controle", key=f"mtz_auto_close_low_{group_ctx.grupo_id}", use_container_width=True):
+        if st.button("Fechar setores sob controle", key=f"mtz_auto_close_low_{group_ctx.grupo_id}", use_container_width=True):
             closed = 0
             for item in analytics_data["analytics_sector_intelligence"]:
                 if item.get("risk") == "baixo":
@@ -610,46 +664,21 @@ def _render_group_overview(base_ctx, group_ctx, header_placeholder) -> dict:
     return _prepare_analytics(group_ctx)
 
 
-def _get_tab_labels(can_edit: bool) -> list[str]:
-    labels = ["📊 Resumo", "⚙️ Matriz", "📈 Evolução", "🧠 Analytics", "⏱️ Tempos"]
+def _get_sections(can_edit: bool) -> list[str]:
+    sections = ["📊 Resumo", "⚙️ Matriz", "📈 Evolução", "🧠 Analytics", "⏱️ Tempos"]
     if can_edit:
-        labels.append("✏️ Editar célula")
-    labels.append("⬇️ Exportar")
-    return labels
+        sections.append("✏️ Editar célula")
+    sections.append("⬇️ Exportar")
+    return sections
 
 
-def _open_matrix_tab_if_needed(group_ctx) -> None:
-    goto_matriz = st.session_state.pop(f"_mtz_goto_matriz_{group_ctx.grupo_id}", False)
-    if goto_matriz:
-        st.markdown(
-            """<script>(function(){const tabs=window.parent.document.querySelectorAll('button[data-baseweb="tab"]'); if(tabs&&tabs.length>1){tabs[1].click();}})();</script>""",
-            unsafe_allow_html=True,
-        )
+def _section_state_key(group_ctx) -> str:
+    return f"mtz_active_section_{group_ctx.revisao_id}_{group_ctx.grupo_id}"
 
 
-def _unpack_tabs(tabs, can_edit: bool):
-    if can_edit:
-        tab_resumo, tab_matriz, tab_evolucao, tab_analytics, tab_tempos, tab_editor, tab_exportar = tabs
-        return {
-            "resumo": tab_resumo,
-            "matriz": tab_matriz,
-            "evolucao": tab_evolucao,
-            "analytics": tab_analytics,
-            "tempos": tab_tempos,
-            "editor": tab_editor,
-            "exportar": tab_exportar,
-        }
-
-    tab_resumo, tab_matriz, tab_evolucao, tab_analytics, tab_tempos, tab_exportar = tabs
-    return {
-        "resumo": tab_resumo,
-        "matriz": tab_matriz,
-        "evolucao": tab_evolucao,
-        "analytics": tab_analytics,
-        "tempos": tab_tempos,
-        "editor": None,
-        "exportar": tab_exportar,
-    }
+def _open_matrix_section_if_needed(group_ctx) -> None:
+    if st.session_state.pop(f"_mtz_goto_matriz_{group_ctx.grupo_id}", False):
+        st.session_state[_section_state_key(group_ctx)] = "⚙️ Matriz"
 
 
 def _sync_pdf_group_signature(base_ctx, group_ctx) -> None:
@@ -751,32 +780,65 @@ def _render_export_section(base_ctx, group_ctx) -> None:
     )
 
 
-def _render_tabs(base_ctx, group_ctx, analytics_data) -> None:
-    tab_map = _unpack_tabs(st.tabs(_get_tab_labels(base_ctx.can_edit)), base_ctx.can_edit)
-    _open_matrix_tab_if_needed(group_ctx)
-    _sync_pdf_group_signature(base_ctx, group_ctx)
+def _render_section_switcher(group_ctx, can_edit: bool) -> str:
+    options = _get_sections(can_edit)
+    state_key = _section_state_key(group_ctx)
+    st.session_state.setdefault(state_key, "⚙️ Matriz")
 
-    with tab_map["resumo"]:
+    current_value = st.session_state.get(state_key, "⚙️ Matriz")
+    if current_value not in options:
+        current_value = options[0]
+        st.session_state[state_key] = current_value
+
+    st.markdown("### Navegação rápida")
+    try:
+        picked = st.segmented_control(
+            "Seção",
+            options=options,
+            selection_mode="single",
+            default=current_value,
+            key=f"{state_key}_segmented",
+            label_visibility="collapsed",
+        )
+        if picked:
+            st.session_state[state_key] = picked
+    except Exception:
+        picked = st.radio(
+            "Seção",
+            options=options,
+            index=options.index(current_value),
+            horizontal=True,
+            key=f"{state_key}_radio",
+            label_visibility="collapsed",
+        )
+        st.session_state[state_key] = picked
+
+    return st.session_state[state_key]
+
+
+def _render_active_section(base_ctx, group_ctx, analytics_data, active_section: str) -> None:
+    if active_section == "📊 Resumo":
         _render_resumo_section(group_ctx)
-
-    with tab_map["matriz"]:
+    elif active_section == "⚙️ Matriz":
         _render_matriz_section(base_ctx, group_ctx)
-
-    with tab_map["evolucao"]:
+    elif active_section == "📈 Evolução":
         _render_evolucao_tab(group_ctx, base_ctx)
-
-    with tab_map["analytics"]:
+    elif active_section == "🧠 Analytics":
         _render_analytics_tab(group_ctx, analytics_data)
-
-    with tab_map["tempos"]:
+    elif active_section == "⏱️ Tempos":
         _render_tempos_section(base_ctx, group_ctx)
-
-    if tab_map["editor"] is not None:
-        with tab_map["editor"]:
-            _render_editor_section(base_ctx, group_ctx)
-
-    with tab_map["exportar"]:
+    elif active_section == "✏️ Editar célula":
+        _render_editor_section(base_ctx, group_ctx)
+    elif active_section == "⬇️ Exportar":
         _render_export_section(base_ctx, group_ctx)
+
+
+def _render_sections(base_ctx, group_ctx, analytics_data) -> None:
+    _open_matrix_section_if_needed(group_ctx)
+    _sync_pdf_group_signature(base_ctx, group_ctx)
+    active_section = _render_section_switcher(group_ctx, base_ctx.can_edit)
+    st.divider()
+    _render_active_section(base_ctx, group_ctx, analytics_data, active_section)
 
 
 def render_matriz() -> None:
@@ -794,7 +856,7 @@ def render_matriz() -> None:
             return
 
         analytics_data = _render_group_overview(base_ctx, group_ctx, header_placeholder)
-        _render_tabs(base_ctx, group_ctx, analytics_data)
+        _render_sections(base_ctx, group_ctx, analytics_data)
     except Exception as e:
         st.error("Erro ao renderizar a Matriz.")
         st.exception(e)
