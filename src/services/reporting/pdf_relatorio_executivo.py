@@ -222,11 +222,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     c.setFillColor(colors.Color(0.65, 0.70, 0.78))
     c.setFont('Helvetica', 10)
     c.drawString(
-        16 * mm, h - 22 * mm, f"{
-            payload.revisao_titulo}  ·  Semana {
-            payload.semana_atual} de {
-                payload.semanas_total}  ·  {
-                    payload.tenant_nome}  ·  {now}")
+        16 * mm, h - 22 * mm, f"{payload.revisao_titulo}  ·  Semana {payload.semana_atual} de {payload.semanas_total}  ·  {payload.tenant_nome}  ·  {now}")
 
     c.setFillColor(colors.Color(0.18, 0.21, 0.27))
     c.roundRect(
@@ -298,11 +294,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         c.setFillColor(MUTED)
         c.setFont('Helvetica', 7)
         c.drawString(
-            32 * mm, y - row_h * 0.72, f"{
-                dept.n_equipamentos} equip · {
-                dept.n_concluidos} OK · {
-                dept.n_travados} travados · {
-                    dept.n_sem_inicio} sem início")
+            32 * mm, y - row_h * 0.72, f"{dept.n_equipamentos} equip · {dept.n_concluidos} OK · {dept.n_travados} travados · {dept.n_sem_inicio} sem início")
         bar_x = w / 2
         bar_w = w - 32 * mm - (bar_x - 16 * mm) - 18 * mm
         pbar(bar_x, y - row_h + 3 * mm, bar_w, 5 * mm, dept.pct_geral)
@@ -516,8 +508,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         c.drawString(147 * mm, y - row_h * 0.5, label)
         pbar(164 * mm, y - row_h + 2.4 * mm, 23 * mm, 5 * mm,
              round((n_par / max(max_parados, 1)) * 100), color=bar_col)
-        impacto = f"{round((n_par / max(dept.n_equipamentos,
-                                        1)) * 100)}%" if dept.n_equipamentos else '0%'
+        impacto = f"{round((n_par / max(dept.n_equipamentos, 1)) * 100)}%" if dept.n_equipamentos else '0%'
         c.setFillColor(bar_col)
         c.setFont('Helvetica-Bold', 8.5)
         c.drawRightString(w - 18 * mm, y - row_h * 0.38, impacto)
