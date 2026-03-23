@@ -7,6 +7,7 @@ import streamlit as st
 
 from src.ui.components.forms import form_submit_button
 from src.ui.core.cache import bump_data_version
+from src.ui.core.cache_matrix import invalidate_matriz_cache
 from src.ui.pages.matriz_runtime import (
     bulk_update_tasks as _bulk_update_tasks,
     sector_is_open as _sector_is_open,
@@ -37,8 +38,6 @@ def _pct_bar_html(pct: int, height: int = 6) -> str:
         f'<div style="width:{pct}%;background:{tone};height:{height}px;border-radius:999px;transition:width .35s ease"></div>'
         '</div>'
     )
-
-
 
 
 def _resolve_task_row(sb, task_map, revisao_id, equipamento_id, servico_id):
@@ -73,6 +72,19 @@ def _resolve_task_row(sb, task_map, revisao_id, equipamento_id, servico_id):
     except Exception as _e:
         import logging; logging.getLogger("saas").debug("_get_or_create_task: %s", _e)
     return {}
+
+
+def _invalidate_after_matrix_write() -> None:
+    invalidate_matriz_cache()
+    try:
+        _load_payload.clear()
+    except Exception:
+        pass
+    try:
+        _group_kpis.clear()
+    except Exception:
+        pass
+
 
 def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_v, svc_names_v, eqs, task_map, eq_label_short, rev_start, atraso_dias, semana_lote):
     df, col_meta, obs_map = build_sector_frame(
@@ -162,9 +174,7 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
     with sv2:
         st.caption('Marque/desmarque etapas acima e clique em Salvar.')
     with sv3:
-        # ── K: Export por setor ──
         try:
-            import io
             exp_df = df_display.reset_index(drop=True).copy()
             for c in [c for c in exp_df.columns if c not in ('%', 'Equipamento', 'Status')]:
                 exp_df[c] = exp_df[c].apply(lambda v: 'OK' if bool(v) else '')
@@ -271,22 +281,11 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
                         + (f'  ·  {missing} não encontradas' if missing else '')
                     )
                     st.toast('✅ Alterações aplicadas com sucesso!')
-                    bump_data_version()
-                    try:
-                        _load_payload.clear()
-                    except Exception:
-                        pass  # cache.clear() pode falhar sem bloquear o fluxo
-                    try:
-                        _group_kpis.clear()
-                    except Exception:
-                        pass  # cache.clear() pode falhar sem bloquear o fluxo
-                    # ── X: limpa cache para rerun mostrar progresso atualizado ──
-                    st.session_state.pop("_mtz_payload_cache", None)
+                    _invalidate_after_matrix_write()
                     try:
                         nav.rerun_keep_menu()
                     except Exception:
                         st.rerun()
-
 
 
 def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_disp, semana_sugerida, group_rev_start, setor_to_services, tarefas, eqs, task_map, eq_label_short) -> None:

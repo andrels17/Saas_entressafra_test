@@ -6,8 +6,12 @@ from src.ui.components.confirmations import confirmation_panel
 from src.ui.components.forms import form_submit_button, validation_summary
 from src.utils import nav
 from src.utils.supabase_helpers import current_user_id
-from src.ui.core.cache import bump_data_version
+from src.ui.core.cache_matrix import invalidate_matriz_cache
 from src.ui.pages.matriz_runtime import risk_color as _risk_color
+
+
+def _invalidate_after_editor_write() -> None:
+    invalidate_matriz_cache()
 
 
 def render_editor_tab(
@@ -25,17 +29,12 @@ def render_editor_tab(
     st.markdown("### ✏️ Edição rápida por célula")
     st.caption("Selecione frota, setor e serviço para atualizar etapas, status e observação.")
 
-    # ── Painel de equipamentos ocultos ───────────────────────────────────────
-    # Fica no topo da aba para que gestores possam revelar equipamentos
-    # mesmo sem encontrá-los no seletor (ocultos não aparecem na lista)
     _ocultos = eq_ocultos_set or set()
     if _ocultos:
         with st.expander(f"👁 Equipamentos ocultos nesta revisão ({len(_ocultos)})", expanded=True):
             st.caption("Estes equipamentos não entram nos KPIs. Clique em Revelar quando pararem para manutenção.")
             try:
                 from src.utils.eq_oculto import revelar_equipamento
-                from src.ui.core.cache import bump_data_version
-                # Busca nomes dos equipamentos ocultos
                 _ocultos_rows = (
                     sb.table("equipamentos")
                     .select("id,frota,modelo")
@@ -55,7 +54,7 @@ def render_editor_tab(
                         if st.button("👁 Revelar", key=f"rev_oculto_{_eid}",
                                      use_container_width=True, type="primary"):
                             revelar_equipamento(sb, tenant_id, revisao_id, _eid)
-                            bump_data_version()
+                            _invalidate_after_editor_write()
                             st.toast(f"{_label} revelado ✅")
                             st.rerun()
             except Exception as _e:
@@ -93,10 +92,8 @@ def render_editor_tab(
         st.info("Selecione um setor e serviço válidos para continuar.")
         return
 
-    # Ocultar equipamento visível (sem etapas marcadas)
     try:
         from src.utils.eq_oculto import ocultar_equipamento
-        from src.utils.supabase_helpers import current_user_id
         _already_oculto = equip_sel in (_ocultos or set())
         _any_done_rows = (
             sb.table("tarefas_servico")
@@ -109,8 +106,7 @@ def render_editor_tab(
                          help="Oculta o equipamento dos KPIs enquanto não parar para manutenção."):
                 try:
                     ocultar_equipamento(sb, tenant_id, revisao_id, equip_sel, current_user_id())
-                    from src.ui.core.cache import bump_data_version
-                    bump_data_version()
+                    _invalidate_after_editor_write()
                     st.toast("Equipamento ocultado ✅ — será revelado automaticamente quando uma etapa for marcada.")
                     st.rerun()
                 except Exception as _write_exc:
@@ -123,7 +119,6 @@ def render_editor_tab(
                     )
                     st.error("Não foi possível ocultar o equipamento. Tente novamente.")
     except Exception as _setup_exc:
-        # Erros de setup (importação, query de verificação) — não exibir botão
         from src.utils.observability import log_error
         log_error(
             _setup_exc,
@@ -131,7 +126,6 @@ def render_editor_tab(
             extra={"equipamento_id": equip_sel},
         )
 
-    # Item 9: mostrar toast de confirmação após rerun pós-save
     _saved_key = f"mat_just_saved_{equip_sel}_{svc_sel}"
     if st.session_state.pop(_saved_key, False):
         st.toast("✅ Alterações salvas com sucesso!", icon="✅")
@@ -276,7 +270,7 @@ def render_editor_tab(
                         .eq("id", task_ed["id"])
                         .execute()
                     )
-                    bump_data_version()
+                    _invalidate_after_editor_write()
                     st.session_state[f"mat_just_saved_{equip_sel}_{svc_sel}"] = True
                     try:
                         nav.rerun_keep_menu()
@@ -299,7 +293,7 @@ def render_editor_tab(
                 try:
                     sb.table("tarefas_servico").update({"observacao": None}).eq("id", task_ed["id"]).execute()
                     st.toast("Observação removida.")
-                    bump_data_version()
+                    _invalidate_after_editor_write()
                     try:
                         nav.rerun_keep_menu()
                     except Exception:
@@ -341,9 +335,8 @@ def render_editor_tab(
                     updated_at = t.get("updated_at") or ""
                     updated_by = t.get("updated_by") or "—"
                     if updated_at:
-                        from src.utils.timezone import now_brt as _now_brt
-                        import pandas as pd
                         try:
+                            import pandas as pd
                             dt = pd.to_datetime(updated_at, utc=True).tz_convert("America/Sao_Paulo")
                             updated_at = dt.strftime("%d/%m/%Y %H:%M")
                         except Exception:
@@ -467,7 +460,6 @@ def render_bulk_editor(
     ):
         from datetime import datetime, timezone
         from src.ui.pages.matriz_runtime import bulk_update_tasks as _bulk_update_tasks
-        from src.utils.supabase_helpers import current_user_id
 
         now_iso = datetime.now(timezone.utc).isoformat()
         updates = []
@@ -513,14 +505,10 @@ def render_bulk_editor(
 
         if ok > 0:
             st.success(f"✅ {ok} equipamento(s) atualizados com sucesso!")
-            from src.ui.core.cache import bump_data_version
-            bump_data_version()
-            st.session_state.pop("_mtz_payload_cache", None)
+            _invalidate_after_editor_write()
             try:
-                from src.utils import nav
                 nav.rerun_keep_menu()
             except Exception:
-                import streamlit as _st
-                _st.rerun()
+                st.rerun()
         if failed:
             st.warning(f"⚠️ {failed} atualização(ões) falharam.")
