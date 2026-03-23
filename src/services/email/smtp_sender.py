@@ -96,8 +96,7 @@ def _load_config_from_secrets() -> SmtpConfig:
             "SMTP_PASSWORD") if not secrets.get(k)]
     if missing:
         raise ValueError(
-            f"Configuração SMTP incompleta. Adicione ao secrets.toml: {
-                ', '.join(missing)}")
+            f"Configuração SMTP incompleta. Adicione ao secrets.toml: {', '.join(missing)}")
 
     port = int(secrets["SMTP_PORT"])
     _true_vals = ("true", "1", "yes")
@@ -283,9 +282,7 @@ def build_html_body(
         bar_color = "#EF4444"
     now = fmt_brt("%d/%m/%Y")
     alerta_txt = (
-        f"{n_alertas} alerta{
-            's' if n_alertas != 1 else ''} " f"ativo{
-            's' if n_alertas != 1 else ''}") if n_alertas else "sem alertas"
+        f"{n_alertas} alerta{'s' if n_alertas != 1 else ''} " f"ativo{'s' if n_alertas != 1 else ''}") if n_alertas else "sem alertas"
     alerta_color = "#EF4444" if n_alertas else "#12B76A"
 
     return f"""<!DOCTYPE html>
