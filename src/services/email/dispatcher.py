@@ -204,7 +204,7 @@ def _load_equipamentos_ativos(
             sb.table("equipamentos")
             .select("id,frota,modelo,grupo_id")
             .eq("tenant_id", tenant_id)
-            .eq("ativo", True)
+            .eq("ativo", "true")
             .in_("grupo_id", grupo_ids)
             .execute()
             .data
