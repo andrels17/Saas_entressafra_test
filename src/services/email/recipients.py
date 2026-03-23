@@ -48,6 +48,52 @@ class RecipientGroup:
     dados: dict[str, Any] = field(default_factory=dict)
 
 
+def _load_active_departments_or_group_fallback(svc, tenant_id: str) -> tuple[list[dict[str, Any]], bool]:
+    """Carrega departamentos ativos.
+
+    Fallback operacional: alguns tenants antigos ainda não possuem registros em
+    `departamentos`, mas já trabalham apenas com `equip_grupos`. Nesse caso,
+    cada grupo ativo passa a ser tratado como um pseudo-departamento apenas para
+    fins de relatório/disparo.
+
+    Retorna (rows, using_group_fallback).
+    """
+    try:
+        deps = (
+            svc.table("departamentos")
+            .select("id,nome")
+            .eq("tenant_id", tenant_id)
+            .is_("ativo", "true")
+            .execute()
+            .data
+        ) or []
+        if deps:
+            return deps, False
+    except Exception as exc:
+        log.warning("_load_active_departments_or_group_fallback.departamentos tenant=%s: %s", tenant_id, exc)
+
+    try:
+        grupos = (
+            svc.table("equip_grupos")
+            .select("id,nome,ativo")
+            .eq("tenant_id", tenant_id)
+            .execute()
+            .data
+        ) or []
+        grupos = [g for g in grupos if g.get("ativo", True)]
+        if grupos:
+            log.warning(
+                "Tenant %s sem departamentos ativos; usando %d grupo(s) ativo(s) como fallback para e-mail.",
+                tenant_id,
+                len(grupos),
+            )
+            return [{"id": g["id"], "nome": g.get("nome") or "Grupo"} for g in grupos if g.get("id")], True
+    except Exception as exc:
+        log.warning("_load_active_departments_or_group_fallback.equip_grupos tenant=%s: %s", tenant_id, exc)
+
+    return [], False
+
+
 def _fetch_user_emails(svc, user_ids: set[str]) -> dict[str, str]:
     out: dict[str, str] = {}
     if not user_ids:
@@ -146,14 +192,7 @@ def get_recipient_groups(tenant_id: str) -> list[RecipientGroup]:
     svc = get_supabase_service()
     prefs = _fetch_email_prefs(svc, tenant_id)
 
-    deps = (
-        svc.table("departamentos")
-        .select("id,nome")
-        .eq("tenant_id", tenant_id)
-        .is_("ativo", "true")
-        .execute()
-        .data
-    ) or []
+    deps, using_group_fallback = _load_active_departments_or_group_fallback(svc, tenant_id)
     if not deps:
         return []
     dep_map = {d["id"]: d["nome"] for d in deps}
@@ -166,21 +205,36 @@ def get_recipient_groups(tenant_id: str) -> list[RecipientGroup]:
         .data
     ) or []
     dep_to_grupos: dict[str, list[str]] = {}
-    for g in grupos:
-        did = g.get("departamento_id")
-        if did:
-            dep_to_grupos.setdefault(did, []).append(g["id"])
+    if using_group_fallback:
+        for d in deps:
+            dep_to_grupos[d["id"]] = [d["id"]]
+    else:
+        for g in grupos:
+            did = g.get("departamento_id")
+            if did:
+                dep_to_grupos.setdefault(did, []).append(g["id"])
 
+    links: list[dict[str, Any]] = []
     try:
-        links = (
+        links.extend((
             svc.table("tenant_user_departamentos")
-            .select("user_id,departamento_id")
+            .select("user_id,departamento_id,grupo_id")
             .eq("tenant_id", tenant_id)
             .execute()
             .data
-        ) or []
+        ) or [])
     except Exception:
-        links = []
+        pass
+    try:
+        links.extend((
+            svc.table("tenant_user_scope")
+            .select("user_id,departamento_id,grupo_id")
+            .eq("tenant_id", tenant_id)
+            .execute()
+            .data
+        ) or [])
+    except Exception:
+        pass
 
     try:
         tu_rows = (
@@ -198,12 +252,14 @@ def get_recipient_groups(tenant_id: str) -> list[RecipientGroup]:
     for lk in links:
         uid = lk.get("user_id")
         did = lk.get("departamento_id")
-        if not (uid and did):
+        gid = lk.get("grupo_id")
+        alvo_id = gid if using_group_fallback and gid in dep_map else did
+        if not (uid and alvo_id):
             continue
         role = user_roles.get(uid, "")
         tipo = _resolve_tipo(uid, role, prefs)
         if tipo == TIPO_GESTOR:
-            dep_to_users.setdefault(did, set()).add(uid)
+            dep_to_users.setdefault(alvo_id, set()).add(uid)
 
     all_uids = {uid for uids in dep_to_users.values() for uid in uids}
     profiles = _fetch_profiles(svc, list(all_uids))
@@ -350,14 +406,7 @@ def _build_all_dept_groups(tenant_id: str) -> list[RecipientGroup]:
     """
     svc = get_supabase_service()
 
-    deps = (
-        svc.table("departamentos")
-        .select("id,nome")
-        .eq("tenant_id", tenant_id)
-        .is_("ativo", "true")
-        .execute()
-        .data
-    ) or []
+    deps, using_group_fallback = _load_active_departments_or_group_fallback(svc, tenant_id)
     if not deps:
         return []
 
@@ -369,10 +418,14 @@ def _build_all_dept_groups(tenant_id: str) -> list[RecipientGroup]:
         .data
     ) or []
     dep_to_grupos: dict[str, list[str]] = {}
-    for g in grupos:
-        did = g.get("departamento_id")
-        if did:
-            dep_to_grupos.setdefault(did, []).append(g["id"])
+    if using_group_fallback:
+        for d in deps:
+            dep_to_grupos[d["id"]] = [d["id"]]
+    else:
+        for g in grupos:
+            did = g.get("departamento_id")
+            if did:
+                dep_to_grupos.setdefault(did, []).append(g["id"])
 
     return [
         RecipientGroup(

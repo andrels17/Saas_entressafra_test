@@ -712,7 +712,9 @@ def dispatch_relatorio_semanal(
 
     if not groups and not all_dept_groups:
         result.skipped += 1
-        result.errors.append("Nenhum departamento ativo encontrado.")
+        result.errors.append(
+            "Nenhum departamento ou grupo ativo encontrado para gerar os relatórios."
+        )
         return result
 
     _log(f"Iniciando disparo para {len(groups)} departamento(s)…")
