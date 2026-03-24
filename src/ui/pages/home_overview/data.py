@@ -4,16 +4,33 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from src.utils.supabase_helpers import sb_for_user
+from src.db.supabase_client import get_supabase_anon
 from src.utils.observability import log_error
+
+
+def _sb(token: str):
+    """Cliente Supabase autenticado pelo token da sessão.
+
+    Aceita o token como argumento explícito para que funções @st.cache_data
+    possam usar _token (excluído da chave de cache pelo underscore), evitando
+    compartilhamento de cache entre usuários diferentes do mesmo tenant.
+    """
+    sb = get_supabase_anon()
+    if token:
+        try:
+            sb.postgrest.auth(token)
+        except Exception:
+            pass
+    return sb
 
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_revision(
         tenant_id: str,
         ver: str = "0",
-        rev_id: str | None = None) -> dict | None:
-    sb = sb_for_user()
+        rev_id: str | None = None,
+        _token: str = "") -> dict | None:
+    sb = _sb(_token)
     try:
         revs = (
             sb.table("revisoes")
@@ -27,52 +44,54 @@ def load_revision(
     except Exception as exc:
         log_error(exc, context="home_overview.load_revision", table="revisoes")
         return None
-        return None
     for r in revs:
-        if str(
-            r.get(
-                "status",
-                "")).lower() in (
-            "ativa",
-            "em_andamento",
-            "andamento",
-            "aberta",
-                "open"):
+        if str(r.get("status", "")).lower() in (
+            "ativa", "em_andamento", "andamento", "aberta", "open"
+        ):
             return r
-    return revs[0]
+    return revs[0] if revs else None
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def load_groups(tenant_id: str, ver: str = "0") -> list[dict]:
-    return (
-        sb_for_user()
-        .table("equip_grupos")
-        .select("id,nome,departamento_id,ativo")
-        .eq("tenant_id", tenant_id)
-        .eq("ativo", True)
-        .execute()
-        .data
-    ) or []
+def load_groups(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]:
+    try:
+        return (
+            _sb(_token)
+            .table("equip_grupos")
+            .select("id,nome,departamento_id,ativo")
+            .eq("tenant_id", tenant_id)
+            .eq("ativo", True)
+            .execute()
+            .data
+        ) or []
+    except Exception as exc:
+        log_error(exc, context="home_overview.load_groups", table="equip_grupos")
+        return []
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def load_depts(tenant_id: str, ver: str = "0") -> list[dict]:
-    return (
-        sb_for_user()
-        .table("departamentos")
-        .select("id,nome,ativo")
-        .eq("tenant_id", tenant_id)
-        .execute()
-        .data
-    ) or []
+def load_depts(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]:
+    try:
+        return (
+            _sb(_token)
+            .table("departamentos")
+            .select("id,nome,ativo")
+            .eq("tenant_id", tenant_id)
+            .execute()
+            .data
+        ) or []
+    except Exception as exc:
+        log_error(exc, context="home_overview.load_depts", table="departamentos")
+        return []
 
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_snapshots(
         tenant_id: str,
         revisao_id: str,
-        ver: str = "0") -> pd.DataFrame:
-    sb = sb_for_user()
+        ver: str = "0",
+        _token: str = "") -> pd.DataFrame:
+    sb = _sb(_token)
     try:
         rows = (
             sb.table("kpi_snapshots")
@@ -87,6 +106,9 @@ def load_snapshots(
     except Exception as exc:
         log_error(exc, context="home_overview.load_snapshots", table="kpi_snapshots")
         rows = []
+
+    df = pd.DataFrame(rows)
+    for c in ["week_number", "pct", "done_steps", "expected_steps", "backlog_steps"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
     return df
@@ -96,8 +118,9 @@ def load_snapshots(
 def load_group_sector_view(
         tenant_id: str,
         revisao_id: str,
-        ver: str = "0") -> dict:
-    sb = sb_for_user()
+        ver: str = "0",
+        _token: str = "") -> dict:
+    sb = _sb(_token)
     try:
         rows = (
             sb.table("vw_revisao_grupo_setores")
@@ -122,10 +145,10 @@ def load_group_sector_view(
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def snapshots_supported(tenant_id: str = "", ver: str = "0") -> bool:
+def snapshots_supported(tenant_id: str = "", ver: str = "0", _token: str = "") -> bool:
     """Verifica se a tabela kpi_snapshots existe — cacheado por 5 minutos."""
     try:
-        sb_for_user().table("kpi_snapshots").select("id").limit(1).execute()
+        _sb(_token).table("kpi_snapshots").select("id").limit(1).execute()
         return True
     except Exception:
         return False
@@ -133,6 +156,7 @@ def snapshots_supported(tenant_id: str = "", ver: str = "0") -> bool:
 
 def insert_snapshot(tenant_id: str, revisao_id: str,
                     week_number: int, df: pd.DataFrame) -> tuple[bool, str]:
+    from src.utils.supabase_helpers import sb_for_user
     if df is None or df.empty:
         return False, "Sem dados"
     sb = sb_for_user()
