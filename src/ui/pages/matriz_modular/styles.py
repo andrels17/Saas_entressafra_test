@@ -122,6 +122,45 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
   min-height:40px;
   font-weight:700;
 }
+
+.mtz-quicknav-shell{margin:8px 0 14px 0;padding:14px 14px 10px 14px;border-radius:20px;
+border:1px solid rgba(255,255,255,.08);
+background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015));
+box-shadow:0 12px 28px rgba(0,0,0,.18);}
+.mtz-quicknav-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+.mtz-quicknav-title{font-size:1rem;font-weight:800;letter-spacing:-.01em;color:#fff;margin:0}
+.mtz-quicknav-sub{font-size:.84rem;color:rgba(255,255,255,.68);margin-top:2px}
+.mtz-quicknav-active{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:999px;
+border:1px solid rgba(52,211,153,.18);background:rgba(16,185,129,.08);font-size:.82rem;color:rgba(255,255,255,.86)}
+.mtz-quicknav-active strong{color:#ecfdf5}
+.mtz-quicknav-shell [data-testid="stSegmentedControl"]{background:transparent;padding:0;margin:2px 0 6px 0}
+.mtz-quicknav-shell [data-testid="stSegmentedControl"] [role="radiogroup"],
+.mtz-quicknav-shell [data-testid="stRadio"] [role="radiogroup"]{
+display:flex;flex-wrap:wrap;gap:10px;background:transparent;border:none;padding:0}
+.mtz-quicknav-shell [data-testid="stSegmentedControl"] label,
+.mtz-quicknav-shell [data-testid="stRadio"] label{
+min-height:46px;border-radius:14px !important;padding:0 14px !important;
+border:1px solid rgba(255,255,255,.09) !important;
+background:linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.015)) !important;
+box-shadow:inset 0 1px 0 rgba(255,255,255,.04);transition:all .18s ease;}
+.mtz-quicknav-shell [data-testid="stSegmentedControl"] label:hover,
+.mtz-quicknav-shell [data-testid="stRadio"] label:hover{
+transform:translateY(-1px);border-color:rgba(255,255,255,.18) !important;background:rgba(255,255,255,.06) !important}
+.mtz-quicknav-shell [data-testid="stSegmentedControl"] label p,
+.mtz-quicknav-shell [data-testid="stRadio"] label p{
+font-size:.90rem !important;font-weight:700 !important;color:rgba(255,255,255,.88) !important}
+.mtz-quicknav-shell [data-testid="stSegmentedControl"] label[data-selected="true"],
+.mtz-quicknav-shell [data-testid="stRadio"] label:has(input:checked){
+background:linear-gradient(180deg, rgba(16,185,129,.22), rgba(5,150,105,.14)) !important;
+border-color:rgba(52,211,153,.34) !important;
+box-shadow:0 10px 20px rgba(6,95,70,.18), inset 0 1px 0 rgba(255,255,255,.08) !important;}
+.mtz-quicknav-shell [data-testid="stSegmentedControl"] label[data-selected="true"] p,
+.mtz-quicknav-shell [data-testid="stRadio"] label:has(input:checked) p{color:#ecfdf5 !important}
+.mtz-quicknav-foot{margin-top:4px;padding-top:8px;border-top:1px solid rgba(255,255,255,.06);
+font-size:.82rem;color:rgba(255,255,255,.70)}
+.mtz-quicknav-foot strong{color:#fff}
+.mtz-quicknav-foot span{display:inline-block;margin:0 8px;color:rgba(255,255,255,.34)}
+
 /* Painéis e inteligência */
 .mtz-risk-badges{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 8px 0}
 .mtz-risk-badge{display:inline-flex;align-items:center;padding:4px 9px;border-radius:999px;font-size:.78rem;font-weight:600;border:1px solid rgba(255,255,255,.08)}
