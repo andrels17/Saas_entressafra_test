@@ -383,30 +383,3 @@ def _pct_bar_html(pct: int, height: int = 6) -> str:
     )
 
 
-
-/* ===== Navegação rápida compacta ===== */
-.mtz-quick-nav-compact-label{
-  margin:6px 0 6px 0;
-  font-size:.84rem;
-  font-weight:700;
-  letter-spacing:.02em;
-  text-transform:uppercase;
-  color:rgba(255,255,255,.72);
-}
-.mtz-quick-nav-compact{
-  margin:0 0 10px 0;
-}
-.mtz-quick-nav-compact [data-testid="stSegmentedControl"],
-.mtz-quick-nav-compact [role="radiogroup"]{
-  margin-top:0;
-}
-.mtz-quick-nav-compact [data-testid="stSegmentedControl"] label,
-.mtz-quick-nav-compact [role="radio"]{
-  min-height:34px !important;
-}
-.mtz-section-wrap{
-  margin-top:2px;
-}
-
-/* chip de foco removido da UI */
-.mtz-focus-row,.mtz-focus-chip,.mtz-focus-chip-wrap,.mtz-matrix-gap{display:none !important;}

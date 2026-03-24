@@ -727,78 +727,34 @@ def _render_analytics_tab(group_ctx, analytics_data):
         st.info("Sem dados de equipamentos para análise.")
     else:
         critical_equipment_df = group_ctx.resumo_df.copy()
-        if "%" not in critical_equipment_df.columns:
-            st.info("Sem coluna de percentual disponível para gerar o gráfico.")
-        else:
-            critical_equipment_df["%"] = pd.to_numeric(critical_equipment_df["%"], errors="coerce")
-            if "Concluidos" in critical_equipment_df.columns:
-                critical_equipment_df["Concluidos"] = pd.to_numeric(critical_equipment_df["Concluidos"], errors="coerce").fillna(0)
-            else:
-                critical_equipment_df["Concluidos"] = 0
-            if "Total" in critical_equipment_df.columns:
-                critical_equipment_df["Total"] = pd.to_numeric(critical_equipment_df["Total"], errors="coerce").fillna(0)
-            else:
-                critical_equipment_df["Total"] = 0
-
-            critical_equipment_df = critical_equipment_df.dropna(subset=["%"]).copy()
-            if critical_equipment_df.empty:
-                st.info("Sem dados suficientes para gerar o gráfico de equipamentos.")
-            else:
-                critical_equipment_df["Risco"] = critical_equipment_df["%"].apply(
-                    lambda v: "alto" if float(v) < 50 else ("medio" if float(v) < 80 else "baixo")
-                )
-                critical_equipment_df["Equipamento"] = critical_equipment_df.get("Equipamento", "").astype(str)
-                critical_equipment_df = critical_equipment_df.sort_values(
-                    by=["%", "Concluidos"], ascending=[True, True]
-                ).head(10)[["Equipamento", "%", "Concluidos", "Total", "Risco"]]
-
-                chart_df = critical_equipment_df.copy()
-                chart_df["cor"] = chart_df["Risco"].map({"alto": "#EF4444", "medio": "#F59E0B", "baixo": "#12B76A"})
-                chart_df["label_pct"] = chart_df["%"].round(0).astype(int).astype(str) + "%"
-
-                if chart_df.empty:
-                    st.info("Sem dados suficientes para gerar o gráfico de equipamentos.")
-                else:
-                    try:
-                        bars = (
-                            alt.Chart(chart_df)
-                            .mark_bar(height=20, cornerRadiusEnd=4)
-                            .encode(
-                                x=alt.X("%:Q", scale=alt.Scale(domain=[0, 100]), axis=alt.Axis(title="% concluído", grid=True, gridOpacity=0.15)),
-                                y=alt.Y("Equipamento:N", sort=alt.SortField(field="%", order="ascending"), axis=alt.Axis(title=None, labelLimit=240)),
-                                color=alt.Color("cor:N", scale=None, legend=None),
-                                tooltip=[
-                                    alt.Tooltip("Equipamento:N", title="Equipamento"),
-                                    alt.Tooltip("%:Q", title="% concluído", format=".0f"),
-                                    alt.Tooltip("Concluidos:Q", title="Concluídos", format=".0f"),
-                                    alt.Tooltip("Total:Q", title="Total", format=".0f"),
-                                    alt.Tooltip("Risco:N", title="Risco"),
-                                ],
-                            )
-                        )
-                        labels = (
-                            alt.Chart(chart_df)
-                            .mark_text(align="left", baseline="middle", dx=6)
-                            .encode(
-                                x=alt.X("%:Q"),
-                                y=alt.Y("Equipamento:N", sort=alt.SortField(field="%", order="ascending")),
-                                text="label_pct:N",
-                            )
-                        )
-                        bar = (
-                            (bars + labels)
-                            .properties(height=max(180, len(chart_df) * 34))
-                            .configure_view(strokeWidth=0)
-                            .configure_axis(domainOpacity=0.3)
-                        )
-                        st.altair_chart(bar, use_container_width=True)
-                    except Exception:
-                        fallback_df = chart_df.set_index("Equipamento")[["%"]]
-                        st.bar_chart(fallback_df, use_container_width=True)
-
-                    with st.expander("📋 Ver tabela detalhada", expanded=False):
-                        st.dataframe(critical_equipment_df, use_container_width=True, hide_index=True)
-
+        critical_equipment_df["Risco"] = critical_equipment_df["%"].apply(
+            lambda v: "alto" if int(v) < 50 else ("medio" if int(v) < 80 else "baixo")
+        )
+        critical_equipment_df = critical_equipment_df.sort_values(by=["%", "Concluidos"], ascending=[True, True]).head(10)[
+            ["Equipamento", "%", "Concluidos", "Total", "Risco"]
+        ]
+        chart_df = critical_equipment_df[["Equipamento", "%", "Risco"]].copy()
+        chart_df["cor"] = chart_df["Risco"].map({"alto": "#EF4444", "medio": "#F59E0B", "baixo": "#12B76A"})
+        bar = (
+            alt.Chart(chart_df)
+            .mark_bar(height=18, cornerRadiusEnd=3)
+            .encode(
+                x=alt.X("%:Q", scale=alt.Scale(domain=[0, 100]), axis=alt.Axis(title="% concluído", grid=True, gridOpacity=0.15)),
+                y=alt.Y("Equipamento:N", sort=alt.SortField(field="%", order="ascending"), axis=alt.Axis(title=None, labelLimit=220)),
+                color=alt.Color("cor:N", scale=None, legend=None),
+                tooltip=[
+                    alt.Tooltip("Equipamento:N", title="Equipamento"),
+                    alt.Tooltip("%:Q", title="% concluído", format=".0f"),
+                    alt.Tooltip("Risco:N", title="Risco"),
+                ],
+            )
+            .properties(height=max(180, len(chart_df) * 32))
+            .configure_view(strokeWidth=0)
+            .configure_axis(domainOpacity=0.3)
+        )
+        st.altair_chart(bar, use_container_width=True)
+        with st.expander("📋 Ver tabela detalhada", expanded=False):
+            st.dataframe(critical_equipment_df, use_container_width=True, hide_index=True)
 
     st.markdown("#### Lead time médio entre etapas")
     if group_ctx.view_agg.empty:
@@ -983,8 +939,7 @@ def _render_section_switcher(group_ctx, can_edit: bool) -> str:
     if st.session_state.get(radio_key) not in options:
         st.session_state[radio_key] = current_value
 
-    st.markdown('<div class="mtz-quick-nav-compact-label">Navegação rápida</div>', unsafe_allow_html=True)
-    st.markdown('<div class="mtz-quick-nav-compact">', unsafe_allow_html=True)
+    st.markdown("### Navegação rápida")
     try:
         picked = st.segmented_control(
             "Seção",
@@ -1007,7 +962,6 @@ def _render_section_switcher(group_ctx, can_edit: bool) -> str:
         if picked != st.session_state.get(state_key):
             st.session_state[state_key] = picked
 
-    st.markdown('</div>', unsafe_allow_html=True)
     return st.session_state.get(state_key, current_value)
 
 
@@ -1034,6 +988,11 @@ def _render_sections(base_ctx, group_ctx, analytics_data) -> None:
     _open_matrix_section_if_needed(group_ctx)
     _sync_pdf_group_signature(base_ctx, group_ctx)
     active_section = _render_section_switcher(group_ctx, base_ctx.can_edit)
+    st.markdown(
+        f'<div class="mtz-focus-row"><span class="mtz-focus-chip">● Em foco: {active_section}</span></div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="mtz-matrix-gap"></div>', unsafe_allow_html=True)
     _render_active_section(base_ctx, group_ctx, analytics_data, active_section)
 
 
