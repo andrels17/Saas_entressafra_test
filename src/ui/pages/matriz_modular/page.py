@@ -163,6 +163,38 @@ def _build_cached_analytics(
     }
 
 
+@st.cache_data(ttl=90, show_spinner=False)
+def _build_revision_comparison_data(
+    *,
+    tenant_id: str,
+    revisoes_json: str,
+    eqs_json: str,
+    all_services_json: str,
+    current_title: str,
+    current_revisao_id: str,
+) -> list[dict]:
+    # Placeholder cache shell: actual DB fetch happens outside; this cache stabilizes final table building.
+    revisoes = json.loads(revisoes_json)
+    eqs = json.loads(eqs_json)
+    all_services = json.loads(all_services_json)
+    total = max(len(eqs) * len(all_services) * 3, 1)
+    rows = []
+    for rev in revisoes:
+        rid = str(rev.get("id") or "")
+        rtit = rev.get("titulo") or rid[:8]
+        rows.append(
+            {
+                "Revisão": rtit,
+                "Status": rev.get("status") or "?",
+                "% Concluído": 0,
+                "Etapas concluídas": 0,
+                "Total esperado": total,
+                "Atual": "◄ atual" if rtit in (current_title, current_revisao_id) or rid == current_revisao_id else "",
+            }
+        )
+    return rows
+
+
 def _serialize_task_map(task_map) -> str:
     payload = {f"{eid}||{sid}": value for (eid, sid), value in task_map.items()}
     return json.dumps(payload, default=str, sort_keys=True)
@@ -252,7 +284,7 @@ def _invalidate_matrix_perf_cache() -> None:
     _group_cache_store().clear()
     _resumo_cache_store().clear()
     st.session_state.pop("_mtz_prewarm_sig", None)
-    for fn in (_build_evo_chart_data, _build_cached_analytics):
+    for fn in (_build_evo_chart_data, _build_cached_analytics, _build_revision_comparison_data):
         try:
             fn.clear()
         except Exception:
@@ -278,42 +310,6 @@ def _build_default_evo_inputs(group_ctx):
     return tuple(svc_ids_rank), total_cells_rank, str(rev_start)
 
 
-def _prefetch_next_group(base_ctx, current_group_ctx) -> None:
-    try:
-        grupos = base_ctx.grupos or []
-        if len(grupos) < 2:
-            return
-
-        current_id = str(getattr(current_group_ctx, "grupo_id", "") or st.session_state.get("matriz_grupo_id") or "")
-        idx = next((i for i, g in enumerate(grupos) if str(g.get("id")) == current_id), None)
-        if idx is None:
-            return
-
-        next_idx = (idx + 1) % len(grupos)
-        next_group = grupos[next_idx]
-        next_group_id = str(next_group.get("id") or "")
-        if not next_group_id or next_group_id == current_id:
-            return
-
-        target_sig = (
-            str(getattr(base_ctx, "tenant_id", "") or ""),
-            str(st.session_state.get("matriz_revisao_id") or ""),
-            next_group_id,
-            str(st.session_state.get("data_version", "0")),
-        )
-        if target_sig in _group_cache_store():
-            return
-
-        original_group_id = st.session_state.get("matriz_grupo_id")
-        st.session_state["matriz_grupo_id"] = next_group_id
-        try:
-            _get_cached_group_context(base_ctx)
-        finally:
-            st.session_state["matriz_grupo_id"] = original_group_id
-    except Exception:
-        pass
-
-
 def _prewarm_matrix_caches(base_ctx, group_ctx) -> None:
     sig = _group_signature_from_ctx(base_ctx, group_ctx)
     if st.session_state.get("_mtz_prewarm_sig") == sig:
@@ -334,6 +330,19 @@ def _prewarm_matrix_caches(base_ctx, group_ctx) -> None:
                 semanas_total=int((group_ctx.rev_row or {}).get("semanas_total") or 1),
                 rev_start_iso=rev_start_iso,
             )
+    except Exception:
+        pass
+
+    try:
+        revisoes = [r for r in base_ctx.revisoes if r.get("id")][:6]
+        _build_revision_comparison_data(
+            tenant_id=str(base_ctx.tenant_id),
+            revisoes_json=json.dumps(revisoes, default=str, sort_keys=True),
+            eqs_json=json.dumps(group_ctx.eqs, default=str, sort_keys=True),
+            all_services_json=json.dumps(group_ctx.all_services, default=str, sort_keys=True),
+            current_title=str(group_ctx.titulo),
+            current_revisao_id=str(group_ctx.revisao_id),
+        )
     except Exception:
         pass
 
@@ -533,6 +542,52 @@ def _prepare_analytics(base_ctx, group_ctx):
     )
 
 
+def _load_revision_completion_rows(base_ctx, group_ctx) -> list[dict]:
+    revisoes = [r for r in base_ctx.revisoes if r.get("id")][:6]
+    skeleton = _build_revision_comparison_data(
+        tenant_id=str(base_ctx.tenant_id),
+        revisoes_json=json.dumps(revisoes, default=str, sort_keys=True),
+        eqs_json=json.dumps(group_ctx.eqs, default=str, sort_keys=True),
+        all_services_json=json.dumps(group_ctx.all_services, default=str, sort_keys=True),
+        current_title=str(group_ctx.titulo),
+        current_revisao_id=str(group_ctx.revisao_id),
+    )
+    skeleton_by_title = {row["Revisão"]: row for row in skeleton}
+    rows = []
+
+    eq_ids = [e["id"] for e in group_ctx.eqs]
+    total = max(len(group_ctx.eqs) * len(group_ctx.all_services) * 3, 1)
+
+    for rev in revisoes:
+        rid = rev.get("id")
+        rtit = rev.get("titulo") or str(rid)[:8]
+        row = dict(skeleton_by_title.get(rtit) or {})
+        try:
+            trows = (
+                base_ctx.sb.table("tarefas_servico")
+                .select("etapa_d,etapa_r,etapa_m")
+                .eq("tenant_id", base_ctx.tenant_id)
+                .eq("revisao_id", rid)
+                .in_("equipamento_id", eq_ids)
+                .execute()
+                .data
+            ) or []
+            done = sum(int(bool(t.get("etapa_d"))) + int(bool(t.get("etapa_r"))) + int(bool(t.get("etapa_m"))) for t in trows)
+            row.update(
+                {
+                    "Status": rev.get("status") or "?",
+                    "% Concluído": round((done / total) * 100),
+                    "Etapas concluídas": done,
+                    "Total esperado": total,
+                }
+            )
+        except Exception:
+            pass
+        rows.append(row)
+
+    return rows
+
+
 def _render_evolucao_tab(group_ctx, base_ctx):
     st.markdown("### Evolução semanal")
     st.caption("Acompanhe o ritmo de conclusão semana a semana versus a meta linear.")
@@ -640,49 +695,17 @@ def _render_evolucao_tab(group_ctx, base_ctx):
     st.markdown("#### Comparativo entre revisões do mesmo grupo")
     st.caption("Compare o progresso desta revisão com revisões anteriores do mesmo grupo.")
     try:
-        all_revs = [r for r in base_ctx.revisoes if r.get("id")]
-        if len(all_revs) <= 1:
+        comp_rows = _load_revision_completion_rows(base_ctx, group_ctx)
+        if not comp_rows:
             st.info("Apenas uma revisão encontrada — sem dados para comparar.")
             return
-        comp_rows = []
-        for rev in all_revs[:6]:
-            rid = rev.get("id")
-            rtit = rev.get("titulo") or str(rid)[:8]
-            try:
-                trows = (
-                    base_ctx.sb.table("tarefas_servico")
-                    .select("etapa_d,etapa_r,etapa_m")
-                    .eq("tenant_id", base_ctx.tenant_id)
-                    .eq("revisao_id", rid)
-                    .in_("equipamento_id", [e["id"] for e in group_ctx.eqs])
-                    .execute()
-                    .data
-                ) or []
-                done = sum(int(bool(t.get("etapa_d"))) + int(bool(t.get("etapa_r"))) + int(bool(t.get("etapa_m"))) for t in trows)
-                total = max(len(group_ctx.eqs) * len(group_ctx.all_services) * 3, 1)
-                comp_rows.append(
-                    {
-                        "Revisão": rtit,
-                        "Status": rev.get("status") or "?",
-                        "% Concluído": round((done / total) * 100),
-                        "Etapas concluídas": done,
-                        "Total esperado": total,
-                    }
-                )
-            except Exception:
-                pass
-        if comp_rows:
-            comp_df = pd.DataFrame(comp_rows)
-            comp_df["Atual"] = comp_df.apply(
-                lambda r: "◄ atual" if r["Revisão"] in (group_ctx.titulo, group_ctx.revisao_id) else "",
-                axis=1,
-            )
-            st.dataframe(
-                comp_df,
-                use_container_width=True,
-                hide_index=True,
-                column_config={"% Concluído": st.column_config.ProgressColumn("% Concluído", min_value=0, max_value=100)},
-            )
+        comp_df = pd.DataFrame(comp_rows)
+        st.dataframe(
+            comp_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={"% Concluído": st.column_config.ProgressColumn("% Concluído", min_value=0, max_value=100)},
+        )
     except Exception as comp_err:
         st.caption(f"Comparativo não disponível: {comp_err}")
 
@@ -986,6 +1009,7 @@ def _render_section_switcher(group_ctx, can_edit: bool) -> str:
 
 
 def _render_active_section(base_ctx, group_ctx, analytics_data, active_section: str) -> None:
+    st.markdown('<div class="mtz-section-wrap">', unsafe_allow_html=True)
     if active_section == "📊 Resumo":
         _render_resumo_section(group_ctx)
     elif active_section == "⚙️ Matriz":
@@ -1000,6 +1024,7 @@ def _render_active_section(base_ctx, group_ctx, analytics_data, active_section: 
         _render_editor_section(base_ctx, group_ctx)
     elif active_section == "⬇️ Exportar":
         _render_export_section(base_ctx, group_ctx)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def _render_sections(base_ctx, group_ctx, analytics_data) -> None:
