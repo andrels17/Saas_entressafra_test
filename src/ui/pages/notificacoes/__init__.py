@@ -42,7 +42,7 @@ def render_notificacoes() -> None:
         return
 
     # ── Thresholds ───────────────────────────────────────────────────────────
-    with st.expander("⚙️ Configurar thresholds", expanded=False):
+    with st.expander("Configurar thresholds", expanded=False):
         tc1, tc2 = st.columns(2)
         with tc1:
             dias_travado = st.number_input(
@@ -106,13 +106,13 @@ def render_notificacoes() -> None:
 
     # ── Abas ──────────────────────────────────────────────────────────────────
     tab_trav, tab_sem, tab_par, tab_risc, tab_grupos, tab_export, tab_email = st.tabs([
-        f"🚫 Travados ({len(alertas['travados'])})",
-        f"⬜ Sem início ({len(alertas['sem_inicio'])})",
-        f"⏸ Parados ({len(alertas['sem_update'])})",
-        f"⚠️ Risco prazo ({len(alertas['risco_prazo'])})",
-        "📊 Por grupo",
-        "⬇️ Exportar",
-        "📧 Enviar por e-mail",
+        f"Travados ({len(alertas['travados'])})",
+        f"Sem início ({len(alertas['sem_inicio'])})",
+        f"Parados ({len(alertas['sem_update'])})",
+        f"Risco prazo ({len(alertas['risco_prazo'])})",
+        "Por grupo",
+        "Exportar",
+        "Enviar por e-mail",
     ])
 
     with tab_trav:   fragment_travados(alertas["travados"])
@@ -123,7 +123,7 @@ def render_notificacoes() -> None:
 
     with tab_export:
         st.markdown("### ⬇️ Exportações")
-        st.caption("Baixe os alertas em formato CSV por categoria ou PDF consolidado.")
+        st.caption("Baixe os alertas em formato CSV por categoria ou PDF.")
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("**CSV por categoria**")
@@ -148,12 +148,12 @@ def render_notificacoes() -> None:
                 download_action("⬇️ Baixar PDF completo", data=pdf_bytes,
                                 file_name=f"alertas_{titulo_rev}.pdf",
                                 mime="application/pdf", key="ntf_pdf_dl", type="primary",
-                                help="PDF consolidado com todas as categorias de alerta.")
+                                help="PDF com todas as categorias de alerta.")
             except ImportError:
                 st.info("Instale `reportlab` no requirements.txt para habilitar exportação em PDF.")
 
     with tab_email:
-        st.markdown("### 📧 Envio de Relatório por E-mail")
+        st.markdown("### Envio de Relatório por E-mail")
         st.caption("Envie manualmente ou configure o agendamento automático por departamento.")
         st.divider()
         fragment_disparo_manual(tenant_id, revisao_id, is_admin,
