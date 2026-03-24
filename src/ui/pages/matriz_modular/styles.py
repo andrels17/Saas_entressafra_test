@@ -143,7 +143,7 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 .mtz-quick-nav-title{font-size:1.18rem;font-weight:800;letter-spacing:-.02em;color:#fff;line-height:1.1;margin:0}
 .mtz-quick-nav-sub{font-size:.92rem;color:rgba(255,255,255,.70);margin-top:4px}
 .mtz-focus-chip-wrap{display:flex;justify-content:flex-end;align-items:flex-start;height:100%}
-.mtz-focus-chip{display:inline-flex;align-items:center;justify-content:center;min-height:38px;padding:0 14px;border-radius:999px;border:1px solid rgba(16,185,129,.24);background:linear-gradient(180deg, rgba(16,185,129,.10), rgba(16,185,129,.05));color:#ecfdf5;font-size:.88rem;font-weight:700;white-space:nowrap;box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+.mtz-focus-chip{display:inline-flex;align-items:center;justify-content:center;min-height:38px;padding:0 14px;border-radius:999px;border:1px solid rgba(16,185,129,.24);background:linear-gradient(180deg, rgba(16,185,129,.10), rgba(16,185,129,.05));color:#ecfdf5;font-size:.88rem;font-weight:700;white-space:nowrap;box-shadow:inset 0 1px 0 rgba(255,255,255,.04);transition:transform .22s ease, box-shadow .22s ease, border-color .22s ease, background .22s ease, filter .22s ease;cursor:default}
 .mtz-toolbar-inline [data-testid="stButton"] button{min-height:40px;font-weight:700}
 .mtz-toolbar-inline [data-testid="stNumberInput"] input{min-height:40px}
 .mtz-toolbar-inline [data-testid="stTextInput"] input{min-height:40px}
@@ -281,12 +281,12 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 }
 
 /* micro feedback no chip */
-.mtz-focus-chip{
-  transition:all .25s ease;
-}
 .mtz-focus-chip:hover{
-  transform:translateY(-1px);
-  box-shadow:0 6px 14px rgba(16,185,129,.18);
+  transform:translateY(-2px) scale(1.015);
+  border-color:rgba(52,211,153,.42);
+  background:linear-gradient(180deg, rgba(16,185,129,.18), rgba(16,185,129,.08));
+  box-shadow:0 10px 24px rgba(16,185,129,.20), inset 0 1px 0 rgba(255,255,255,.06);
+  filter:brightness(1.06);
 }
 
 /* efeito leve na matriz */
@@ -296,42 +296,6 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 [data-testid="stDataFrame"] div[data-testid="cell"]:hover{
   transform:scale(1.03);
   filter:brightness(1.05);
-  z-index:2;
-}
-
-
-/* ===== Transição suave entre abas ===== */
-.mtz-section-wrap{
-  animation: mtzFadeSlide .35s cubic-bezier(.22,.61,.36,1);
-  will-change: opacity, transform;
-}
-@keyframes mtzFadeSlide{
-  from{
-    opacity:0;
-    transform:translateY(10px) scale(.995);
-    filter:blur(2px);
-  }
-  to{
-    opacity:1;
-    transform:translateY(0) scale(1);
-    filter:blur(0);
-  }
-}
-
-/* microinteração do chip de foco */
-.mtz-focus-chip{transition:all .25s ease}
-.mtz-focus-chip:hover{
-  transform:translateY(-1px);
-  box-shadow:0 6px 14px rgba(16,185,129,.18);
-}
-
-/* hover leve nas células da matriz */
-[data-testid="stDataFrame"] div[data-testid="cell"]{
-  transition:transform .15s ease, filter .15s ease;
-}
-[data-testid="stDataFrame"] div[data-testid="cell"]:hover{
-  transform:scale(1.03);
-  filter:brightness(1.03);
   z-index:2;
 }
 
