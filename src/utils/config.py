@@ -130,16 +130,23 @@ def validate_config_or_stop() -> None:
 
     Deve ser chamado no início do app.py, antes de qualquer lógica de negócio.
     Avisos são exibidos mas não param a aplicação.
+
+    Otimização: a validação de st.secrets é estática (não muda em runtime),
+    por isso é executada apenas uma vez por sessão. Reruns subsequentes
+    retornam imediatamente sem releitura de disco ou iteração sobre listas.
     """
     import streamlit as st
+
+    # Já validado nesta sessão — retorno imediato sem nenhuma leitura
+    if st.session_state.get("_config_validated"):
+        return
 
     errors, warnings = validate_config()
 
     # Avisos: exibe uma vez por sessão
-    if warnings and not st.session_state.get("_config_warnings_shown"):
+    if warnings:
         for w in warnings:
             st.warning(w)
-        st.session_state["_config_warnings_shown"] = True
 
     # Erros críticos: para a aplicação com mensagem clara
     if errors:
@@ -155,6 +162,9 @@ def validate_config_or_stop() -> None:
             "📖 Consulte a documentação de configuração no `README.md` do projeto.\n\n"
             "Após corrigir, reinicie o aplicativo.")
         st.stop()
+
+    # Marca como validado para não repetir nos próximos reruns
+    st.session_state["_config_validated"] = True
 # ── Limites de consultas paginadas ──────────────────────────────────────────
 # Use fetch_all() de src.utils.fetching para queries que podem exceder estes limites
 MAX_QUERY_ROWS = 5_000    # limite padrão para queries simples

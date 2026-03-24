@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 from src.ui.core.login import render_login
 from src.ui.core.page_registry import NAV_CONFIG, PageKey, get_menu_pages, get_pages_for_role
 from src.ui.core.setup_wizard import render_setup_wizard
-from src.ui.core.sidebar_counts import sidebar_badges
+from src.ui.core.sidebar_counts import get_sidebar_badges
 from src.ui.core.sidebar_display import get_display_names, role_label
 from src.ui.core.styles import inject_global_css, inject_mobile_css
 
@@ -105,12 +105,17 @@ def _purge_login_screen_state() -> None:
     for key in (
         "_identity_user_id",
         "_role_identity_signature",
-        "_sidebar_badges_cache",
         "_sidebar_rev_titulo",
         "_sidebar_rev_semana",
         "tenant_logo_url",
+        "_token_last_remote_verify",
     ):
         st.session_state.pop(key, None)
+    # Invalida cache de badges para este usuário
+    try:
+        get_sidebar_badges.clear()
+    except Exception:
+        pass
 
 
 def _handle_identity_guard(current_uid: str) -> None:
@@ -120,10 +125,10 @@ def _handle_identity_guard(current_uid: str) -> None:
         clear_derived_state()
         for key in (
             "_role_identity_signature",
-            "_sidebar_badges_cache",
             "_sidebar_rev_titulo",
             "_sidebar_rev_semana",
             "tenant_logo_url",
+            "_token_last_remote_verify",
         ):
             st.session_state.pop(key, None)
         _safe_clear_streamlit_caches()
@@ -208,7 +213,10 @@ def _load_navigation_context() -> tuple[str, str, str]:
             current_role = refreshed_role
             st.session_state["current_role"] = current_role
         st.session_state["_role_identity_signature"] = identity_signature
-        st.session_state.pop("_sidebar_badges_cache", None)
+        try:
+            get_sidebar_badges.clear()
+        except Exception:
+            pass
     else:
         st.session_state["current_role"] = current_role
 
@@ -236,19 +244,18 @@ def _sync_current_page(pages: list[str], menu_pages: list[str]) -> str:
 
 
 def _safe_sidebar_badges(user_id: str, tenant_id: str, role: str) -> dict[str, int]:
-    sig = f"{user_id}:{tenant_id}:{role}"
-    now = time.time()
-    cached = st.session_state.get("_sidebar_badges_cache") or {}
-    if cached.get("sig") == sig and (now - float(cached.get("at", 0))) < 20:
-        return cached.get("data") or {"gestor_travados": 0, "apont_pendentes": 0, "auditoria_24h": 0}
+    """Retorna badges da sidebar, delegando ao cache @st.cache_data(ttl=60) de get_sidebar_badges.
 
+    A versão anterior duplicava a lógica de TTL com um cache manual de 20s no
+    session_state, mais restritivo e redundante. Agora confia inteiramente no
+    TTL declarado na função subjacente, eliminando a competição entre os dois
+    mecanismos e o overhead de serializar/desserializar do session_state a cada rerun.
+    """
     try:
-        data = sidebar_badges()
+        token = st.session_state.get("sb_access_token", "")
+        return get_sidebar_badges(tenant_id, token)
     except Exception:
-        data = {"gestor_travados": 0, "apont_pendentes": 0, "auditoria_24h": 0}
-
-    st.session_state["_sidebar_badges_cache"] = {"sig": sig, "at": now, "data": data}
-    return data
+        return {"gestor_travados": 0, "apont_pendentes": 0, "auditoria_24h": 0}
 
 
 def _render_sidebar_header(app_name: str, tenant_id: str, user_id: str, role: str) -> None:

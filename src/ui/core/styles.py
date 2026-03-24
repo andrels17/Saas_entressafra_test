@@ -73,25 +73,33 @@ _STATUS_HEX: dict[str, str] = {
 _CSS_DIR = Path(__file__).parent
 
 
-def _load_css(filename: str) -> str:
+@st.cache_resource
+def _load_css_cached(filename: str) -> str:
+    """Lê CSS do disco uma única vez e mantém em cache de recurso.
+
+    @st.cache_resource persiste entre reruns e entre sessões no mesmo
+    processo — ideal para arquivos estáticos que não mudam em runtime.
+    """
     return (_CSS_DIR / filename).read_text(encoding="utf-8")
+
+
+def _load_css(filename: str) -> str:
+    return _load_css_cached(filename)
 
 
 def inject_global_css() -> None:
     st.markdown(
-        f"<style>{
-            _load_css('global.css')}</style>",
+        f"<style>{_load_css('global.css')}</style>",
         unsafe_allow_html=True)
 
 
 def inject_mobile_css() -> None:
-    """CSS para uso em celular (chao de fabrica).
+    """CSS para uso em celular (chão de fábrica).
 
     Objetivos: alvos de toque maiores, menos densidade, sidebar escondida.
     """
     st.markdown(
-        f"<style>{
-            _load_css('mobile.css')}</style>",
+        f"<style>{_load_css('mobile.css')}</style>",
         unsafe_allow_html=True)
 
 

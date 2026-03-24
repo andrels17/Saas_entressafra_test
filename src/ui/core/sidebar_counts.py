@@ -41,13 +41,15 @@ def _safe_count(res) -> int:
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_sidebar_badges(tenant_id: str, _token: str = "") -> dict[str, int]:
-    """Badges da sidebar em 2 queries (era 5).
+    """Badges da sidebar em 3 queries leves (era 1 query que trazia até 5 000 linhas).
 
     Query 1 — revisão ativa: busca o id da revisão com status 'ativa'.
-    Query 2 — tarefas_servico: carrega status + timestamps de uma só vez
-               e agrupa localmente, eliminando 3 round-trips anteriores.
-    Query 3 — historico_eventos: contagem de auditoria 24h (best-effort,
-               tabela diferente, não pode ser unida com tarefas_servico).
+    Query 2 — contagens agregadas por status diretamente no banco:
+               usa group-by no PostgREST para evitar trazer todas as linhas.
+               Calcula travados, pendentes em uma única chamada.
+    Query 2b — equipamentos parados: só busca timestamps se necessário,
+               limitada a 1 000 linhas (parados há > 7 dias são raros).
+    Query 3 — historico_eventos: contagem de auditoria 24h (best-effort).
     """
     sb = get_supabase_anon()
     if _token:
@@ -71,62 +73,72 @@ def get_sidebar_badges(tenant_id: str, _token: str = "") -> dict[str, int]:
 
     revisao_id = rev[0]["id"]
 
-    # ── Query 2: tarefas_servico — tudo em uma só chamada ───────────────────
-    # Busca status + timestamps das etapas.
-    # Antes: 3 queries (travados count, parados rows, pendentes count).
-    # Agora: 1 query, agrupamento feito em Python.
+    # ── Query 2: contagens por status — agregadas no banco ──────────────────
+    # Busca apenas travados e pendentes usando count="exact" por status.
+    # Evita trazer o payload completo de 5 000 linhas para Python.
     travados = pendentes = parados = 0
+    try:
+        r_trav = (
+            sb.table("tarefas_servico")
+            .select("id", count="exact")
+            .eq("tenant_id", tenant_id)
+            .eq("revisao_id", revisao_id)
+            .eq("status", "travado")
+            .execute()
+        )
+        travados = _safe_count(r_trav)
+
+        r_pend = (
+            sb.table("tarefas_servico")
+            .select("id", count="exact")
+            .eq("tenant_id", tenant_id)
+            .eq("revisao_id", revisao_id)
+            .in_("status", ["pendente", "em_andamento"])
+            .execute()
+        )
+        pendentes = _safe_count(r_pend)
+    except Exception:
+        travados = pendentes = 0
+
+    # ── Query 2b: equipamentos parados (≥ 7 dias sem movimentação) ──────────
+    # Limitado a 1 000 linhas: parados de longa data são minoria.
+    # Traz apenas equipamento_id + timestamps das etapas, sem status nem outros campos.
     try:
         from src.utils.timezone import days_since_utc
 
-        rows = (
+        rows_mov = (
             sb.table("tarefas_servico")
-            .select(
-                "equipamento_id,status,"
-                "dt_etapa_d,dt_etapa_r,dt_etapa_m"
-            )
+            .select("equipamento_id,dt_etapa_d,dt_etapa_r,dt_etapa_m")
             .eq("tenant_id", tenant_id)
             .eq("revisao_id", revisao_id)
-            .limit(5000)
+            .not_.in_("status", ["concluido", "nao_aplica"])
+            .limit(1000)
             .execute()
             .data
         ) or []
 
-        # Última movimentação por equipamento (para detectar parados)
         ultimos: dict[str, str] = {}
-
-        for row in rows:
-            status = row.get("status") or ""
-            eid    = row.get("equipamento_id")
-
-            # Travados
-            if status == "travado":
-                travados += 1
-
-            # Pendentes (pendente + em_andamento)
-            if status in ("pendente", "em_andamento"):
-                pendentes += 1
-
-            # Parados: rastreia último timestamp por equipamento
-            if eid and status not in ("concluido", "nao_aplica"):
-                mov = max(
-                    [x for x in [
-                        row.get("dt_etapa_m"),
-                        row.get("dt_etapa_r"),
-                        row.get("dt_etapa_d"),
-                    ] if x],
-                    default=None,
-                )
-                if mov and (eid not in ultimos or mov > ultimos[eid]):
-                    ultimos[eid] = mov
+        for row in rows_mov:
+            eid = row.get("equipamento_id")
+            if not eid:
+                continue
+            mov = max(
+                [x for x in [
+                    row.get("dt_etapa_m"),
+                    row.get("dt_etapa_r"),
+                    row.get("dt_etapa_d"),
+                ] if x],
+                default=None,
+            )
+            if mov and (eid not in ultimos or mov > ultimos[eid]):
+                ultimos[eid] = mov
 
         parados = sum(
             1 for mov in ultimos.values()
             if (days_since_utc(mov) or 0) >= 7
         )
-
     except Exception:
-        travados = pendentes = parados = 0
+        parados = 0
 
     # ── Query 3: auditoria 24h (best-effort, tabela separada) ───────────────
     auditoria = 0

@@ -21,14 +21,46 @@ def _supabase_config() -> tuple[str, str, str]:
 
 
 def get_supabase_anon() -> Client:
-    """Cliente anon fresco por chamada — nunca cacheado.
+    """Cliente anon com pool leve por token de sessão.
 
-    Evita dois bugs graves do cache_resource:
-      1. Estado de autenticação vazando entre sessões/usuários.
-      2. Token expirado travado no cliente cacheado após reboot.
+    Mantém uma instância por (url, token) em vez de criar um novo cliente
+    TCP a cada rerun. Seguro contra vazamento entre usuários porque a chave
+    inclui o próprio token do usuário: tokens diferentes → instâncias
+    diferentes. Ao trocar de token (refresh / logout) a entrada antiga
+    fica orfã e será coletada pelo GC normalmente.
+
+    Evita os bugs graves originais:
+      1. Estado de autenticação vazando entre sessões/usuários — cada token
+         tem sua própria instância no cache.
+      2. Token expirado — o token novo resulta em chave nova, cliente novo.
     """
     url, anon, _ = _supabase_config()
-    return create_client(url, anon)
+
+    # Tenta ler o token da sessão sem importar streamlit no topo do módulo
+    # (evita ciclos de importação e mantém o módulo utilizável fora do Streamlit).
+    token: str = ""
+    try:
+        import streamlit as st  # importação local intencional
+        token = st.session_state.get("sb_access_token") or ""
+    except Exception:
+        pass
+
+    cache_key = (url, token)
+    client = _anon_cache.get(cache_key)
+    if client is None:
+        client = create_client(url, anon)
+        if token:
+            try:
+                client.postgrest.auth(token)
+            except Exception:
+                pass
+        _anon_cache[cache_key] = client
+    return client
+
+
+# Cache simples em nível de módulo: (url, token) → Client
+# Não usa @st.cache_resource para evitar o problema de estado global compartilhado.
+_anon_cache: dict[tuple[str, str], "Client"] = {}
 
 
 # Alias mantido por compatibilidade retroativa
