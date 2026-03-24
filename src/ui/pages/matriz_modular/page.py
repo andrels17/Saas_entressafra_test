@@ -22,118 +22,6 @@ from .insights import (
 )
 from .selection import render_selection_screen
 from .styles import _inject_css
-
-
-def _inject_matriz_micro_interactions() -> None:
-    st.markdown(
-        """
-        <style>
-        .mtz-nav-shell{
-            position:relative;
-            padding: .25rem 0 0;
-        }
-        .mtz-nav-caption{
-            margin:-.35rem 0 .85rem;
-            color: rgba(226,232,240,.78);
-            font-size:.92rem;
-        }
-        .mtz-section-wrap{
-            position:relative;
-            border:1px solid rgba(16,185,129,.10);
-            border-radius:20px;
-            padding:1rem 1rem .85rem;
-            background: linear-gradient(180deg, rgba(6,20,18,.42) 0%, rgba(3,11,10,.22) 100%);
-            box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
-            animation: mtzFadeSlide .26s ease-out;
-            will-change: transform, opacity;
-        }
-        .mtz-section-wrap::before{
-            content:"";
-            position:absolute;
-            inset:0 0 auto 0;
-            height:1px;
-            background: linear-gradient(90deg, rgba(16,185,129,0), rgba(16,185,129,.35), rgba(16,185,129,0));
-            pointer-events:none;
-        }
-        .mtz-section-chip{
-            display:inline-flex;
-            align-items:center;
-            gap:.45rem;
-            margin:.1rem 0 .8rem;
-            padding:.36rem .72rem;
-            border-radius:999px;
-            background: rgba(15,23,42,.42);
-            border:1px solid rgba(16,185,129,.18);
-            color:#dff7eb;
-            font-size:.82rem;
-            line-height:1;
-            box-shadow: 0 8px 20px rgba(0,0,0,.14);
-            animation: mtzFadeSlide .22s ease-out;
-        }
-        .mtz-section-chip-dot{
-            width:.48rem;
-            height:.48rem;
-            border-radius:999px;
-            background: linear-gradient(180deg, rgba(52,211,153,.95), rgba(16,185,129,.68));
-            box-shadow: 0 0 0 4px rgba(16,185,129,.10);
-            flex:0 0 auto;
-        }
-        .mtz-heatmap-note{
-            margin:.15rem 0 .9rem;
-            padding:.72rem .9rem;
-            border-radius:16px;
-            border:1px solid rgba(255,255,255,.05);
-            background: linear-gradient(90deg, rgba(239,68,68,.10), rgba(245,158,11,.08), rgba(16,185,129,.08));
-            color: rgba(226,232,240,.88);
-            font-size:.9rem;
-        }
-        .mtz-heatmap-scale{
-            display:flex;
-            align-items:center;
-            gap:.5rem;
-            margin-top:.5rem;
-        }
-        .mtz-heatmap-bar{
-            flex:1;
-            height:.42rem;
-            border-radius:999px;
-            background: linear-gradient(90deg, rgba(239,68,68,.78) 0%, rgba(245,158,11,.72) 45%, rgba(250,204,21,.68) 68%, rgba(16,185,129,.72) 100%);
-            box-shadow: inset 0 0 0 1px rgba(255,255,255,.05);
-        }
-        .mtz-heatmap-labels{
-            display:flex;
-            justify-content:space-between;
-            gap:1rem;
-            font-size:.78rem;
-            color: rgba(226,232,240,.72);
-            margin-top:.35rem;
-        }
-        @keyframes mtzFadeSlide{
-            from{ opacity:0; transform: translateY(10px);}
-            to{ opacity:1; transform: translateY(0);}
-        }
-        @media (prefers-reduced-motion: reduce){
-            .mtz-section-wrap,.mtz-section-chip{ animation:none !important; }
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def _render_matriz_visual_hint(active_section: str) -> None:
-    if active_section != "Matriz":
-        return
-    st.markdown(
-        """
-        <div class="mtz-heatmap-note">
-            <strong>Leitura visual da matriz</strong> · tons mais quentes indicam maior atraso/risco e tons frios indicam avanço maior.
-            <div class="mtz-heatmap-scale"><div class="mtz-heatmap-bar"></div></div>
-            <div class="mtz-heatmap-labels"><span>Crítico</span><span>Atenção</span><span>Estável</span><span>Avançado</span></div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 from .summary_tab import render_summary_tab
 
 
@@ -1051,9 +939,7 @@ def _render_section_switcher(group_ctx, can_edit: bool) -> str:
     if st.session_state.get(radio_key) not in options:
         st.session_state[radio_key] = current_value
 
-    st.markdown('<div class="mtz-nav-shell">', unsafe_allow_html=True)
     st.markdown("### Navegação rápida")
-    st.markdown('<div class="mtz-nav-caption">Troque de área sem perder contexto da matriz.</div>', unsafe_allow_html=True)
     try:
         picked = st.segmented_control(
             "Seção",
@@ -1076,16 +962,10 @@ def _render_section_switcher(group_ctx, can_edit: bool) -> str:
         if picked != st.session_state.get(state_key):
             st.session_state[state_key] = picked
 
-    st.markdown('</div>', unsafe_allow_html=True)
     return st.session_state.get(state_key, current_value)
 
 
 def _render_active_section(base_ctx, group_ctx, analytics_data, active_section: str) -> None:
-    st.markdown(
-        f'<div class="mtz-section-chip"><span class="mtz-section-chip-dot"></span>Em foco: {active_section}</div>',
-        unsafe_allow_html=True,
-    )
-    _render_matriz_visual_hint(active_section)
     st.markdown('<div class="mtz-section-wrap">', unsafe_allow_html=True)
     if active_section == "Resumo":
         _render_resumo_section(group_ctx)
@@ -1108,14 +988,17 @@ def _render_sections(base_ctx, group_ctx, analytics_data) -> None:
     _open_matrix_section_if_needed(group_ctx)
     _sync_pdf_group_signature(base_ctx, group_ctx)
     active_section = _render_section_switcher(group_ctx, base_ctx.can_edit)
-    st.divider()
+    st.markdown(
+        f'<div class="mtz-focus-row"><span class="mtz-focus-chip">● Em foco: {active_section}</span></div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="mtz-matrix-gap"></div>', unsafe_allow_html=True)
     _render_active_section(base_ctx, group_ctx, analytics_data, active_section)
 
 
 def render_matriz() -> None:
     try:
         _inject_css()
-        _inject_matriz_micro_interactions()
         _ph("⊞", "Matriz de Atividades", "Visao por Grupo com drill-down por Setor. Etapas D/R/M, tempos e exportacoes.")
 
         base_ctx = load_matrix_base_context()

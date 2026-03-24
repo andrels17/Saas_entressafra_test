@@ -143,7 +143,7 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 .mtz-quick-nav-title{font-size:1.18rem;font-weight:800;letter-spacing:-.02em;color:#fff;line-height:1.1;margin:0}
 .mtz-quick-nav-sub{font-size:.92rem;color:rgba(255,255,255,.70);margin-top:4px}
 .mtz-focus-chip-wrap{display:flex;justify-content:flex-end;align-items:flex-start;height:100%}
-.mtz-focus-chip{display:inline-flex;align-items:center;justify-content:center;min-height:38px;padding:0 14px;border-radius:999px;border:1px solid rgba(16,185,129,.24);background:linear-gradient(180deg, rgba(16,185,129,.10), rgba(16,185,129,.05));color:#ecfdf5;font-size:.88rem;font-weight:700;white-space:nowrap;box-shadow:inset 0 1px 0 rgba(255,255,255,.04);transition:transform .22s ease, box-shadow .22s ease, border-color .22s ease, background .22s ease, filter .22s ease;cursor:default}
+.mtz-focus-chip{display:inline-flex;align-items:center;justify-content:center;min-height:38px;padding:0 14px;border-radius:999px;border:1px solid rgba(16,185,129,.24);background:linear-gradient(180deg, rgba(16,185,129,.10), rgba(16,185,129,.05));color:#ecfdf5;font-size:.88rem;font-weight:700;white-space:nowrap;box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
 .mtz-toolbar-inline [data-testid="stButton"] button{min-height:40px;font-weight:700}
 .mtz-toolbar-inline [data-testid="stNumberInput"] input{min-height:40px}
 .mtz-toolbar-inline [data-testid="stTextInput"] input{min-height:40px}
@@ -260,45 +260,46 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 .mtz-btn-neutral [data-testid="stButton"] button p,
 .mtz-btn-ghost [data-testid="stButton"] button p{font-weight:700}
 
-
-/* ===== TRANSIÇÃO ENTRE ABAS (fade + slide) ===== */
-.mtz-section-wrap{
-  animation: mtzFadeSlide .35s cubic-bezier(.22,.61,.36,1);
-  will-change: opacity, transform;
+/* ===== Espaçamento premium da navegação para a seção ativa ===== */
+.mtz-focus-row{
+  display:flex;
+  align-items:center;
+  margin:10px 0 12px 0;
 }
-
-@keyframes mtzFadeSlide{
-  from{
-    opacity:0;
-    transform:translateY(10px) scale(.995);
-    filter:blur(2px);
-  }
-  to{
-    opacity:1;
-    transform:translateY(0) scale(1);
-    filter:blur(0);
-  }
+.mtz-matrix-gap{
+  height:2px;
+  margin:0 0 8px 0;
 }
-
-/* micro feedback no chip */
+.mtz-focus-chip{
+  gap:8px;
+  padding:0 16px;
+  min-height:40px;
+  border-color:rgba(16,185,129,.26);
+  background:linear-gradient(180deg, rgba(9,54,43,.72), rgba(6,35,29,.82));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05), 0 8px 18px rgba(3,17,14,.18);
+  transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease;
+}
 .mtz-focus-chip:hover{
-  transform:translateY(-2px) scale(1.015);
-  border-color:rgba(52,211,153,.42);
-  background:linear-gradient(180deg, rgba(16,185,129,.18), rgba(16,185,129,.08));
-  box-shadow:0 10px 24px rgba(16,185,129,.20), inset 0 1px 0 rgba(255,255,255,.06);
-  filter:brightness(1.06);
+  transform:translateY(-1px);
+  border-color:rgba(52,211,153,.38);
+  background:linear-gradient(180deg, rgba(10,68,53,.78), rgba(7,41,34,.88));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06), 0 12px 24px rgba(6,95,70,.18);
 }
-
-/* efeito leve na matriz */
-[data-testid="stDataFrame"] div[data-testid="cell"]{
-  transition:transform .15s ease, filter .15s ease;
+.mtz-section-wrap{
+  animation:mtzFadeSlide .30s cubic-bezier(.22,.61,.36,1);
+  will-change:opacity, transform;
 }
-[data-testid="stDataFrame"] div[data-testid="cell"]:hover{
-  transform:scale(1.03);
-  filter:brightness(1.05);
-  z-index:2;
+@keyframes mtzFadeSlide{
+  from{opacity:0;transform:translateY(8px);}
+  to{opacity:1;transform:translateY(0);}
 }
-
+.mtz-sector-content-fade{
+  animation:mtzSectorFade .22s ease-out;
+}
+@keyframes mtzSectorFade{
+  from{opacity:0;transform:translateY(6px);}
+  to{opacity:1;transform:translateY(0);}
+}
 </style>""", unsafe_allow_html=True)
 
 

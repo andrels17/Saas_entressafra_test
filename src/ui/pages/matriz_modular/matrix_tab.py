@@ -27,6 +27,7 @@ from src.utils.timezone import now_utc as _now_utc
 
 from .data import _group_kpis, _load_payload
 from .insights import _sector_priority_sort_key
+from .pdf_export import _style_heatmap
 
 
 def _pct_bar_html(pct: int, height: int = 6) -> str:
@@ -37,25 +38,6 @@ def _pct_bar_html(pct: int, height: int = 6) -> str:
         f'<div style="width:{pct}%;background:{tone};height:{height}px;border-radius:999px;transition:width .35s ease"></div>'
         '</div>'
     )
-
-
-def _refined_heatmap(_df: pd.DataFrame):
-    def style_cell(val):
-        if val in ["OK", True]:
-            return (
-                "background: linear-gradient(180deg, rgba(18,183,106,.25), rgba(18,183,106,.12)); "
-                "color:#ecfdf5; border-radius:6px;"
-            )
-        elif val == "!":
-            return (
-                "background: linear-gradient(180deg, rgba(239,68,68,.28), rgba(239,68,68,.12)); "
-                "color:#fee2e2; border-radius:6px;"
-            )
-        elif val:
-            return "background: rgba(255,255,255,.05); border-radius:6px;"
-        return "background: rgba(255,255,255,.02); opacity:.6; border-radius:6px;"
-
-    return _df.applymap(style_cell)
 
 
 def _resolve_task_row(sb, task_map, revisao_id, equipamento_id, servico_id):
@@ -166,7 +148,7 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
         if days_since > atraso_dias:
             for c in [c for c in svc_bool if str(c).strip().endswith(' M')]:
                 df_vis.loc[df_vis[c] == '', c] = '!'
-        st.dataframe(df_vis.style.apply(_refined_heatmap, axis=None), use_container_width=True, hide_index=True)
+        st.dataframe(df_vis.style.apply(_style_heatmap, axis=None), use_container_width=True, hide_index=True)
         edited = None
     else:
         edited = st.data_editor(
@@ -467,6 +449,7 @@ def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_di
                 st.markdown('</div>', unsafe_allow_html=True)
                 continue
 
+            st.markdown('<div class="mtz-sector-content-fade">', unsafe_allow_html=True)
             _render_sector_editor(
                 sb=sb,
                 revisao_id=revisao_id,
@@ -482,4 +465,5 @@ def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_di
                 atraso_dias=atraso_dias,
                 semana_lote=semana_lote,
             )
+            st.markdown('</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
