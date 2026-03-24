@@ -440,7 +440,7 @@ def _render_toolbar(base_ctx):
                 key="mtz_lim_pick",
             )
 
-        row2_c1, row2_c2, row2_c3 = st.columns([1.05, 1.05, 1.95], vertical_alignment="bottom")
+        row2_c1, row2_c2 = st.columns([1.05, 1.05], vertical_alignment="bottom")
         with row2_c1:
             status_filter = st.selectbox(
                 "Status",
@@ -455,57 +455,6 @@ def _render_toolbar(base_ctx):
                 index=1,
                 key="mtz_sort_by",
             )
-        with row2_c3:
-            actions_left, actions_right = st.columns([0.60, 1.40], gap="medium")
-            with actions_left:
-                st.session_state["matriz_show_legend"] = st.toggle(
-                    "Legenda",
-                    value=bool(st.session_state["matriz_show_legend"]),
-                    key="mtz_leg",
-                )
-            with actions_right:
-                st.markdown('<div class="mtz-inline-actions">', unsafe_allow_html=True)
-                a1, a2, a3 = st.columns([0.90, 1.00, 1.15], gap="small")
-                with a1:
-                    st.markdown('<div class="mtz-btn-ghost">', unsafe_allow_html=True)
-                    clear_dept = st.button(
-                        "🧹 Limpar",
-                        key="mtz_clear_dept",
-                        use_container_width=True,
-                        help="Remove o departamento selecionado e mantém os demais filtros.",
-                    )
-                    st.markdown("</div>", unsafe_allow_html=True)
-                with a2:
-                    st.markdown('<div class="mtz-btn-neutral">', unsafe_allow_html=True)
-                    show_all = st.button(
-                        "▦ Ver todos",
-                        key="mtz_show_all",
-                        use_container_width=True,
-                        help="Exibe todos os grupos novamente e limpa a busca atual.",
-                    )
-                    st.markdown("</div>", unsafe_allow_html=True)
-                with a3:
-                    st.markdown('<div class="mtz-btn-primary">', unsafe_allow_html=True)
-                    reload_data = st.button(
-                        "↻ Atualizar",
-                        key="mtz_reload",
-                        use_container_width=True,
-                        help="Recarrega os dados da matriz e atualiza os indicadores.",
-                    )
-                    st.markdown("</div>", unsafe_allow_html=True)
-                st.markdown("</div>", unsafe_allow_html=True)
-
-        if clear_dept:
-            st.session_state["matriz_departamento_id"] = None
-            st.rerun()
-        if show_all:
-            st.session_state["matriz_grp_search"] = ""
-            st.session_state["matriz_departamento_id"] = None
-            st.rerun()
-        if reload_data:
-            _invalidate_matrix_perf_cache()
-            handle_toolbar_reload()
-            st.rerun()
 
         st.markdown("</div></div>", unsafe_allow_html=True)
     return hph, search, status_filter, sort_by
