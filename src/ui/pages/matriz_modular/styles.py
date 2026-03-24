@@ -259,6 +259,82 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
 .mtz-btn-primary [data-testid="stButton"] button p,
 .mtz-btn-neutral [data-testid="stButton"] button p,
 .mtz-btn-ghost [data-testid="stButton"] button p{font-weight:700}
+
+
+/* ===== TRANSIÇÃO ENTRE ABAS (fade + slide) ===== */
+.mtz-section-wrap{
+  animation: mtzFadeSlide .35s cubic-bezier(.22,.61,.36,1);
+  will-change: opacity, transform;
+}
+
+@keyframes mtzFadeSlide{
+  from{
+    opacity:0;
+    transform:translateY(10px) scale(.995);
+    filter:blur(2px);
+  }
+  to{
+    opacity:1;
+    transform:translateY(0) scale(1);
+    filter:blur(0);
+  }
+}
+
+/* micro feedback no chip */
+.mtz-focus-chip{
+  transition:all .25s ease;
+}
+.mtz-focus-chip:hover{
+  transform:translateY(-1px);
+  box-shadow:0 6px 14px rgba(16,185,129,.18);
+}
+
+/* efeito leve na matriz */
+[data-testid="stDataFrame"] div[data-testid="cell"]{
+  transition:transform .15s ease, filter .15s ease;
+}
+[data-testid="stDataFrame"] div[data-testid="cell"]:hover{
+  transform:scale(1.03);
+  filter:brightness(1.05);
+  z-index:2;
+}
+
+
+/* ===== Transição suave entre abas ===== */
+.mtz-section-wrap{
+  animation: mtzFadeSlide .35s cubic-bezier(.22,.61,.36,1);
+  will-change: opacity, transform;
+}
+@keyframes mtzFadeSlide{
+  from{
+    opacity:0;
+    transform:translateY(10px) scale(.995);
+    filter:blur(2px);
+  }
+  to{
+    opacity:1;
+    transform:translateY(0) scale(1);
+    filter:blur(0);
+  }
+}
+
+/* microinteração do chip de foco */
+.mtz-focus-chip{transition:all .25s ease}
+.mtz-focus-chip:hover{
+  transform:translateY(-1px);
+  box-shadow:0 6px 14px rgba(16,185,129,.18);
+}
+
+/* hover leve nas células da matriz */
+[data-testid="stDataFrame"] div[data-testid="cell"]{
+  transition:transform .15s ease, filter .15s ease;
+}
+[data-testid="stDataFrame"] div[data-testid="cell"]:hover{
+  transform:scale(1.03);
+  filter:brightness(1.03);
+  z-index:2;
+}
+
 </style>""", unsafe_allow_html=True)
 
 
