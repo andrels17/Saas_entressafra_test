@@ -300,6 +300,18 @@ background:rgba(255,255,255,.04);font-size:.82rem;color:rgba(255,255,255,.88)}
   from{opacity:0;transform:translateY(6px);}
   to{opacity:1;transform:translateY(0);}
 }
+
+/* ===== Navegação rápida compacta ===== */
+.mtz-quick-nav-compact{margin:2px 0 8px 0}
+.mtz-quick-nav-label{font-size:.82rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.62);margin:0 0 6px 0}
+.mtz-quick-nav-compact [data-testid="stSegmentedControl"]{margin-bottom:0}
+.mtz-quick-nav-compact [data-testid="stSegmentedControl"] button,
+.mtz-quick-nav-compact [role="radiogroup"] label{
+  min-height:34px !important;
+}
+.mtz-focus-row,.mtz-matrix-gap,.mtz-focus-chip,.mtz-focus-chip-wrap{display:none !important}
+.mtz-section-wrap{margin-top:2px}
+
 </style>""", unsafe_allow_html=True)
 
 

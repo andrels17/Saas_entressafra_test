@@ -727,34 +727,49 @@ def _render_analytics_tab(group_ctx, analytics_data):
         st.info("Sem dados de equipamentos para análise.")
     else:
         critical_equipment_df = group_ctx.resumo_df.copy()
-        critical_equipment_df["Risco"] = critical_equipment_df["%"].apply(
-            lambda v: "alto" if int(v) < 50 else ("medio" if int(v) < 80 else "baixo")
-        )
-        critical_equipment_df = critical_equipment_df.sort_values(by=["%", "Concluidos"], ascending=[True, True]).head(10)[
-            ["Equipamento", "%", "Concluidos", "Total", "Risco"]
-        ]
-        chart_df = critical_equipment_df[["Equipamento", "%", "Risco"]].copy()
-        chart_df["cor"] = chart_df["Risco"].map({"alto": "#EF4444", "medio": "#F59E0B", "baixo": "#12B76A"})
-        bar = (
-            alt.Chart(chart_df)
-            .mark_bar(height=18, cornerRadiusEnd=3)
-            .encode(
-                x=alt.X("%:Q", scale=alt.Scale(domain=[0, 100]), axis=alt.Axis(title="% concluído", grid=True, gridOpacity=0.15)),
-                y=alt.Y("Equipamento:N", sort=alt.SortField(field="%", order="ascending"), axis=alt.Axis(title=None, labelLimit=220)),
-                color=alt.Color("cor:N", scale=None, legend=None),
-                tooltip=[
-                    alt.Tooltip("Equipamento:N", title="Equipamento"),
-                    alt.Tooltip("%:Q", title="% concluído", format=".0f"),
-                    alt.Tooltip("Risco:N", title="Risco"),
-                ],
+        for col in ["%", "Concluidos", "Total"]:
+            if col in critical_equipment_df.columns:
+                critical_equipment_df[col] = pd.to_numeric(critical_equipment_df[col], errors="coerce")
+        critical_equipment_df["Equipamento"] = critical_equipment_df.get("Equipamento", "-").astype(str)
+        critical_equipment_df = critical_equipment_df.dropna(subset=["%", "Concluidos"], how="any")
+
+        if critical_equipment_df.empty:
+            st.info("Sem dados válidos para gerar o gráfico de equipamentos.")
+        else:
+            critical_equipment_df["Risco"] = critical_equipment_df["%"].apply(
+                lambda v: "alto" if float(v) < 50 else ("medio" if float(v) < 80 else "baixo")
             )
-            .properties(height=max(180, len(chart_df) * 32))
-            .configure_view(strokeWidth=0)
-            .configure_axis(domainOpacity=0.3)
-        )
-        st.altair_chart(bar, use_container_width=True)
-        with st.expander("📋 Ver tabela detalhada", expanded=False):
-            st.dataframe(critical_equipment_df, use_container_width=True, hide_index=True)
+            critical_equipment_df = critical_equipment_df.sort_values(by=["%", "Concluidos"], ascending=[True, True]).head(10)[
+                ["Equipamento", "%", "Concluidos", "Total", "Risco"]
+            ]
+            chart_df = critical_equipment_df[["Equipamento", "%", "Risco"]].copy()
+            chart_df["cor"] = chart_df["Risco"].map({"alto": "#EF4444", "medio": "#F59E0B", "baixo": "#12B76A"}).fillna("#12B76A")
+            chart_df["%"] = pd.to_numeric(chart_df["%"], errors="coerce").fillna(0).clip(lower=0, upper=100)
+            chart_df = chart_df.sort_values(by="%", ascending=True)
+            try:
+                bar = (
+                    alt.Chart(chart_df)
+                    .mark_bar(height=18, cornerRadiusEnd=3)
+                    .encode(
+                        x=alt.X("%:Q", scale=alt.Scale(domain=[0, 100]), axis=alt.Axis(title="% concluído", grid=True, gridOpacity=0.15)),
+                        y=alt.Y("Equipamento:N", sort=alt.SortField(field="%", order="ascending"), axis=alt.Axis(title=None, labelLimit=220)),
+                        color=alt.Color("cor:N", scale=None, legend=None),
+                        tooltip=[
+                            alt.Tooltip("Equipamento:N", title="Equipamento"),
+                            alt.Tooltip("%:Q", title="% concluído", format=".0f"),
+                            alt.Tooltip("Risco:N", title="Risco"),
+                        ],
+                    )
+                    .properties(height=max(180, len(chart_df) * 32))
+                    .configure_view(strokeWidth=0)
+                    .configure_axis(domainOpacity=0.3)
+                )
+                st.altair_chart(bar, use_container_width=True)
+            except Exception:
+                fallback_df = chart_df.set_index("Equipamento")[["%"]]
+                st.bar_chart(fallback_df, use_container_width=True)
+            with st.expander("📋 Ver tabela detalhada", expanded=False):
+                st.dataframe(critical_equipment_df, use_container_width=True, hide_index=True)
 
     st.markdown("#### Lead time médio entre etapas")
     if group_ctx.view_agg.empty:
@@ -939,7 +954,8 @@ def _render_section_switcher(group_ctx, can_edit: bool) -> str:
     if st.session_state.get(radio_key) not in options:
         st.session_state[radio_key] = current_value
 
-    st.markdown("### Navegação rápida")
+    st.markdown('<div class="mtz-quick-nav-compact">', unsafe_allow_html=True)
+    st.markdown('<div class="mtz-quick-nav-label">Navegação rápida</div>', unsafe_allow_html=True)
     try:
         picked = st.segmented_control(
             "Seção",
@@ -961,6 +977,7 @@ def _render_section_switcher(group_ctx, can_edit: bool) -> str:
         )
         if picked != st.session_state.get(state_key):
             st.session_state[state_key] = picked
+    st.markdown('</div>', unsafe_allow_html=True)
 
     return st.session_state.get(state_key, current_value)
 
@@ -988,11 +1005,6 @@ def _render_sections(base_ctx, group_ctx, analytics_data) -> None:
     _open_matrix_section_if_needed(group_ctx)
     _sync_pdf_group_signature(base_ctx, group_ctx)
     active_section = _render_section_switcher(group_ctx, base_ctx.can_edit)
-    st.markdown(
-        f'<div class="mtz-focus-row"><span class="mtz-focus-chip">● Em foco: {active_section}</span></div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown('<div class="mtz-matrix-gap"></div>', unsafe_allow_html=True)
     _render_active_section(base_ctx, group_ctx, analytics_data, active_section)
 
 
