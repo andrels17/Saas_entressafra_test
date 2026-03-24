@@ -8,12 +8,15 @@ from src.db.supabase_client import get_supabase_anon
 from src.utils.observability import log_error
 
 
-def _sb(token: str):
-    """Cliente Supabase autenticado pelo token da sessão.
+def _sb_from_token(token: str = ""):
+    """Constrói cliente Supabase autenticado a partir de um token explícito.
 
-    Aceita o token como argumento explícito para que funções @st.cache_data
-    possam usar _token (excluído da chave de cache pelo underscore), evitando
-    compartilhamento de cache entre usuários diferentes do mesmo tenant.
+    Aceitar token como argumento (em vez de ler st.session_state diretamente)
+    é obrigatório dentro de funções @st.cache_data: o Streamlit serializa todos
+    os argumentos como chave de cache, e acessar session_state dentro do cache
+    causa TypeError em versões recentes.  O underscore (_token) exclui o valor
+    da chave de cache, mas o argumento ainda garante que clientes de tenants /
+    usuários diferentes nunca compartilhem o mesmo resultado cacheado.
     """
     sb = get_supabase_anon()
     if token:
@@ -24,13 +27,18 @@ def _sb(token: str):
     return sb
 
 
+def _token() -> str:
+    """Lê o token de acesso do session_state de forma segura."""
+    return st.session_state.get("sb_access_token", "") or ""
+
+
 @st.cache_data(ttl=60, show_spinner=False)
 def load_revision(
         tenant_id: str,
         ver: str = "0",
         rev_id: str | None = None,
         _token: str = "") -> dict | None:
-    sb = _sb(_token)
+    sb = _sb_from_token(_token)
     try:
         revs = (
             sb.table("revisoes")
@@ -56,7 +64,7 @@ def load_revision(
 def load_groups(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]:
     try:
         return (
-            _sb(_token)
+            _sb_from_token(_token)
             .table("equip_grupos")
             .select("id,nome,departamento_id,ativo")
             .eq("tenant_id", tenant_id)
@@ -73,7 +81,7 @@ def load_groups(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]:
 def load_depts(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]:
     try:
         return (
-            _sb(_token)
+            _sb_from_token(_token)
             .table("departamentos")
             .select("id,nome,ativo")
             .eq("tenant_id", tenant_id)
@@ -91,7 +99,7 @@ def load_snapshots(
         revisao_id: str,
         ver: str = "0",
         _token: str = "") -> pd.DataFrame:
-    sb = _sb(_token)
+    sb = _sb_from_token(_token)
     try:
         rows = (
             sb.table("kpi_snapshots")
@@ -120,7 +128,7 @@ def load_group_sector_view(
         revisao_id: str,
         ver: str = "0",
         _token: str = "") -> dict:
-    sb = _sb(_token)
+    sb = _sb_from_token(_token)
     try:
         rows = (
             sb.table("vw_revisao_grupo_setores")
@@ -148,7 +156,7 @@ def load_group_sector_view(
 def snapshots_supported(tenant_id: str = "", ver: str = "0", _token: str = "") -> bool:
     """Verifica se a tabela kpi_snapshots existe — cacheado por 5 minutos."""
     try:
-        _sb(_token).table("kpi_snapshots").select("id").limit(1).execute()
+        _sb_from_token(_token).table("kpi_snapshots").select("id").limit(1).execute()
         return True
     except Exception:
         return False
@@ -156,6 +164,7 @@ def snapshots_supported(tenant_id: str = "", ver: str = "0", _token: str = "") -
 
 def insert_snapshot(tenant_id: str, revisao_id: str,
                     week_number: int, df: pd.DataFrame) -> tuple[bool, str]:
+    # insert_snapshot não é cacheada — pode acessar session_state diretamente
     from src.utils.supabase_helpers import sb_for_user
     if df is None or df.empty:
         return False, "Sem dados"
