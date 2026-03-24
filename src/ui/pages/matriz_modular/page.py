@@ -821,7 +821,7 @@ def _render_group_overview(base_ctx, group_ctx, header_placeholder) -> dict:
 
 
 def _get_sections(can_edit: bool) -> list[str]:
-    sections = ["Resumo", "Matriz", "Evolução", "Análise", "Tempos"]
+    sections = ["Resumo", "Matriz", "Evolução", "Tempos"]
     if can_edit:
         sections.append("Editar célula")
     sections.append("Exportar")
@@ -990,8 +990,6 @@ def _render_active_section(base_ctx, group_ctx, analytics_data, active_section: 
         _render_matriz_section(base_ctx, group_ctx)
     elif active_section == "Evolução":
         _render_evolucao_tab(group_ctx, base_ctx)
-    elif active_section == "Análise":
-        _render_analytics_tab(group_ctx, analytics_data)
     elif active_section == "Tempos":
         _render_tempos_section(base_ctx, group_ctx)
     elif active_section == "Editar célula":
