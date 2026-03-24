@@ -79,9 +79,14 @@ def _normalize_role(value: object) -> str:
     return aliases.get(role, role)
 
 
-def _inject_sidebar_css() -> None:
+@st.cache_resource
+def _load_sidebar_css() -> str:
     css_path = Path(__file__).parent / "src" / "ui" / "core" / "sidebar.css"
-    st.markdown(f"<style>{css_path.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
+    return css_path.read_text(encoding="utf-8")
+
+
+def _inject_sidebar_css() -> None:
+    st.markdown(f"<style>{_load_sidebar_css()}</style>", unsafe_allow_html=True)
 
 
 def _safe_clear_streamlit_caches() -> None:
@@ -456,12 +461,23 @@ def _render_mobile_nav(menu_pages: list[str], current: str) -> None:
     st.divider()
 
 
-def _build_route() -> dict[str, callable]:
+_ROUTE: dict[str, callable] | None = None
+
+
+def _get_route() -> dict[str, callable]:
+    """Retorna o dict de rotas, inicializando uma única vez (lazy singleton).
+
+    Evita recriar lambdas e o dict a cada rerun do Streamlit.
+    """
+    global _ROUTE
+    if _ROUTE is not None:
+        return _ROUTE
+
     def guarded(render_fn, *roles):
         require_role(*roles)
         render_fn()
 
-    return {
+    _ROUTE = {
         PageKey.INICIO.value: render_home_overview,
         PageKey.DASHBOARD.value: render_dashboard,
         PageKey.PAINEL_GESTOR.value: render_gestor_painel,
@@ -479,6 +495,7 @@ def _build_route() -> dict[str, callable]:
         PageKey.ADM_REVISOES.value: lambda: guarded(render_admin_revisoes, *Role.ADMIN_ROLES),
         PageKey.ADM_BRANDING.value: lambda: guarded(render_admin_branding_reports, *Role.ADMIN_ROLES),
     }
+    return _ROUTE
 
 
 def _render_navigation(menu_pages: list[str], current_page: str, role: str, user_id: str, tenant_id: str) -> str:
@@ -503,7 +520,7 @@ def _render_current_page(page: str, role: str) -> None:
         render_matriz()
         return
 
-    route = _build_route()
+    route = _get_route()
     handler = route.get(page)
     if handler:
         handler()
