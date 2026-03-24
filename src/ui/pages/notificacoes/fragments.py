@@ -45,13 +45,13 @@ def fragment_resumo(alertas: dict, revisao: dict) -> None:
         unsafe_allow_html=True,
     )
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("🚫 Travados",   n_trav, delta="crítico" if n_trav else "ok",
+    c1.metric("Travados",   n_trav, delta="crítico" if n_trav else "ok",
               delta_color="inverse" if n_trav else "off")
-    c2.metric("⬜ Sem início",  n_sem,  delta="atenção" if n_sem  else "ok",
+    c2.metric("Sem início",  n_sem,  delta="atenção" if n_sem  else "ok",
               delta_color="inverse" if n_sem  else "off")
-    c3.metric("⏸ Parados",     n_upd,  delta="atenção" if n_upd  else "ok",
+    c3.metric("Parados",     n_upd,  delta="atenção" if n_upd  else "ok",
               delta_color="inverse" if n_upd  else "off")
-    c4.metric("⚠️ Risco de prazo", n_risc, delta="atraso vs meta" if n_risc else "no prazo",
+    c4.metric("Risco de prazo", n_risc, delta="atraso vs meta" if n_risc else "no prazo",
               delta_color="inverse" if n_risc else "off")
 
     if n_trav == 0 and n_sem == 0 and n_upd == 0 and n_risc == 0:
@@ -66,7 +66,7 @@ def fragment_travados(df) -> None:
                               "Dias travado", "Obs."] if c in df.columns]
     df_show = df[cols_show].sort_values("Dias travado", ascending=False) \
         if "Dias travado" in df.columns else df[cols_show]
-    titled_table("🚫 Travados sem resolução", df_show,
+    titled_table("Travados sem resolução", df_show,
                  caption=f"{len(df)} tarefa(s) travada(s) sem resolução." if not df.empty else None,
                  empty_message="Nenhum item travado no período configurado.",
                  column_config={
@@ -82,7 +82,7 @@ def fragment_travados(df) -> None:
 def fragment_sem_inicio(df) -> None:
     cols_show = [c for c in ["Frota", "Modelo", "Grupo", "Setor", "Serviço",
                               "Dias sem update"] if c in df.columns]
-    titled_table("⬜ Sem nenhum apontamento", df[cols_show],
+    titled_table("Sem nenhum apontamento", df[cols_show],
                  caption=f"{len(df)} tarefa(s) sem nenhuma etapa marcada." if not df.empty else None,
                  empty_message="Todos os itens tiveram pelo menos um apontamento.")
     _df_download(df, "Exportar CSV", "alertas_sem_inicio.csv")
@@ -115,7 +115,7 @@ def fragment_risco_prazo(df) -> None:
                  if c in df.columns]
     df_show = df[cols_show].sort_values("Atraso (p.p.)", ascending=False) \
         if "Atraso (p.p.)" in df.columns else df[cols_show]
-    titled_table("⚠️ Risco de não concluir no prazo", df_show,
+    titled_table("Risco de não concluir no prazo", df_show,
                  caption=f"{len(df)} equipamento(s) com atraso acima de 15 p.p. em relação à meta."
                          if not df.empty else None,
                  empty_message="Todos os equipamentos estão dentro da meta linear.",
@@ -132,7 +132,7 @@ def fragment_risco_prazo(df) -> None:
 
 @st.fragment
 def fragment_resumo_grupos(alertas: dict) -> None:
-    st.markdown("### 📊 Resumo por grupo")
+    st.markdown("### Resumo por grupo")
     df_res = resumo_por_grupo(alertas)
     if df_res.empty:
         st.info("Nenhum alerta encontrado para exibir por grupo.")
@@ -219,12 +219,12 @@ def fragment_disparo_manual(tenant_id: str, revisao_id: str, is_admin: bool,
             st.warning(f"Não foi possível carregar destinatários: {e}")
 
     # Configuração de destinatários (expander separado)
-    with st.expander("👥 Configurar destinatários e tipo de relatório", expanded=False):
+    with st.expander("Configurar destinatários e tipo de relatório", expanded=False):
         _render_prefs_editor(tenant_id)
 
     st.divider()
 
-    dry_run = st.toggle("🧪 Modo teste — gerar PDFs sem enviar e-mails", value=True,
+    dry_run = st.toggle("Modo teste — gerar PDFs sem enviar e-mails", value=True,
                         key="ntf_email_dry",
                         help="Ative para validar a geração dos PDFs sem disparar nenhum e-mail.")
     if dry_run:
@@ -233,9 +233,9 @@ def fragment_disparo_manual(tenant_id: str, revisao_id: str, is_admin: bool,
         if not smtp_ok:
             st.error("Configure o SMTP antes de enviar e-mails reais.")
         else:
-            st.warning("⚠️ Modo real — os e-mails **serão enviados** aos responsáveis.")
+            st.warning("Modo real — os e-mails **serão enviados** aos responsáveis.")
 
-    btn_label = "🧪 Testar geração de PDFs" if dry_run else "📧 Enviar relatórios agora"
+    btn_label = "Testar geração de PDFs" if dry_run else "📧 Enviar relatórios agora"
     do_send = form_submit_button(btn_label, key="ntf_send_btn", use_container_width=False,
                                   help="Executa o envio imediato ou um dry-run.")
 
@@ -264,11 +264,11 @@ def fragment_disparo_manual(tenant_id: str, revisao_id: str, is_admin: bool,
         elif result.failed > 0:
             st.warning(f"Concluído com {result.failed} falha(s).")
         if result.errors:
-            with st.expander("❌ Erros", expanded=True):
+            with st.expander("Erros", expanded=True):
                 for err in result.errors:
                     st.error(err)
         if log_lines:
-            with st.expander("📋 Log completo", expanded=False):
+            with st.expander("Log completo", expanded=False):
                 st.code("\n".join(log_lines))
 
 
@@ -316,11 +316,11 @@ def _render_prefs_editor(tenant_id: str) -> None:
                 ok = all(save_email_pref(tenant_id, uid, tipo, ativo=(tipo != "nenhum"))
                          for uid, tipo in changed.items())
                 if ok:
-                    st.success("✅ Preferências salvas!")
+                    st.success("Preferências salvas!")
                     st.rerun()
                 else:
                     st.error("Erro ao salvar. Verifique se a tabela `tenant_email_prefs` existe.")
-                    with st.expander("📋 SQL para criar a tabela", expanded=True):
+                    with st.expander("SQL para criar a tabela", expanded=True):
                         st.code("""
 CREATE TABLE tenant_email_prefs (
   tenant_id       uuid NOT NULL,
@@ -346,7 +346,7 @@ def fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
         DIAS_SEMANA_LABELS, PERIODICIDADE_LABELS, PERIODICIDADE_OPTS,
         ScheduleConfig, load_schedule_config, save_schedule_config,
     )
-    form_section("⏰ Agendamento Automático",
+    form_section("Agendamento Automático",
                  "Configure o envio automático dos alertas operacionais e de prazo.")
     if not is_admin:
         st.info("Apenas administradores podem configurar o agendamento.")
@@ -358,9 +358,9 @@ def fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
     col_status, col_prox = st.columns(2)
     with col_status:
         if cfg.ativo:
-            st.success(f"✅ Ativo — {cfg.descricao_humana()}")
+            st.success(f"Ativo — {cfg.descricao_humana()}")
         else:
-            st.warning(f"⏸ Pausado — {cfg.descricao_humana()}")
+            st.warning(f"Pausado — {cfg.descricao_humana()}")
     with col_prox:
         try:
             proximo = cfg.proximo_disparo_brt().strftime("%d/%m/%Y às %H:%M")
@@ -413,7 +413,7 @@ def fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
                     revisao_fixa=cfg.revisao_fixa,
                 )
                 if save_schedule_config(new_cfg):
-                    st.success("✅ Configuração salva!")
+                    st.success("Configuração salva!")
                     st.rerun()
                 else:
                     st.error("Falha ao salvar. Verifique se a tabela `email_schedule_config` existe.")
@@ -432,7 +432,7 @@ def fragment_configurar_agendamento(tenant_id: str, is_admin: bool) -> None:
             except Exception:
                 pass
 
-    with st.expander("📋 Como configurar o scheduler", expanded=False):
+    with st.expander("Como configurar o scheduler", expanded=False):
         st.markdown(f"""
 O `scheduler.py` e o GitHub Actions lêem esta configuração automaticamente do Supabase.
 
