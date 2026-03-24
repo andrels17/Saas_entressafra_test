@@ -238,9 +238,9 @@ def _fragment_kpis_globais(overall: dict) -> None:
 def _fragment_previsao(previsao: dict, risco: dict) -> None:
     _RISCO_ICONS = {"baixo": "🟢", "medio": "🟡", "alto": "🔴"}
     _PREV_LABELS = {
-        "no_prazo": "✅ No prazo",
-        "atraso": "⚠️ Com atraso",
-        "sem_base": "— Sem base"}
+        "no_prazo": "No prazo",
+        "atraso": "Com atraso",
+        "sem_base": "Sem base"}
     status_prev = previsao.get("status_previsao", "sem_base")
     status_risco = risco.get("status_risco", "baixo")
 
@@ -869,12 +869,12 @@ def render_dashboard() -> None:
     st.divider()
 
     tabs = [
-        "🏢 Departamentos",
-        "🏗️ Grupos",
-        "🔧 Equipamentos",
-        "🌡️ Heatmap",
-        "⚠️ Criticidade",
-        "📈 Timeline"]
+        "Departamentos",
+        "Grupos",
+        "Equipamentos",
+        "Heatmap",
+        "Criticidade",
+        "Timeline"]
 
     def _on_tab_change() -> None:
         st.session_state["_dash_tab"] = st.session_state["_dash_tab_ctrl"]
@@ -892,23 +892,23 @@ def render_dashboard() -> None:
         label_visibility="collapsed")
     active = st.session_state.get("_dash_tab", tabs[0])
 
-    if active == "🏗️ Grupos":
+    if active == "Grupos":
         st.markdown("### Progresso por grupo")
         _fragment_grupos(
             base_filtered,
             dept_map,
             dashboard_groups_filtered,
             top_n=top_n)
-    elif active == "🏢 Departamentos":
+    elif active == "Departamentos":
         st.markdown("### Progresso por departamento")
         _fragment_departamentos(dashboard_groups_filtered, gid_to_dept, dept_map)
-    elif active == "🔧 Equipamentos":
+    elif active == "Equipamentos":
         st.markdown("### Progresso por equipamento")
         _fragment_equipamentos(base_filtered, dept_map, top_n=top_n)
-    elif active == "🌡️ Heatmap":
+    elif active == "Heatmap":
         st.markdown("### Heatmap de risco — Grupo × Setor")
         _fragment_heatmap(heat)
-    elif active == "⚠️ Criticidade":
+    elif active == "Criticidade":
         st.markdown("### Top equipamentos críticos")
         _fragment_criticidade(crit)
     else:
