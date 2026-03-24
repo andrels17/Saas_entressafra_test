@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.ui.pages.matriz_runtime import sector_set_open as _sector_set_open
-
 from .styles import _pct_bar_html
 
 
@@ -22,27 +20,4 @@ def render_group_header(*, placeholder, grupo_nome, titulo, eqs, pct_geral, eq10
             if st.button("← Voltar", key="mtz_back_hdr", use_container_width=True):
                 st.session_state["matriz_view"] = "select"
                 st.rerun()
-
-        if setor_rows:
-            st.markdown('<div class="enterprise-divider"></div>', unsafe_allow_html=True)
-            st.markdown(
-                '<div class="enterprise-chip-row" style="flex-wrap:wrap;gap:6px;display:flex;margin-top:6px">',
-                unsafe_allow_html=True,
-            )
-            chip_cols = st.columns(min(len(setor_rows[:12]), 6))
-            for ci, r in enumerate(setor_rows[:12]):
-                ratio = r["ok_eq"] / max(r["total_eq"], 1)
-                icon = "🟢" if ratio >= 0.8 else ("🟡" if ratio >= 0.5 else "🔴")
-                lbl = f"{icon} {r['setor']} {r['ok_eq']}/{r['total_eq']}"
-                with chip_cols[ci % len(chip_cols)]:
-                    if st.button(
-                        lbl,
-                        key=f"chip_setor_{ci}_{r['setor']}".replace(" ", "_"),
-                        use_container_width=True,
-                        help=f"{r['setor']}: {r['pct_med']}% médio · {r['ok_eq']}/{r['total_eq']} equip. 100%",
-                    ):
-                        st.session_state["mtz_chip_jump"] = r["setor"]
-                        _sector_set_open(revisao_id, grupo_id, r["setor"], True)
-                        st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)

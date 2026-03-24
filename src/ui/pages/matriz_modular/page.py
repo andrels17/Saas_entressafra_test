@@ -836,11 +836,6 @@ def _resolve_selected_group(base_ctx, search: str, status_filter: str, sort_by: 
 
 
 def _render_group_overview(base_ctx, group_ctx, header_placeholder) -> dict:
-    if st.session_state.get("matriz_show_legend"):
-        st.markdown("**Legenda:** pendente · em andamento · concluido · travado · nao aplica")
-
-    _render_missing_services_alert(group_ctx)
-
     render_group_header(
         placeholder=header_placeholder,
         grupo_nome=group_ctx.grupo_nome,
@@ -852,6 +847,11 @@ def _render_group_overview(base_ctx, group_ctx, header_placeholder) -> dict:
         revisao_id=group_ctx.revisao_id,
         grupo_id=group_ctx.grupo_id,
     )
+
+    if st.session_state.get("matriz_show_legend"):
+        st.caption("Legenda: pendente · em andamento · concluido · travado · nao aplica")
+
+    _render_missing_services_alert(group_ctx)
 
     return _prepare_analytics(base_ctx, group_ctx)
 
@@ -870,7 +870,7 @@ def _section_state_key(group_ctx) -> str:
 
 def _open_matrix_section_if_needed(group_ctx) -> None:
     if st.session_state.pop(f"_mtz_goto_matriz_{group_ctx.grupo_id}", False):
-        st.session_state[_section_state_key(group_ctx)] = "⚙️ Matriz"
+        st.session_state[_section_state_key(group_ctx)] = "Matriz"
 
 
 def _sync_pdf_group_signature(base_ctx, group_ctx) -> None:
@@ -972,17 +972,18 @@ def _render_export_section(base_ctx, group_ctx) -> None:
     )
 
 
-def _render_section_switcher(group_ctx, can_edit: bool) -> str:
+def _render_section_switcher(group_ctx, can_edit: bool, *, title: bool = True) -> str:
     options = _get_sections(can_edit)
     state_key = _section_state_key(group_ctx)
-    st.session_state.setdefault(state_key, "⚙️ Matriz")
+    st.session_state.setdefault(state_key, "Matriz")
 
-    current_value = st.session_state.get(state_key, "⚙️ Matriz")
+    current_value = st.session_state.get(state_key, "Matriz")
     if current_value not in options:
         current_value = options[0]
         st.session_state[state_key] = current_value
 
-    st.markdown("### Navegação rápida")
+    if title:
+        st.markdown("### Navegação rápida")
     try:
         picked = st.segmented_control(
             "Seção",
@@ -1030,7 +1031,7 @@ def _render_active_section(base_ctx, group_ctx, analytics_data, active_section: 
 def _render_sections(base_ctx, group_ctx, analytics_data) -> None:
     _open_matrix_section_if_needed(group_ctx)
     _sync_pdf_group_signature(base_ctx, group_ctx)
-    active_section = _render_section_switcher(group_ctx, base_ctx.can_edit)
+    active_section = _render_section_switcher(group_ctx, base_ctx.can_edit, title=False)
     st.divider()
     _render_active_section(base_ctx, group_ctx, analytics_data, active_section)
 
@@ -1051,6 +1052,7 @@ def render_matriz() -> None:
 
         analytics_data = _render_group_overview(base_ctx, group_ctx, header_placeholder)
         _prewarm_matrix_caches(base_ctx, group_ctx)
+        st.markdown("### Navegação rápida")
         _render_sections(base_ctx, group_ctx, analytics_data)
     except Exception as e:
         st.error("Erro ao renderizar a Matriz.")
