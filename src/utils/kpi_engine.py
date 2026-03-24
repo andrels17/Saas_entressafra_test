@@ -51,9 +51,11 @@ def _sb_from_token(token: str = ""):
     return sb
 
 
+@st.cache_data(ttl=120, show_spinner=False)
 def _get_revisao_status(tenant_id: str, revisao_id: str, _token: str = "") -> str:
     """Busca o status da revisão para decidir o TTL de cache.
 
+    Cacheado por 120s para evitar uma query extra a cada get_group_kpis.
     Retorna "ativa" (default seguro) ou "concluida".
     """
     try:
@@ -81,10 +83,11 @@ def invalidate_kpi_cache() -> None:
         from src.utils.kpi_engine import invalidate_kpi_cache
         invalidate_kpi_cache()
     """
-    try:
-        get_group_kpis.clear()
-    except Exception:
-        pass  # cache pode não estar inicializado
+    for fn in (get_group_kpis, _get_group_kpis_concluded, _get_revisao_status):
+        try:
+            fn.clear()
+        except Exception:
+            pass  # cache pode não estar inicializado
     # Incrementa o 'ver' na sessão — força nova chave de cache mesmo sem
     # clear()
     ver = st.session_state.get("_kpi_ver", 0)
