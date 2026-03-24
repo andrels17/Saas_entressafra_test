@@ -25,6 +25,47 @@ from .styles import _inject_css
 from .summary_tab import render_summary_tab
 
 
+def _render_skeleton() -> None:
+    st.markdown(
+        """
+        <div style="padding:20px 0">
+            <div style="
+                height:28px;
+                width:280px;
+                background:rgba(255,255,255,.08);
+                border-radius:8px;
+                margin-bottom:12px;
+                animation:pulse 1.2s infinite;
+            "></div>
+
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+                <div style="height:80px;background:rgba(255,255,255,.06);border-radius:12px;animation:pulse 1.2s infinite"></div>
+                <div style="height:80px;background:rgba(255,255,255,.06);border-radius:12px;animation:pulse 1.2s infinite"></div>
+                <div style="height:80px;background:rgba(255,255,255,.06);border-radius:12px;animation:pulse 1.2s infinite"></div>
+                <div style="height:80px;background:rgba(255,255,255,.06);border-radius:12px;animation:pulse 1.2s infinite"></div>
+            </div>
+
+            <div style="
+                margin-top:16px;
+                height:320px;
+                background:rgba(255,255,255,.05);
+                border-radius:12px;
+                animation:pulse 1.2s infinite;
+            "></div>
+        </div>
+
+        <style>
+        @keyframes pulse {
+            0% { opacity: .60; }
+            50% { opacity: 1; }
+            100% { opacity: .60; }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 @st.cache_data(ttl=60, show_spinner=False)
 def _build_evo_chart_data(
     tarefas_json: str,
@@ -984,12 +1025,20 @@ def render_matriz() -> None:
             return
 
         header_placeholder, search, status_filter, sort_by = _render_toolbar(base_ctx)
+
+        skeleton = st.empty()
+        with skeleton.container():
+            _render_skeleton()
+
         group_ctx = _resolve_selected_group(base_ctx, search, status_filter, sort_by)
         if not group_ctx:
+            skeleton.empty()
             return
 
         analytics_data = _render_group_overview(base_ctx, group_ctx, header_placeholder)
         _prewarm_matrix_caches(base_ctx, group_ctx)
+
+        skeleton.empty()
         _render_sections(base_ctx, group_ctx, analytics_data)
     except Exception as e:
         st.error("Erro ao renderizar a Matriz.")
