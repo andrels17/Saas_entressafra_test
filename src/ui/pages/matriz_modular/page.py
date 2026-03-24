@@ -857,10 +857,10 @@ def _render_group_overview(base_ctx, group_ctx, header_placeholder) -> dict:
 
 
 def _get_sections(can_edit: bool) -> list[str]:
-    sections = ["📊 Resumo", "⚙️ Matriz", "📈 Evolução", "🧠 Analytics", "⏱️ Tempos"]
+    sections = ["Resumo", "Matriz", "Evolução", "Análise", "Tempos"]
     if can_edit:
-        sections.append("✏️ Editar célula")
-    sections.append("⬇️ Exportar")
+        sections.append("Editar célula")
+    sections.append("Exportar")
     return sections
 
 
@@ -1010,19 +1010,19 @@ def _render_section_switcher(group_ctx, can_edit: bool) -> str:
 
 def _render_active_section(base_ctx, group_ctx, analytics_data, active_section: str) -> None:
     st.markdown('<div class="mtz-section-wrap">', unsafe_allow_html=True)
-    if active_section == "📊 Resumo":
+    if active_section == "Resumo":
         _render_resumo_section(group_ctx)
-    elif active_section == "⚙️ Matriz":
+    elif active_section == "Matriz":
         _render_matriz_section(base_ctx, group_ctx)
-    elif active_section == "📈 Evolução":
+    elif active_section == "Evolução":
         _render_evolucao_tab(group_ctx, base_ctx)
-    elif active_section == "🧠 Analytics":
+    elif active_section == "Análise":
         _render_analytics_tab(group_ctx, analytics_data)
-    elif active_section == "⏱️ Tempos":
+    elif active_section == "Tempos":
         _render_tempos_section(base_ctx, group_ctx)
-    elif active_section == "✏️ Editar célula":
+    elif active_section == "Editar célula":
         _render_editor_section(base_ctx, group_ctx)
-    elif active_section == "⬇️ Exportar":
+    elif active_section == "Exportar":
         _render_export_section(base_ctx, group_ctx)
     st.markdown('</div>', unsafe_allow_html=True)
 
