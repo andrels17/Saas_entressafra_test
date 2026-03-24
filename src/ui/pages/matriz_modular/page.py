@@ -406,9 +406,11 @@ def _render_toolbar(base_ctx):
         st.markdown('<div class="enterprise-title">Matriz Operacional</div>', unsafe_allow_html=True)
         st.markdown('<div class="enterprise-sub">Filtros, revisão e acesso rápido aos grupos</div>', unsafe_allow_html=True)
 
+        clear_dept = False
+        show_all = False
         reload_data = False
 
-        row1_c1, row1_c2, row1_c3, row1_c4 = st.columns([1.6, 1.0, 0.7, 0.7], vertical_alignment="bottom")
+        row1_c1, row1_c2, row1_c3 = st.columns([1.7, 1.1, 0.7], vertical_alignment="bottom")
         with row1_c1:
             st.session_state.setdefault("matriz_grp_search", "")
             search = st.text_input(
@@ -437,15 +439,8 @@ def _render_toolbar(base_ctx):
                 step=20,
                 key="mtz_lim_pick",
             )
-        with row1_c4:
-            reload_data = st.button(
-                "↻ Atualizar",
-                key="mtz_reload",
-                use_container_width=True,
-                help="Recarrega os dados da matriz e atualiza os indicadores.",
-            )
 
-        row2_c1, row2_c2 = st.columns([1.05, 1.05], vertical_alignment="bottom")
+        row2_c1, row2_c2, row2_c3 = st.columns([1.05, 1.05, 1.95], vertical_alignment="bottom")
         with row2_c1:
             status_filter = st.selectbox(
                 "Status",
@@ -460,6 +455,53 @@ def _render_toolbar(base_ctx):
                 index=1,
                 key="mtz_sort_by",
             )
+        with row2_c3:
+            actions_left, actions_right = st.columns([0.60, 1.40], gap="medium")
+            with actions_left:
+                st.session_state["matriz_show_legend"] = st.toggle(
+                    "Legenda",
+                    value=bool(st.session_state["matriz_show_legend"]),
+                    key="mtz_leg",
+                )
+            with actions_right:
+                st.markdown('<div class="mtz-inline-actions">', unsafe_allow_html=True)
+                a1, a2, a3 = st.columns([0.90, 1.00, 1.15], gap="small")
+                with a1:
+                    st.markdown('<div class="mtz-btn-ghost">', unsafe_allow_html=True)
+                    clear_dept = st.button(
+                        "🧹 Limpar",
+                        key="mtz_clear_dept",
+                        use_container_width=True,
+                        help="Remove o departamento selecionado e mantém os demais filtros.",
+                    )
+                    st.markdown("</div>", unsafe_allow_html=True)
+                with a2:
+                    st.markdown('<div class="mtz-btn-neutral">', unsafe_allow_html=True)
+                    show_all = st.button(
+                        "▦ Ver todos",
+                        key="mtz_show_all",
+                        use_container_width=True,
+                        help="Exibe todos os grupos novamente e limpa a busca atual.",
+                    )
+                    st.markdown("</div>", unsafe_allow_html=True)
+                with a3:
+                    st.markdown('<div class="mtz-btn-primary">', unsafe_allow_html=True)
+                    reload_data = st.button(
+                        "↻ Atualizar",
+                        key="mtz_reload",
+                        use_container_width=True,
+                        help="Recarrega os dados da matriz e atualiza os indicadores.",
+                    )
+                    st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+
+        if clear_dept:
+            st.session_state["matriz_departamento_id"] = None
+            st.rerun()
+        if show_all:
+            st.session_state["matriz_grp_search"] = ""
+            st.session_state["matriz_departamento_id"] = None
+            st.rerun()
         if reload_data:
             _invalidate_matrix_perf_cache()
             handle_toolbar_reload()
@@ -794,6 +836,9 @@ def _resolve_selected_group(base_ctx, search: str, status_filter: str, sort_by: 
 
 
 def _render_group_overview(base_ctx, group_ctx, header_placeholder) -> dict:
+    if st.session_state.get("matriz_show_legend"):
+        st.markdown("**Legenda:** pendente · em andamento · concluido · travado · nao aplica")
+
     _render_missing_services_alert(group_ctx)
 
     render_group_header(
@@ -937,62 +982,55 @@ def _render_section_switcher(group_ctx, can_edit: bool) -> str:
         current_value = options[0]
         st.session_state[state_key] = current_value
 
-    helper = {
-        "Matriz": "visão operacional principal",
-        "Resumo": "síntese dos principais indicadores",
-        "Evolução": "histórico e avanço por semana",
-        "Análise": "leitura inteligente dos gargalos",
-        "Tempos": "duração e produtividade",
-        "Editar célula": "ajustes rápidos na execução",
-        "Editar lote": "edição em massa da matriz",
-        "Exportar": "geração e download de arquivos",
-    }
+    widget_key = f"{state_key}_segmented"
+    if st.session_state.get(widget_key) not in options:
+        st.session_state[widget_key] = current_value
 
-    active_label = current_value
-    st.markdown('<div class="mtz-quicknav-shell">', unsafe_allow_html=True)
-    st.markdown(
-        f"""
-        <div class="mtz-quicknav-head">
-            <div>
-                <div class="mtz-quicknav-title">Navegação rápida</div>
-                <div class="mtz-quicknav-sub">Troque de área sem poluir o topo da matriz.</div>
-            </div>
-            <div class="mtz-quicknav-active">Em foco: <strong>{active_label}</strong></div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    nav_head, nav_chip = st.columns([0.82, 0.18])
+    with nav_head:
+        st.markdown(
+            '<div class="mtz-quick-nav-head">'
+            '<div class="mtz-quick-nav-title">Navegação rápida</div>'
+            '<div class="mtz-quick-nav-sub">Troque de área sem poluir o topo da matriz.</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
+    picked = None
     try:
         picked = st.segmented_control(
             "Seção",
             options=options,
             selection_mode="single",
             default=current_value,
-            key=f"{state_key}_segmented",
+            key=widget_key,
             label_visibility="collapsed",
         )
-        if picked:
-            st.session_state[state_key] = picked
     except Exception:
+        radio_key = f"{state_key}_radio"
+        if st.session_state.get(radio_key) not in options:
+            st.session_state[radio_key] = current_value
         picked = st.radio(
             "Seção",
             options=options,
             index=options.index(current_value),
             horizontal=True,
-            key=f"{state_key}_radio",
+            key=radio_key,
             label_visibility="collapsed",
         )
-        st.session_state[state_key] = picked
 
-    active_label = st.session_state[state_key]
-    st.markdown(
-        f'<div class="mtz-quicknav-foot">Área ativa: <strong>{active_label}</strong> <span>•</span> {helper.get(active_label, "navegação operacional")}</div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown('</div>', unsafe_allow_html=True)
+    active_section = picked if picked in options else st.session_state.get(widget_key, current_value)
+    if active_section not in options:
+        active_section = current_value
+    st.session_state[state_key] = active_section
 
-    return st.session_state[state_key]
+    with nav_chip:
+        st.markdown(
+            f'<div class="mtz-focus-chip-wrap"><span class="mtz-focus-chip">Em foco: {active_section}</span></div>',
+            unsafe_allow_html=True,
+        )
+
+    return active_section
 
 
 def _render_active_section(base_ctx, group_ctx, analytics_data, active_section: str) -> None:
@@ -1014,8 +1052,10 @@ def _render_active_section(base_ctx, group_ctx, analytics_data, active_section: 
     st.markdown('</div>', unsafe_allow_html=True)
 
 
-def _render_sections(base_ctx, group_ctx, analytics_data, active_section: str) -> None:
+def _render_sections(base_ctx, group_ctx, analytics_data) -> None:
+    _open_matrix_section_if_needed(group_ctx)
     _sync_pdf_group_signature(base_ctx, group_ctx)
+    active_section = _render_section_switcher(group_ctx, base_ctx.can_edit)
     st.divider()
     _render_active_section(base_ctx, group_ctx, analytics_data, active_section)
 
@@ -1035,10 +1075,8 @@ def render_matriz() -> None:
             return
 
         analytics_data = _render_group_overview(base_ctx, group_ctx, header_placeholder)
-        _open_matrix_section_if_needed(group_ctx)
-        active_section = _render_section_switcher(group_ctx, base_ctx.can_edit)
         _prewarm_matrix_caches(base_ctx, group_ctx)
-        _render_sections(base_ctx, group_ctx, analytics_data, active_section)
+        _render_sections(base_ctx, group_ctx, analytics_data)
     except Exception as e:
         st.error("Erro ao renderizar a Matriz.")
         st.exception(e)
