@@ -975,62 +975,45 @@ def _render_export_section(base_ctx, group_ctx) -> None:
 def _render_section_switcher(group_ctx, can_edit: bool) -> str:
     options = _get_sections(can_edit)
     state_key = _section_state_key(group_ctx)
+    widget_key = f"{state_key}_segmented"
+    radio_key = f"{state_key}_radio"
+
     st.session_state.setdefault(state_key, "Matriz")
 
     current_value = st.session_state.get(state_key, "Matriz")
     if current_value not in options:
-        current_value = options[0]
+        current_value = "Matriz" if "Matriz" in options else options[0]
         st.session_state[state_key] = current_value
 
-    widget_key = f"{state_key}_segmented"
     if st.session_state.get(widget_key) not in options:
         st.session_state[widget_key] = current_value
+    if st.session_state.get(radio_key) not in options:
+        st.session_state[radio_key] = current_value
 
-    nav_head, nav_chip = st.columns([0.82, 0.18])
-    with nav_head:
-        st.markdown(
-            '<div class="mtz-quick-nav-head">'
-            '<div class="mtz-quick-nav-title">Navegação rápida</div>'
-            '<div class="mtz-quick-nav-sub">Troque de área sem poluir o topo da matriz.</div>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-
-    picked = None
+    st.markdown("### Navegação rápida")
     try:
         picked = st.segmented_control(
             "Seção",
             options=options,
             selection_mode="single",
-            default=current_value,
             key=widget_key,
             label_visibility="collapsed",
         )
+        if picked and picked != st.session_state.get(state_key):
+            st.session_state[state_key] = picked
     except Exception:
-        radio_key = f"{state_key}_radio"
-        if st.session_state.get(radio_key) not in options:
-            st.session_state[radio_key] = current_value
         picked = st.radio(
             "Seção",
             options=options,
-            index=options.index(current_value),
+            index=options.index(st.session_state.get(radio_key, current_value)),
             horizontal=True,
             key=radio_key,
             label_visibility="collapsed",
         )
+        if picked != st.session_state.get(state_key):
+            st.session_state[state_key] = picked
 
-    active_section = picked if picked in options else st.session_state.get(widget_key, current_value)
-    if active_section not in options:
-        active_section = current_value
-    st.session_state[state_key] = active_section
-
-    with nav_chip:
-        st.markdown(
-            f'<div class="mtz-focus-chip-wrap"><span class="mtz-focus-chip">Em foco: {active_section}</span></div>',
-            unsafe_allow_html=True,
-        )
-
-    return active_section
+    return st.session_state.get(state_key, current_value)
 
 
 def _render_active_section(base_ctx, group_ctx, analytics_data, active_section: str) -> None:
