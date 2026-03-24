@@ -345,7 +345,7 @@ def _build_pdf_tables(
                 if right in order_map:
                     service_name, suffix = left, right
             except Exception:
-                pass  # ignorado — operação opcional
+                pass
             if service_name not in by_service:
                 by_service[service_name] = {
                     "name": service_name, "cols": [
@@ -627,5 +627,3 @@ def _build_pdf_tables(
 
     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
     return buf.getvalue()
-
-
