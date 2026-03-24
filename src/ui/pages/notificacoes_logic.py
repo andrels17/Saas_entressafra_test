@@ -274,10 +274,10 @@ def build_pdf_alertas(alertas: dict, revisao: dict) -> bytes:
     n_upd = len(alertas["sem_update"])
     n_risc = len(alertas["risco_prazo"])
     kpi_t = Table([[
-        Paragraph(f'<font color="#6B7280" size="8">🚫 Travados</font><br/><b><font size="16" color="#EF4444">{n_trav}</font></b>', p),
-        Paragraph(f'<font color="#6B7280" size="8">⬜ Sem início</font><br/><b><font size="16">{n_sem}</font></b>', p),
-        Paragraph(f'<font color="#6B7280" size="8">⏸ Parados</font><br/><b><font size="16">{n_upd}</font></b>', p),
-        Paragraph(f'<font color="#6B7280" size="8">⚠️ Risco prazo</font><br/><b><font size="16" color="#F59E0B">{n_risc}</font></b>', p),
+        Paragraph(f'<font color="#6B7280" size="8">Travados</font><br/><b><font size="16" color="#EF4444">{n_trav}</font></b>', p),
+        Paragraph(f'<font color="#6B7280" size="8">Sem início</font><br/><b><font size="16">{n_sem}</font></b>', p),
+        Paragraph(f'<font color="#6B7280" size="8">Parados</font><br/><b><font size="16">{n_upd}</font></b>', p),
+        Paragraph(f'<font color="#6B7280" size="8">Risco prazo</font><br/><b><font size="16" color="#F59E0B">{n_risc}</font></b>', p),
     ]], colWidths=[pw / 4] * 4, rowHeights=[1.4 * cm])
     kpi_t.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5E7EB")),
@@ -335,13 +335,13 @@ def build_pdf_alertas(alertas: dict, revisao: dict) -> bytes:
         story.append(Spacer(1, 0.4 * cm))
 
     append_df_table(alertas["travados"], ["Frota", "Modelo", "Grupo", "Setor", "Serviço", "Dias travado", "Obs."],
-                    "🚫 Travados sem resolução", (colors.HexColor("#7F1D1D"), colors.white))
+                    "Travados sem resolução", (colors.HexColor("#7F1D1D"), colors.white))
     append_df_table(alertas["sem_inicio"], ["Frota", "Modelo", "Grupo", "Setor", "Serviço", "Dias sem update"],
-                    "⬜ Sem nenhum apontamento", (colors.HexColor("#1E3A5F"), colors.white))
+                    "Sem nenhum apontamento", (colors.HexColor("#1E3A5F"), colors.white))
     append_df_table(alertas["sem_update"], ["Frota", "Modelo", "Grupo", "Setor", "Serviço", "Status", "Dias parado"],
-                    "⏸ Parados (sem atualização)", (colors.HexColor("#374151"), colors.white))
+                    "Parados (sem atualização)", (colors.HexColor("#374151"), colors.white))
     append_df_table(alertas["risco_prazo"], ["Frota", "Modelo", "Grupo", "% Atual", "% Esperado", "Atraso (p.p.)"],
-                    "⚠️ Risco de não concluir no prazo", (colors.HexColor("#78350F"), colors.white))
+                    "Risco de não concluir no prazo", (colors.HexColor("#78350F"), colors.white))
 
     def footer(canvas, _doc):
         canvas.saveState()
