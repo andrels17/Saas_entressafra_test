@@ -453,7 +453,7 @@ def render_home_overview() -> None:
     st.divider()
 
     # ── Tabs com on_change lazy loading ──────────────────────────────────────
-    _HOME_TABS = ["📊 Resumo", "⏳ Pendentes", "⚠️ Risco", "📈 Tendência"]
+    _HOME_TABS = ["Resumo", "Pendentes", "Risco", "Tendência"]
 
     def _on_home_tab_change() -> None:
         st.session_state["_home_tab"] = st.session_state["_home_tab_ctrl"]
@@ -472,17 +472,17 @@ def render_home_overview() -> None:
     )
     active_home = st.session_state.get("_home_tab", _HOME_TABS[0])
 
-    if active_home == "📊 Resumo":
+    if active_home == "Resumo":
         _fragment_ranking(scope, tenant_id, rev["id"], ver)
 
-    elif active_home == "⏳ Pendentes":
+    elif active_home == "Pendentes":
         st.markdown("### Departamentos (visão de fim)")
         _fragment_departamentos(dsum, dep_total, dept_to_name, scope)
 
-    elif active_home == "⚠️ Risco":
+    elif active_home == "Risco":
         st.markdown("### Risco por departamento")
         _fragment_risco(kdf, gid_to_dept, dept_to_name)
 
-    else:  # 📈 Tendência
+    else:  # Tendência
         st.markdown("### Tendência semanal")
         _fragment_tendencia(tenant_id, rev["id"], ver, week, scope)
