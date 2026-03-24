@@ -126,7 +126,7 @@ def _fragment_ranking(
                               ascending=[True, True]).head(5)
 
     a, b = st.columns(2)
-    sector_map = load_group_sector_view(tenant_id, revisao_id, ver)
+    sector_map = load_group_sector_view(tenant_id, revisao_id, ver, _token=st.session_state.get("sb_access_token", "") or "")
 
     def _render_grupo_card(row: dict, mode: str) -> None:
         gid = row.get("grupo_id")
@@ -241,7 +241,8 @@ def _fragment_tendencia(
     week: int,
     scope: pd.DataFrame,
 ) -> None:
-    if not snapshots_supported(tenant_id, ver):
+    _tok = st.session_state.get("sb_access_token", "") or ""
+    if not snapshots_supported(tenant_id, ver, _token=_tok):
         empty_message(
             "Tabela **kpi_snapshots** não encontrada.",
             "Rode o SQL de próximos passos para habilitar tendência semanal.",
@@ -258,7 +259,7 @@ def _fragment_tendencia(
         else:
             st.error(f"Falha: {msg}")
 
-    sdf = load_snapshots(tenant_id, revisao_id, ver)
+    sdf = load_snapshots(tenant_id, revisao_id, ver, _token=_tok)
     if sdf.empty:
         empty_message("Ainda não há snapshots salvos para esta revisão.")
         return
@@ -337,7 +338,8 @@ def render_home_overview() -> None:
         return
 
     ver = str(st.session_state.get("data_version", "0"))
-    rev = load_revision(tenant_id, ver, get_current_revisao())
+    _tok = st.session_state.get("sb_access_token", "") or ""
+    rev = load_revision(tenant_id, ver, get_current_revisao(), _token=_tok)
     if not rev:
         st.warning("Nenhuma revisão encontrada para este tenant.")
         return
@@ -351,8 +353,8 @@ def render_home_overview() -> None:
         set_current_revisao(rev["id"])
         st.session_state["_sidebar_rev_titulo"] = rev.get("titulo")
         st.session_state["_sidebar_rev_semana"] = week
-    grupos = load_groups(tenant_id, ver)
-    deps = load_depts(tenant_id, ver)
+    grupos = load_groups(tenant_id, ver, _token=_tok)
+    deps = load_depts(tenant_id, ver, _token=_tok)
     gid_to_name = {g["id"]: (g.get("nome") or "—")
                    for g in grupos if g.get("id")}
     gid_to_dept = {g["id"]: g.get("departamento_id")
