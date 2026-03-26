@@ -137,6 +137,48 @@ def _load_equipamentos(sb, tenant_id):
     ) or []
 
 
+
+
+def _norm_key(v):
+    return str(v) if v is not None else None
+
+
+def _dedup_equipamentos(rows):
+    seen = set()
+    out = []
+    for row in rows or []:
+        eid = _norm_key(row.get("id"))
+        if not eid or eid in seen:
+            continue
+        seen.add(eid)
+        item = dict(row)
+        item["id"] = eid
+        item["grupo_id"] = _norm_key(row.get("grupo_id"))
+        out.append(item)
+    return out
+
+
+def _dedup_task_payload(payload):
+    seen = set()
+    out = []
+    for row in payload or []:
+        item = dict(row)
+        item["tenant_id"] = _norm_key(item.get("tenant_id"))
+        item["revisao_id"] = _norm_key(item.get("revisao_id"))
+        item["equipamento_id"] = _norm_key(item.get("equipamento_id"))
+        item["servico_id"] = _norm_key(item.get("servico_id"))
+        key = (
+            item.get("tenant_id"),
+            item.get("revisao_id"),
+            item.get("equipamento_id"),
+            item.get("servico_id"),
+        )
+        if None in key or key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
 def _load_grupo_servicos(sb, tenant_id, grupo_ids):
     if not grupo_ids:
         return {}
@@ -156,6 +198,7 @@ def _load_grupo_servicos(sb, tenant_id, grupo_ids):
 
 def _load_existing_tasks(sb, tenant_id, revisao_id, equipamento_ids):
     existing = {}
+    equipamento_ids = [_norm_key(i) for i in (equipamento_ids or []) if i is not None]
     for ids in _chunk(equipamento_ids, 200):
         rows = (
             sb.table("tarefas_servico")
@@ -167,28 +210,22 @@ def _load_existing_tasks(sb, tenant_id, revisao_id, equipamento_ids):
             .data
         ) or []
         for r in rows:
-            existing.setdefault(r["equipamento_id"], {})[r["servico_id"]] = r
+            eid = _norm_key(r.get("equipamento_id"))
+            sid = _norm_key(r.get("servico_id"))
+            if not eid or not sid:
+                continue
+            item = dict(r)
+            item["equipamento_id"] = eid
+            item["servico_id"] = sid
+            existing.setdefault(eid, {})[sid] = item
     return existing
 
 
 def _insert_tasks(sb, payload):
     if not payload:
-        return
+        return 0
 
-    dedup = []
-    seen = set()
-
-    for row in payload:
-        key = (
-            row.get("tenant_id"),
-            row.get("revisao_id"),
-            row.get("equipamento_id"),
-            row.get("servico_id"),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        dedup.append(row)
+    dedup = _dedup_task_payload(payload)
 
     for batch in _chunk(dedup, 500):
         sb.table("tarefas_servico").upsert(
@@ -196,6 +233,8 @@ def _insert_tasks(sb, payload):
             on_conflict="tenant_id,revisao_id,equipamento_id,servico_id",
             ignore_duplicates=True,
         ).execute()
+
+    return len(dedup)
 
 
 def _update_tasks_status(sb, ids, status="nao_aplica"):
@@ -800,7 +839,7 @@ def render_admin_revisoes() -> None:
             st.warning("Você precisa criar grupos.")
             st.stop()
 
-        eqs = _load_equipamentos(sb, tenant_id)
+        eqs = _dedup_equipamentos(_load_equipamentos(sb, tenant_id))
         total_eq = len(eqs)
         sem_grupo = [e for e in eqs if not e.get("grupo_id")]
         com_grupo = [e for e in eqs if e.get("grupo_id")]
@@ -863,6 +902,7 @@ def render_admin_revisoes() -> None:
                             "etapa_m": False,
                         })
 
+            payload = _dedup_task_payload(payload)
             st.info(f"Tarefas novas a inserir: **{len(payload):,}**")
             if confirmation_panel(
                 state_key="confirm_generate_matrix",
@@ -876,9 +916,9 @@ def render_admin_revisoes() -> None:
                 if payload:
                     try:
                         with st.spinner("Inserindo tarefas..."):
-                            _insert_tasks(sb, payload)
+                            inserted_count = _insert_tasks(sb, payload)
                         st.toast(
-                            "✓ Matriz gerada/atualizada",
+                            f"✓ Matriz gerada/atualizada · inseridas {inserted_count:,} tarefa(s)",
                             icon=":material/check_circle:")
                         nav.rerun_keep_menu()
                     except Exception as e:
@@ -928,6 +968,7 @@ def render_admin_revisoes() -> None:
                         if row and row.get("status") != "nao_aplica":
                             to_na.append(row["id"])
 
+            to_insert = _dedup_task_payload(to_insert)
             st.markdown(f"- Inserir: **{len(to_insert):,}**")
             st.markdown(f"- Marcar como não aplica: **{len(to_na):,}**")
 
@@ -943,13 +984,14 @@ def render_admin_revisoes() -> None:
 
                 try:
                     with st.spinner("Sincronizando..."):
+                        inserted_count = 0
                         if to_insert:
-                            _insert_tasks(sb, to_insert)
+                            inserted_count = _insert_tasks(sb, to_insert)
                         if to_na:
                             _update_tasks_status(
                                 sb, to_na, status="nao_aplica")
                     st.toast(
-                        "✓ Sincronização concluída",
+                        f"✓ Sincronização concluída · inseridas {inserted_count:,} tarefa(s)",
                         icon=":material/check_circle:")
                     nav.rerun_keep_menu()
                 except Exception as e:
