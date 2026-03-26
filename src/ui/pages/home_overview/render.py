@@ -428,10 +428,17 @@ def render_home_overview() -> None:
     )
 
     # ── Carrega KPIs ────────────────────────────────────────────────────────
+    rev_status = str(rev.get("status") or "").strip().lower()
+    prefer_mv = rev_status in ("concluida", "encerrada", "fechada")
+
     with st.spinner("", show_time=False):
-        rev_status = str(rev.get("status") or "").strip().lower()
-        prefer_mv = rev_status in {"concluida", "encerrada", "fechada"}
-        kdf = get_group_kpis(tenant_id, rev["id"], ver, prefer_mv=prefer_mv, _token=st.session_state.get("sb_access_token", ""))
+        kdf = get_group_kpis(
+            tenant_id,
+            rev["id"],
+            ver,
+            prefer_mv=prefer_mv,
+            _token=st.session_state.get("sb_access_token", ""),
+        )
 
     kdf = enforce_home_schema(kdf)
     if kdf is None or (hasattr(kdf, "empty") and kdf.empty):
