@@ -172,8 +172,30 @@ def _load_existing_tasks(sb, tenant_id, revisao_id, equipamento_ids):
 
 
 def _insert_tasks(sb, payload):
-    for batch in _chunk(payload, 500):
-        sb.table("tarefas_servico").insert(batch).execute()
+    if not payload:
+        return
+
+    dedup = []
+    seen = set()
+
+    for row in payload:
+        key = (
+            row.get("tenant_id"),
+            row.get("revisao_id"),
+            row.get("equipamento_id"),
+            row.get("servico_id"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        dedup.append(row)
+
+    for batch in _chunk(dedup, 500):
+        sb.table("tarefas_servico").upsert(
+            batch,
+            on_conflict="tenant_id,revisao_id,equipamento_id,servico_id",
+            ignore_duplicates=True,
+        ).execute()
 
 
 def _update_tasks_status(sb, ids, status="nao_aplica"):
