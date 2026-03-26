@@ -52,6 +52,13 @@ def load_revision(
     except Exception as exc:
         log_error(exc, context="home_overview.load_revision", table="revisoes")
         return None
+
+    rev_id = str(rev_id or "").strip()
+    if rev_id:
+        match = next((r for r in revs if str(r.get("id")) == rev_id), None)
+        if match:
+            return match
+
     for r in revs:
         if str(r.get("status", "")).lower() in (
             "ativa", "em_andamento", "andamento", "aberta", "open"

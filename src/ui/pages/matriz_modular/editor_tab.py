@@ -12,6 +12,7 @@ from src.ui.pages.matriz_runtime import risk_color as _risk_color
 
 def _invalidate_after_editor_write() -> None:
     invalidate_matriz_cache()
+    bump_data_version()
 
 
 def render_editor_tab(

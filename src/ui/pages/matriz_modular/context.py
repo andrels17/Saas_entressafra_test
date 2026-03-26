@@ -11,6 +11,7 @@ from src.auth.permissions import can_edit_matriz, can_view_all_data
 from src.auth.scope import get_my_scope
 from src.ui.core.cache import clear_cached_functions
 from src.ui.core.cache_matrix import invalidate_matriz_cache
+from src.utils.nav import get_current_revisao, set_current_revisao
 from src.utils.supabase_helpers import current_role, current_tenant_id, sb_for_user
 from src.utils.timezone import now_brt as _now_brt
 from src.utils.weeks import week_from_revisao as _week_from_revisao
@@ -114,9 +115,31 @@ def load_matrix_base_context() -> MatrixBaseContext | None:
         st.info("Nenhum grupo disponivel para o seu escopo.")
         return None
 
-    if "matriz_revisao_id" not in st.session_state:
-        ativa = next((r for r in revisoes if r.get("status") == "ativa"), None)
-        st.session_state["matriz_revisao_id"] = ativa["id"] if ativa else (revisoes[0]["id"] if revisoes else None)
+    ativa = next((r for r in revisoes if r.get("status") == "ativa"), None)
+    rev_ids_validos = {str(r["id"]) for r in revisoes if r.get("id")}
+    rev_atual_sessao = str(st.session_state.get("matriz_revisao_id") or "")
+    rev_atual_nav = str(get_current_revisao() or "")
+
+    rev_preferida = None
+    if rev_atual_nav in rev_ids_validos:
+        rev_preferida = rev_atual_nav
+    elif ativa and str(ativa["id"]) in rev_ids_validos:
+        rev_preferida = str(ativa["id"])
+    elif revisoes:
+        rev_preferida = str(revisoes[0]["id"])
+
+    if (not rev_atual_sessao) or (rev_atual_sessao not in rev_ids_validos):
+        st.session_state["matriz_revisao_id"] = rev_preferida
+
+    if st.session_state.get("matriz_revisao_id"):
+        rev_row = next(
+            (r for r in revisoes if str(r.get("id")) == str(st.session_state["matriz_revisao_id"])),
+            None,
+        )
+        set_current_revisao(
+            st.session_state["matriz_revisao_id"],
+            titulo=(rev_row or {}).get("titulo"),
+        )
     if "matriz_grupo_id" not in st.session_state:
         st.session_state["matriz_grupo_id"] = grupos[0]["id"]
 
