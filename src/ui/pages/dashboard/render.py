@@ -64,6 +64,69 @@ def _load_revisao(sb, tenant_id: str) -> dict | None:
 
 
 @st.cache_data(ttl=30, show_spinner=False)
+def _load_base_live_cached(tenant_id: str, revisao_id: str, _token: str = "",
+                           ver: str = "0") -> tuple[list, list]:
+    sb = _sb_from_token(_token)
+    try:
+        tarefas = (
+            sb.table("tarefas_servico")
+            .select("equipamento_id,servico_id,status,etapa_d,etapa_r,etapa_m,updated_at")
+            .eq("tenant_id", tenant_id)
+            .eq("revisao_id", revisao_id)
+            .execute()
+            .data
+        ) or []
+    except Exception as exc:
+        log_error(exc, context="dashboard._load_base_live_cached", table="tarefas_servico")
+        tarefas = []
+
+    try:
+        eq_meta = sb.table("equipamentos").select("id,frota,modelo,departamento_id,grupo_id").eq(
+            "tenant_id", tenant_id).eq("ativo", True).execute().data or []
+    except Exception as exc:
+        log_error(exc, context="dashboard._load_base_live_cached", table="equipamentos")
+        eq_meta = []
+
+    try:
+        grupos = sb.table("equip_grupos").select("id,nome").eq("tenant_id", tenant_id).execute().data or []
+    except Exception as exc:
+        log_error(exc, context="dashboard._load_base_live_cached", table="equip_grupos")
+        grupos = []
+
+    try:
+        servicos = sb.table("servicos").select("id,setor,nome").eq("tenant_id", tenant_id).execute().data or []
+    except Exception as exc:
+        log_error(exc, context="dashboard._load_base_live_cached", table="servicos")
+        servicos = []
+
+    eq_map = {str(r.get("id")): r for r in eq_meta if r.get("id") is not None}
+    grp_map = {str(r.get("id")): (r.get("nome") or "—") for r in grupos if r.get("id") is not None}
+    svc_map = {str(r.get("id")): r for r in servicos if r.get("id") is not None}
+
+    raw = []
+    for t in tarefas:
+        eq = eq_map.get(str(t.get("equipamento_id"))) or {}
+        svc = svc_map.get(str(t.get("servico_id"))) or {}
+        gid = eq.get("grupo_id")
+        raw.append({
+            "equipamento_id": t.get("equipamento_id"),
+            "grupo_id": gid,
+            "grupo_nome": grp_map.get(str(gid), "—"),
+            "departamento_id": eq.get("departamento_id"),
+            "frota": eq.get("frota"),
+            "modelo": eq.get("modelo"),
+            "servico_id": t.get("servico_id"),
+            "setor_nome": svc.get("setor") or svc.get("nome") or "—",
+            "estado_execucao": t.get("status") or "pendente",
+            "etapa_d": t.get("etapa_d"),
+            "etapa_r": t.get("etapa_r"),
+            "etapa_m": t.get("etapa_m"),
+            "updated_at": t.get("updated_at"),
+        })
+    return raw, eq_meta
+
+
+@st.cache_data(ttl=30, show_spinner=False)
 def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
                       ver: str = "0") -> tuple[list, list]:
     sb = _sb_from_token(_token)
@@ -93,7 +156,13 @@ def _load_base(sb,
                revisao_id: str) -> tuple[pd.DataFrame,
                                          pd.DataFrame]:
     ver = str(st.session_state.get("data_version", "0"))
-    raw_list, eq_list = _load_base_cached(tenant_id, revisao_id, st.session_state.get("sb_access_token", ""), ver)
+    token = st.session_state.get("sb_access_token", "")
+    revisao = _load_revisao(sb, tenant_id) or {}
+    status = str(revisao.get("status") or "").strip().lower()
+    if status in {"ativa", "em_andamento", "andamento", "aberta", "open"}:
+        raw_list, eq_list = _load_base_live_cached(tenant_id, revisao_id, token, ver)
+    else:
+        raw_list, eq_list = _load_base_cached(tenant_id, revisao_id, token, ver)
     raw = pd.DataFrame(raw_list)
     eq_meta = pd.DataFrame(eq_list)
     if not eq_meta.empty and "id" in eq_meta.columns:
