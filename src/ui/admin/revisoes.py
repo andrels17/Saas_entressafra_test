@@ -611,6 +611,11 @@ def render_admin_revisoes() -> None:
                                             {"status": "ativa"}).eq("id", r["id"]).execute()
                                         st.toast(
                                             "✓ Revisão ativada", icon=":material/check_circle:")
+                                        try:
+                                            from src.ui.core.cache_matrix import invalidate_matriz_cache
+                                            invalidate_matriz_cache()
+                                        except Exception:
+                                            pass
                                         nav.rerun_keep_menu()
                                     except Exception as e:
                                         st.error(f"Erro: {e}")
@@ -799,6 +804,11 @@ def render_admin_revisoes() -> None:
                                         f"wiz_fechar_{r['id']}", None)
                                     st.toast(
                                         "🔒 Revisão encerrada.", icon=":material/lock:")
+                                    try:
+                                        from src.ui.core.cache_matrix import invalidate_matriz_cache
+                                        invalidate_matriz_cache()
+                                    except Exception:
+                                        pass
                                     nav.rerun_keep_menu()
                                 except Exception as e:
                                     st.error(f"Erro ao fechar: {e}")
@@ -917,6 +927,13 @@ def render_admin_revisoes() -> None:
                     try:
                         with st.spinner("Inserindo tarefas..."):
                             inserted_count = _insert_tasks(sb, payload)
+                        # Invalida caches para que Dashboard e Home
+                        # reflitam os dados novos imediatamente.
+                        try:
+                            from src.ui.core.cache_matrix import invalidate_matriz_cache
+                            invalidate_matriz_cache()
+                        except Exception:
+                            pass
                         st.toast(
                             f"✓ Matriz gerada/atualizada · inseridas {inserted_count:,} tarefa(s)",
                             icon=":material/check_circle:")
@@ -990,6 +1007,13 @@ def render_admin_revisoes() -> None:
                         if to_na:
                             _update_tasks_status(
                                 sb, to_na, status="nao_aplica")
+                    # Invalida todos os caches após sincronização para garantir
+                    # que Dashboard e Home reflitam os novos dados imediatamente.
+                    try:
+                        from src.ui.core.cache_matrix import invalidate_matriz_cache
+                        invalidate_matriz_cache()
+                    except Exception:
+                        pass
                     st.toast(
                         f"✓ Sincronização concluída · inseridas {inserted_count:,} tarefa(s)",
                         icon=":material/check_circle:")
