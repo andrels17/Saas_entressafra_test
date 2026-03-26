@@ -67,67 +67,99 @@ def _load_revisao(sb, tenant_id: str) -> dict | None:
 def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
                       ver: str = "0") -> tuple[list, list]:
     sb = _sb_from_token(_token)
-    raw = []
+
+    def _fetch_all(query, page_size: int = 1000):
+        rows = []
+        start = 0
+        while True:
+            chunk = query.range(start, start + page_size - 1).execute().data or []
+            rows.extend(chunk)
+            if len(chunk) < page_size:
+                break
+            start += page_size
+        return rows
+
     try:
-        raw = (
+        task_rows = _fetch_all(
             sb.table("tarefas_servico")
-            .select(
-                "equipamento_id,servico_id,status,etapa_d,etapa_r,etapa_m,updated_at,"
-                "equipamentos(id,frota,modelo,grupo_id,equip_grupos(id,nome,departamento_id)),"
-                "servicos(id,setores(nome))"
-            )
+            .select("equipamento_id,servico_id,status,etapa_d,etapa_r,etapa_m,updated_at")
             .eq("tenant_id", tenant_id)
             .eq("revisao_id", revisao_id)
-            .limit(20000)
-            .execute()
-            .data
-        ) or []
+        )
     except Exception as exc:
-        log_error(exc, context="dashboard._load_base_cached.raw", table="tarefas_servico")
-        raw = []
-
-    normalized_raw = []
-    for row in raw:
-        eq = row.get("equipamentos") or {}
-        grp = eq.get("equip_grupos") or {}
-        svc = row.get("servicos") or {}
-        setor = (svc.get("setores") or {}).get("nome")
-        normalized_raw.append({
-            "equipamento_id": row.get("equipamento_id") or eq.get("id"),
-            "grupo_id": grp.get("id") or eq.get("grupo_id"),
-            "grupo_nome": grp.get("nome"),
-            "departamento_id": grp.get("departamento_id"),
-            "frota": eq.get("frota"),
-            "modelo": eq.get("modelo"),
-            "servico_id": row.get("servico_id") or svc.get("id"),
-            "setor_nome": setor,
-            "status": row.get("status"),
-            "estado_execucao": row.get("status"),
-            "etapa_d": row.get("etapa_d"),
-            "etapa_r": row.get("etapa_r"),
-            "etapa_m": row.get("etapa_m"),
-            "updated_at": row.get("updated_at"),
-        })
+        log_error(exc, context="dashboard._load_base_cached", table="tarefas_servico")
+        task_rows = []
 
     try:
-        eq_meta = sb.table("equipamentos").select("id,frota,modelo,departamento_id").eq(
-            "tenant_id", tenant_id).eq("ativo", True).execute().data or []
+        eq_rows = _fetch_all(
+            sb.table("equipamentos")
+            .select("id,frota,modelo,departamento_id,grupo_id")
+            .eq("tenant_id", tenant_id)
+            .eq("ativo", True)
+        )
     except Exception as exc:
         log_error(exc, context="dashboard._load_base_cached", table="equipamentos")
-        eq_meta = []
-    return normalized_raw, eq_meta
+        eq_rows = []
 
+    try:
+        grupo_rows = _fetch_all(
+            sb.table("equip_grupos")
+            .select("id,nome,departamento_id")
+            .eq("tenant_id", tenant_id)
+            .eq("ativo", True)
+        )
+    except Exception as exc:
+        log_error(exc, context="dashboard._load_base_cached", table="equip_grupos")
+        grupo_rows = []
 
-def _load_base(sb,
-               tenant_id: str,
-               revisao_id: str) -> tuple[pd.DataFrame,
-                                         pd.DataFrame]:
-    ver = str(st.session_state.get("data_version", "0"))
-    raw_list, eq_list = _load_base_cached(tenant_id, revisao_id, st.session_state.get("sb_access_token", ""), ver)
-    raw = pd.DataFrame(raw_list)
-    eq_meta = pd.DataFrame(eq_list)
-    if not eq_meta.empty and "id" in eq_meta.columns:
-        eq_meta = eq_meta.rename(columns={"id": "equipamento_id"})
+    serv_rows = []
+    try:
+        serv_rows = _fetch_all(
+            sb.table("servicos")
+            .select("id,nome,setor")
+            .eq("tenant_id", tenant_id)
+        )
+    except Exception as exc:
+        log_error(exc, context="dashboard._load_base_cached", table="servicos")
+
+    eq_map = {str(r.get("id")): r for r in eq_rows if r.get("id") is not None}
+    grupo_map = {str(r.get("id")): r for r in grupo_rows if r.get("id") is not None}
+    serv_map = {str(r.get("id")): r for r in serv_rows if r.get("id") is not None}
+
+    raw = []
+    for t in task_rows:
+        eid = str(t.get("equipamento_id")) if t.get("equipamento_id") is not None else None
+        sid = str(t.get("servico_id")) if t.get("servico_id") is not None else None
+        eq = eq_map.get(eid, {})
+        gid = eq.get("grupo_id")
+        gid_s = str(gid) if gid is not None else None
+        grp = grupo_map.get(gid_s, {})
+        svc = serv_map.get(sid, {})
+        raw.append({
+            "equipamento_id": t.get("equipamento_id"),
+            "grupo_id": gid,
+            "grupo_nome": grp.get("nome"),
+            "departamento_id": eq.get("departamento_id") or grp.get("departamento_id"),
+            "frota": eq.get("frota"),
+            "modelo": eq.get("modelo"),
+            "servico_id": t.get("servico_id"),
+            "setor_nome": svc.get("setor") or "—",
+            "status": t.get("status"),
+            "etapa_d": t.get("etapa_d"),
+            "etapa_r": t.get("etapa_r"),
+            "etapa_m": t.get("etapa_m"),
+            "updated_at": t.get("updated_at"),
+        })
+
+    eq_meta = [
+        {
+            "equipamento_id": r.get("id"),
+            "frota": r.get("frota"),
+            "modelo": r.get("modelo"),
+            "departamento_id": r.get("departamento_id"),
+        }
+        for r in eq_rows
+    ]
     return raw, eq_meta
 
 
@@ -777,7 +809,7 @@ def render_dashboard() -> None:
     if base.empty:
         notice_card(
             "Sem dados de execução",
-            "A revisão foi encontrada, mas a visão consolidada ainda não possui registros. Verifique se a materialized view mv_matriz_base foi atualizada.",
+            "A revisão foi encontrada, mas ainda não há tarefas suficientes para consolidar o dashboard desta revisão.",
             tone="warning",
         )
         return
@@ -788,7 +820,8 @@ def render_dashboard() -> None:
         # estiver desatualizada, mantém o filtro por departamento em vez de zerar o dashboard.
         base = apply_filters(base=normalize_matriz_base(raw, eq_meta), departamento_ids=dep_scope_ids, grupo_ids=None)
 
-    group_kpis_df = get_group_kpis(tenant_id, revisao_id, ver, prefer_mv=False, _token=st.session_state.get("sb_access_token", ""))
+    prefer_mv = str(rev.get("status") or "").lower() in ("concluida", "encerrada", "fechada")
+    group_kpis_df = get_group_kpis(tenant_id, revisao_id, ver, prefer_mv=prefer_mv, _token=st.session_state.get("sb_access_token", ""))
     if group_kpis_df is not None and not group_kpis_df.empty:
         if grp_scope_ids not in (None, []):
             scoped_group_kpis = group_kpis_df[group_kpis_df["grupo_id"].isin(grp_scope_ids)]
