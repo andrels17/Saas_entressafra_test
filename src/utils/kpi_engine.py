@@ -88,11 +88,21 @@ def invalidate_kpi_cache() -> None:
             fn.clear()
         except Exception:
             pass  # cache pode não estar inicializado
-    # Incrementa o 'ver' na sessão — força nova chave de cache mesmo sem
-    # clear()
+    # Incrementa _kpi_ver: a lógica de get_group_kpis usa este valor para
+    # decidir se deve ignorar mv_revisao_grupo_kpis e ir direto ao raw.
+    # Isso garante que após um apontamento os dados sejam sempre recarregados
+    # do banco, independente do estado da view materializada.
     ver = st.session_state.get("_kpi_ver", 0)
-    st.session_state["_kpi_ver"] = ver + 1
-    log.info("Cache de KPIs invalidado (ver=%d)", ver + 1)
+    new_ver = ver + 1
+    st.session_state["_kpi_ver"] = new_ver
+    # Sincroniza também data_version para que caches dependentes (dashboard,
+    # home) recebam a nova chave e não sirvam dados antigos.
+    try:
+        data_ver = st.session_state.get("data_version", "0")
+        st.session_state["data_version"] = str(int(float(data_ver)) + 1)
+    except Exception:
+        st.session_state["data_version"] = str(new_ver)
+    log.info("Cache de KPIs invalidado (kpi_ver=%d)", new_ver)
 
 
 def _fetch_mv(tenant_id: str, revisao_id: str, _token: str = "") -> list[dict]:
@@ -256,7 +266,12 @@ def get_group_kpis(
     if status in ("concluida", "encerrada", "fechada"):
         return _get_group_kpis_concluded(tenant_id, revisao_id, ver, _token)
 
-    if prefer_mv:
+    # Para revisões ativas: se houve invalidação manual de cache (apontamento
+    # ou sincronização recente), pula mv_revisao_grupo_kpis — que depende de
+    # triggers do banco e pode estar desatualizada — e recalcula do raw.
+    # A view materializada só é usada no carregamento inicial (ver == "0").
+    kpi_ver = st.session_state.get("_kpi_ver", 0)
+    if prefer_mv and ver == "0" and kpi_ver == 0:
         mv_rows = _fetch_mv(tenant_id, revisao_id, _token)
         if mv_rows:
             df = _mv_to_df(mv_rows)
