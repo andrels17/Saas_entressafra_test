@@ -903,6 +903,9 @@ def render_dashboard() -> None:
         else:
             effective_group_ids = all_visible_group_ids
 
+    effective_dept_ids = [str(x) for x in (effective_dept_ids or [])]
+    effective_group_ids = [str(x) for x in (effective_group_ids or [])]
+
     selection_summary(
         "Filtro aplicado",
         {
