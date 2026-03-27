@@ -115,8 +115,6 @@ def _fetch_mv(tenant_id: str, revisao_id: str, _token: str = "") -> list[dict]:
 
 def _mv_to_df(mv_rows: list[dict]) -> pd.DataFrame:
     df = pd.DataFrame(mv_rows)
-    if "grupo_id" in df.columns:
-        df["grupo_id"] = df["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None)
     for col in ["eq_count", "svc_count", "done_steps"]:
         df[col] = pd.to_numeric(
             df.get(
@@ -169,7 +167,7 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
         "id",
         tenant_id__eq=tenant_id,
         ativo__eq=True)
-    gids = [str(g["id"]) for g in grupos if g.get("id") not in (None, "")]
+    gids = [str(g["id"]) for g in grupos if g.get("id")]
     if not gids:
         return EMPTY
 
@@ -183,8 +181,8 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
     grp_to_eq: dict[str, list[str]] = defaultdict(list)
     eq_to_gid: dict[str, str] = {}
     for r in eq_rows:
-        gid = str(r.get("grupo_id")) if r.get("grupo_id") not in (None, "") else None
-        eid = str(r.get("id")) if r.get("id") not in (None, "") else None
+        gid = str(r.get("grupo_id")) if r.get("grupo_id") else None
+        eid = str(r.get("id")) if r.get("id") else None
         if gid and eid:
             grp_to_eq[gid].append(eid)
             eq_to_gid[eid] = gid
@@ -193,8 +191,8 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
                            tenant_id__eq=tenant_id, grupo_id__in=gids)
     grp_to_services: dict[str, set[str]] = defaultdict(set)
     for r in tpl_rows:
-        gid = str(r.get("grupo_id")) if r.get("grupo_id") not in (None, "") else None
-        sid = str(r.get("servico_id")) if r.get("servico_id") not in (None, "") else None
+        gid = str(r.get("grupo_id")) if r.get("grupo_id") else None
+        sid = str(r.get("servico_id")) if r.get("servico_id") else None
         if gid and sid:
             grp_to_services[gid].add(sid)
 
@@ -231,7 +229,7 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
                 )
                 trows = []
             for t in trows:
-                eid = str(t.get("equipamento_id")) if t.get("equipamento_id") not in (None, "") else None
+                eid = str(t.get("equipamento_id")) if t.get("equipamento_id") else None
                 gid = eq_to_gid.get(eid)
                 if gid:
                     done_by_gid[gid] += count_etapas(t)
