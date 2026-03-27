@@ -27,11 +27,11 @@ class GroupKPI(TypedDict):
     done_steps: int
     expected_steps: int
     backlog_steps: int
-    pct: int
+    pct: float
 
 
 class GlobalKPI(TypedDict):
-    pct: int
+    pct: float
     done_steps: int
     expected_steps: int
     backlog_steps: int
@@ -48,7 +48,7 @@ class RiscoKPI(TypedDict):
 
 
 _EMPTY_GLOBAL: GlobalKPI = {
-    "pct": 0, "done_steps": 0, "expected_steps": 0, "backlog_steps": 0
+    "pct": 0.0, "done_steps": 0, "expected_steps": 0, "backlog_steps": 0
 }
 
 
@@ -68,18 +68,19 @@ def calc_expected(eq_count: int, svc_count: int) -> int:
     return eq * svc * 3
 
 
-def calc_pct(eq_count: int, svc_count: int, done: int) -> int:
+def calc_pct(eq_count: int, svc_count: int, done: int) -> float:
     """Calcula o percentual de conclusão de um grupo (0–100).
 
-    Retorna 0 se não há equipamentos ou serviços configurados.
+    Retorna 0.0 se não há equipamentos ou serviços configurados.
+    Mantém 1 casa decimal para não "sumir" com progressos pequenos.
     """
     if eq_count <= 0 or svc_count <= 0:
-        return 0
+        return 0.0
     expected = calc_expected(eq_count, svc_count)
     if expected <= 0:
-        return 0
-    raw = int(round(done / expected * 100))
-    return max(0, min(100, raw))
+        return 0.0
+    raw = (done / expected) * 100
+    return max(0.0, min(100.0, round(raw, 1)))
 
 
 def calc_backlog(eq_count: int, svc_count: int, done: int) -> int:
@@ -99,13 +100,13 @@ def build_group_kpi(
     pct = calc_pct(eq_count, svc_count, done_steps)
     backlog = max(expected - done_steps, 0)
     return GroupKPI(
-        grupo_id=grupo_id,
+        grupo_id=str(grupo_id),
         eq_count=int(eq_count),
         svc_count=int(svc_count),
         done_steps=int(done_steps),
         expected_steps=int(expected),
         backlog_steps=int(backlog),
-        pct=int(pct),
+        pct=float(pct),
     )
 
 
@@ -114,6 +115,7 @@ def calc_global_kpis(df: pd.DataFrame) -> GlobalKPI:
 
     Recebe o DataFrame retornado por kpi_engine.get_group_kpis().
     Filtra grupos sem equipamentos ou serviços configurados.
+    Mantém 1 casa decimal para exibir progresso pequeno corretamente.
     """
     if df is None or df.empty:
         return _EMPTY_GLOBAL
@@ -125,9 +127,9 @@ def calc_global_kpis(df: pd.DataFrame) -> GlobalKPI:
     done = int(scope["done_steps"].sum())
     expected = int(scope["expected_steps"].sum())
     backlog = int(scope["backlog_steps"].sum())
-    pct = int(round(done / expected * 100)) if expected > 0 else 0
+    pct = round(done / expected * 100, 1) if expected > 0 else 0.0
     return GlobalKPI(
-        pct=max(0, min(100, pct)),
+        pct=max(0.0, min(100.0, pct)),
         done_steps=done,
         expected_steps=expected,
         backlog_steps=backlog,
@@ -169,9 +171,8 @@ def calc_dept_kpis(df: pd.DataFrame,
 
     g["pct"] = (
         (g["done_steps"] / g["expected_steps"] * 100)
-        .round()
-        .fillna(0)
-        .astype(int)
+        .round(1)
+        .fillna(0.0)
         .clip(0, 100)
     )
     return g[["departamento_id", "pct", "done_steps",
