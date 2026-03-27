@@ -64,18 +64,27 @@ def multiselect_departamentos(
     key: str | None = None,
     allowed_ids: list[str] | None = None,
 ) -> list[str]:
-    options = [
-        (item["id"], item.get("nome", "—"))
-        for item in departamentos
-        if item.get("id") and (allowed_ids is None or item["id"] in allowed_ids)
-    ]
-    label_to_id = {name: dep_id for dep_id, name in options}
-    selected_names = st.multiselect(
+    options: list[tuple[str, str]] = []
+    allowed = {str(x) for x in allowed_ids} if allowed_ids is not None else None
+
+    for item in departamentos:
+        dep_id = item.get("id")
+        if not dep_id:
+            continue
+        dep_id = str(dep_id)
+        if allowed is not None and dep_id not in allowed:
+            continue
+        nome = str(item.get("nome", "—"))
+        display = f"{nome} ({dep_id[:8]})"
+        options.append((display, dep_id))
+
+    label_to_id = {display: dep_id for display, dep_id in options}
+    selected_labels = st.multiselect(
         label,
-        options=[name for _, name in options],
+        options=[display for display, _ in options],
         key=_normalize_key(key, "filter_departamentos"),
     )
-    return [label_to_id[name] for name in selected_names if name in label_to_id]
+    return [label_to_id[label] for label in selected_labels if label in label_to_id]
 
 
 
@@ -87,24 +96,33 @@ def multiselect_grupos(
     allowed_group_ids: list[str] | None = None,
     departamento_ids: list[str] | None = None,
 ) -> list[str]:
-    options = []
+    options: list[tuple[str, str]] = []
+    allowed_groups = {str(x) for x in allowed_group_ids} if allowed_group_ids is not None else None
+    allowed_depts = {str(x) for x in departamento_ids} if departamento_ids else None
+
     for grupo in grupos:
         grupo_id = grupo.get("id")
         if not grupo_id:
             continue
-        if allowed_group_ids is not None and grupo_id not in allowed_group_ids:
-            continue
-        if departamento_ids and grupo.get("departamento_id") not in departamento_ids:
-            continue
-        options.append((grupo_id, grupo.get("nome", "—")))
+        grupo_id = str(grupo_id)
+        grupo_dep_id = str(grupo.get("departamento_id")) if grupo.get("departamento_id") else None
 
-    label_to_id = {name: group_id for group_id, name in options}
-    selected_names = st.multiselect(
+        if allowed_groups is not None and grupo_id not in allowed_groups:
+            continue
+        if allowed_depts and grupo_dep_id not in allowed_depts:
+            continue
+
+        nome = str(grupo.get("nome", "—"))
+        display = f"{nome} ({grupo_id[:8]})"
+        options.append((display, grupo_id))
+
+    label_to_id = {display: group_id for display, group_id in options}
+    selected_labels = st.multiselect(
         label,
-        options=[name for _, name in options],
+        options=[display for display, _ in options],
         key=_normalize_key(key, "filter_grupos"),
     )
-    return [label_to_id[name] for name in selected_names if name in label_to_id]
+    return [label_to_id[label] for label in selected_labels if label in label_to_id]
 
 
 
