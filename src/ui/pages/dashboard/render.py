@@ -129,34 +129,75 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
     except Exception as exc:
         log_error(exc, context="dashboard._load_base_cached", table="servicos")
 
+    grupo_servicos_rows = []
+    try:
+        grupo_servicos_rows = _fetch_all(
+            sb.table("grupo_servicos")
+            .select("grupo_id,servico_id")
+            .eq("tenant_id", tenant_id)
+        )
+    except Exception as exc:
+        log_error(exc, context="dashboard._load_base_cached", table="grupo_servicos")
+
     eq_map = {str(r.get("id")): r for r in eq_rows if r.get("id") is not None}
     grupo_map = {str(r.get("id")): r for r in grupo_rows if r.get("id") is not None}
     serv_map = {str(r.get("id")): r for r in serv_rows if r.get("id") is not None}
 
-    raw = []
+    # Fonte única de verdade do dashboard: grade esperada de
+    # equipamento ativo × serviço do template do grupo.
+    #
+    # Isso evita três problemas que distorciam os percentuais:
+    # 1) tarefas órfãs / antigas sem equipamento válido entrando no cálculo;
+    # 2) equipamentos sem nenhuma tarefa ainda sumindo do dashboard;
+    # 3) um único equipamento "—" agregando milhares de linhas.
+    group_services: dict[str, list[str]] = {}
+    for row in grupo_servicos_rows:
+        gid = row.get("grupo_id")
+        sid = row.get("servico_id")
+        if gid is None or sid is None:
+            continue
+        gid_s = str(gid)
+        sid_s = str(sid)
+        group_services.setdefault(gid_s, [])
+        if sid_s not in group_services[gid_s]:
+            group_services[gid_s].append(sid_s)
+
+    task_map: dict[tuple[str, str], dict] = {}
     for t in task_rows:
         eid = str(t.get("equipamento_id")) if t.get("equipamento_id") is not None else None
         sid = str(t.get("servico_id")) if t.get("servico_id") is not None else None
-        eq = eq_map.get(eid, {})
+        if not eid or not sid or eid not in eq_map:
+            continue
+        task_map[(eid, sid)] = t
+
+    raw = []
+    for eid, eq in eq_map.items():
         gid = eq.get("grupo_id")
         gid_s = str(gid) if gid is not None else None
+        if not gid_s:
+            continue
         grp = grupo_map.get(gid_s, {})
-        svc = serv_map.get(sid, {})
-        raw.append({
-            "equipamento_id": t.get("equipamento_id"),
-            "grupo_id": gid,
-            "grupo_nome": grp.get("nome"),
-            "departamento_id": eq.get("departamento_id") or grp.get("departamento_id"),
-            "frota": eq.get("frota"),
-            "modelo": eq.get("modelo"),
-            "servico_id": t.get("servico_id"),
-            "setor_nome": svc.get("setor") or "—",
-            "status": t.get("status"),
-            "etapa_d": t.get("etapa_d"),
-            "etapa_r": t.get("etapa_r"),
-            "etapa_m": t.get("etapa_m"),
-            "updated_at": t.get("updated_at"),
-        })
+        service_ids = group_services.get(gid_s, [])
+        if not service_ids:
+            continue
+        for sid in service_ids:
+            svc = serv_map.get(str(sid), {})
+            t = task_map.get((eid, str(sid)), {})
+            raw.append({
+                "equipamento_id": eq.get("id"),
+                "grupo_id": gid,
+                "grupo_nome": grp.get("nome"),
+                "departamento_id": eq.get("departamento_id") or grp.get("departamento_id"),
+                "frota": eq.get("frota"),
+                "modelo": eq.get("modelo"),
+                "servico_id": sid,
+                "setor_nome": svc.get("setor") or "—",
+                "status": t.get("status") or "pendente",
+                "etapa_d": t.get("etapa_d"),
+                "etapa_r": t.get("etapa_r"),
+                "etapa_m": t.get("etapa_m"),
+                "updated_at": t.get("updated_at"),
+            })
 
     eq_meta = [
         {
