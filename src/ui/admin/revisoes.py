@@ -15,6 +15,8 @@ from postgrest.exceptions import APIError
 from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_role
 from src.db.supabase_client import get_supabase_service, get_supabase_anon
 from src.utils import nav
+from src.services.dashboard_cache_service import refresh_dashboard_cache
+from src.ui.core.cache import bump_data_version
 
 
 STATUSES = ["pendente", "em_andamento", "concluido", "travado", "nao_aplica"]
@@ -515,7 +517,18 @@ def render_admin_revisoes() -> None:
 
             try:
                 svc = get_supabase_service()
-                svc.table("revisoes").insert(payload).execute()
+                created = (
+                    svc.table("revisoes")
+                    .insert(payload)
+                    .execute()
+                    .data
+                ) or []
+                created_row = created[0] if created else None
+                revisao_id = str((created_row or {}).get("id") or "")
+                if revisao_id:
+                    refresh_dashboard_cache(svc, tenant_id, revisao_id)
+                    bump_data_version()
+                    nav.set_current_revisao(revisao_id, titulo=t)
                 st.toast("✓ Revisão criada", icon=":material/check_circle:")
                 nav.rerun_keep_menu()
             except Exception as e:

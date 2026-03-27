@@ -6,11 +6,14 @@ from src.ui.components.confirmations import confirmation_panel
 from src.ui.components.forms import form_submit_button, validation_summary
 from src.utils import nav
 from src.utils.supabase_helpers import current_user_id
+from src.ui.core.cache import bump_data_version
 from src.ui.core.cache_matrix import invalidate_matriz_cache
+from src.services.dashboard_cache_service import refresh_dashboard_cache
 from src.ui.pages.matriz_runtime import risk_color as _risk_color
 
 
-def _invalidate_after_editor_write() -> None:
+def _invalidate_after_editor_write(sb, tenant_id, revisao_id) -> None:
+    refresh_dashboard_cache(sb, tenant_id, revisao_id)
     invalidate_matriz_cache()
     bump_data_version()
 
@@ -55,7 +58,7 @@ def render_editor_tab(
                         if st.button("👁 Revelar", key=f"rev_oculto_{_eid}",
                                      use_container_width=True, type="primary"):
                             revelar_equipamento(sb, tenant_id, revisao_id, _eid)
-                            _invalidate_after_editor_write()
+                            _invalidate_after_editor_write(sb, tenant_id, revisao_id)
                             st.toast(f"{_label} revelado ✅")
                             st.rerun()
             except Exception as _e:
@@ -107,7 +110,7 @@ def render_editor_tab(
                          help="Oculta o equipamento dos KPIs enquanto não parar para manutenção."):
                 try:
                     ocultar_equipamento(sb, tenant_id, revisao_id, equip_sel, current_user_id())
-                    _invalidate_after_editor_write()
+                    _invalidate_after_editor_write(sb, tenant_id, revisao_id)
                     st.toast("Equipamento ocultado ✅ — será revelado automaticamente quando uma etapa for marcada.")
                     st.rerun()
                 except Exception as _write_exc:
@@ -271,7 +274,7 @@ def render_editor_tab(
                         .eq("id", task_ed["id"])
                         .execute()
                     )
-                    _invalidate_after_editor_write()
+                    _invalidate_after_editor_write(sb, tenant_id, revisao_id)
                     st.session_state[f"mat_just_saved_{equip_sel}_{svc_sel}"] = True
                     try:
                         nav.rerun_keep_menu()
@@ -294,7 +297,7 @@ def render_editor_tab(
                 try:
                     sb.table("tarefas_servico").update({"observacao": None}).eq("id", task_ed["id"]).execute()
                     st.toast("Observação removida.")
-                    _invalidate_after_editor_write()
+                    _invalidate_after_editor_write(sb, tenant_id, revisao_id)
                     try:
                         nav.rerun_keep_menu()
                     except Exception:
@@ -506,7 +509,7 @@ def render_bulk_editor(
 
         if ok > 0:
             st.success(f"✅ {ok} equipamento(s) atualizados com sucesso!")
-            _invalidate_after_editor_write()
+            _invalidate_after_editor_write(sb, tenant_id, revisao_id)
             try:
                 nav.rerun_keep_menu()
             except Exception:
