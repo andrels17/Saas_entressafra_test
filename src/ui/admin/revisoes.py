@@ -16,6 +16,7 @@ from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_r
 from src.db.supabase_client import get_supabase_service, get_supabase_anon
 from src.utils import nav
 from src.services.dashboard_cache_service import refresh_dashboard_cache
+from src.services.revisao_delete_service import delete_revisao_completa
 from src.ui.core.cache import bump_data_version
 
 
@@ -276,30 +277,23 @@ def _safe_count_rows(
 
 
 def _delete_revisao_cascade(tenant_id: str, revisao_id: str) -> dict:
+    """
+    Exclui a revisão de forma completa via RPC no banco.
+    Mantém retorno em dict para compatibilidade com a UI atual.
+    """
     svc = get_supabase_service()
-    result = {"historico": 0, "tarefas": 0, "revisoes": 0}
+    resumo = _safe_distinct_task_summary(tenant_id, revisao_id)
 
-    result["historico"] = _safe_count_rows(
-        svc, "historico_eventos", tenant_id, revisao_id)
-    result["tarefas"] = _safe_count_rows(
-        svc, "tarefas_servico", tenant_id, revisao_id)
-
-    # Ordem importante: histórico -> tarefas -> revisão
     try:
-        svc.table("historico_eventos").delete().eq(
-            "tenant_id", tenant_id).eq(
-            "revisao_id", revisao_id).execute()
-    except Exception as _e:
-        import logging; logging.getLogger("saas").warning("revisoes.py: %s", _e)
+        delete_revisao_completa(svc, tenant_id, revisao_id)
+    except Exception as exc:
+        raise RuntimeError(f"Falha ao executar delete_revisao_completa: {exc}") from exc
 
-    svc.table("tarefas_servico").delete().eq(
-        "tenant_id", tenant_id).eq(
-        "revisao_id", revisao_id).execute()
-    svc.table("revisoes").delete().eq(
-        "tenant_id", tenant_id).eq(
-        "id", revisao_id).execute()
-    result["revisoes"] = 1
-    return result
+    return {
+        "historico": int(resumo.get("historico", 0) or 0),
+        "tarefas": int(resumo.get("tarefas_total", 0) or 0),
+        "revisoes": 1,
+    }
 
 
 def _safe_distinct_task_summary(tenant_id: str, revisao_id: str) -> dict:
@@ -586,6 +580,7 @@ def render_admin_revisoes() -> None:
                             with st.spinner("Limpando revisões de teste..."):
                                 n_rev, n_tarefas, n_hist = _bulk_delete_test_revisions(
                                     tenant_id, demo_candidates)
+                            bump_data_version()
                             st.success(
                                 f"Limpeza concluída: {n_rev} revisão(ões), {n_tarefas} tarefa(s) e {n_hist} evento(s) removidos.")
                             nav.rerun_keep_menu()
@@ -716,14 +711,11 @@ def render_admin_revisoes() -> None:
                                         st.session_state.pop(delete_flag, None)
                                         st.session_state.pop(
                                             f"delete_confirm_input_{r['id']}", None)
+                                        bump_data_version()
+                                        if str(nav.get_current_revisao() or "") == str(r["id"]):
+                                            nav.set_current_revisao(None, titulo=None)
                                         st.success(
-                                            f"Revisão excluída. Removidos: {
-                                                res.get(
-                                                    'tarefas',
-                                                    0)} tarefa(s), {
-                                                res.get(
-                                                    'historico',
-                                                    0)} evento(s) e 1 revisão.")
+                                            f"Revisão excluída. Removidos: {res.get('tarefas', 0)} tarefa(s), {res.get('historico', 0)} evento(s) e 1 revisão.")
                                         nav.rerun_keep_menu()
                                     except Exception as e:
                                         st.error(
@@ -943,10 +935,15 @@ def render_admin_revisoes() -> None:
                         # Invalida caches para que Dashboard e Home
                         # reflitam os dados novos imediatamente.
                         try:
+                            refresh_dashboard_cache(sb, tenant_id, revisao_id)
+                        except Exception:
+                            pass
+                        try:
                             from src.ui.core.cache_matrix import invalidate_matriz_cache
                             invalidate_matriz_cache()
                         except Exception:
                             pass
+                        bump_data_version()
                         st.toast(
                             f"✓ Matriz gerada/atualizada · inseridas {inserted_count:,} tarefa(s)",
                             icon=":material/check_circle:")
