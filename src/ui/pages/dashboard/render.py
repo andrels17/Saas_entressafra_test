@@ -748,8 +748,6 @@ def render_dashboard() -> None:
     sb = sb_for_user()
     dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id, sb)
     role = st.session_state.get("current_role") or ""
-    
-    # Admin / usuário com visão total: [] deve significar "sem restrição"
     if can_view_all_data(role):
         if dep_scope_ids == []:
             dep_scope_ids = None
@@ -835,7 +833,7 @@ def render_dashboard() -> None:
         # estiver desatualizada, mantém o filtro por departamento em vez de zerar o dashboard.
         base = apply_filters(base=normalize_matriz_base(raw, eq_meta), departamento_ids=dep_scope_ids, grupo_ids=None)
 
-    prefer_mv = str(rev.get("status") or "").lower() in ("concluida", "encerrada", "fechada")
+    prefer_mv = False  # força leitura raw para manter dashboard sincronizado com a matriz
     group_kpis_df = get_group_kpis(tenant_id, revisao_id, ver, prefer_mv=prefer_mv, _token=st.session_state.get("sb_access_token", ""))
     if group_kpis_df is not None and not group_kpis_df.empty:
         if grp_scope_ids not in (None, []):

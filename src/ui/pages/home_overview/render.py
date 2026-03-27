@@ -364,13 +364,11 @@ def render_home_overview() -> None:
 
     dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id)
     role = st.session_state.get("current_role") or ""
-
     if can_view_all_data(role):
         if dep_scope_ids == []:
             dep_scope_ids = None
         if grp_scope_ids == []:
             grp_scope_ids = None
-
     if not can_view_all_data(role) and dep_scope_ids == [] and grp_scope_ids == []:
         st.warning("Você não possui departamentos ou grupos vinculados para visualizar esta revisão.")
         return
@@ -436,7 +434,7 @@ def render_home_overview() -> None:
 
     # ── Carrega KPIs ────────────────────────────────────────────────────────
     with st.spinner("", show_time=False):
-        prefer_mv = False  # força leitura raw para manter home sincronizada com a matriz
+        prefer_mv = False  # força leitura raw para manter Home sincronizada com a matriz
         kdf = get_group_kpis(tenant_id, rev["id"], ver, prefer_mv=prefer_mv, _token=st.session_state.get("sb_access_token", ""))
 
     kdf = enforce_home_schema(kdf)

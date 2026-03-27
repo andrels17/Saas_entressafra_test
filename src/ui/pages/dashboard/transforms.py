@@ -110,10 +110,6 @@ def normalize_matriz_base(raw: Any,
     df["na"] = df["state"].eq("nao_aplica")
     df["trav"] = df["state"].eq("travado")
 
-    for _id_col in ("equipamento_id", "grupo_id", "departamento_id", "servico_id"):
-        if _id_col in df.columns:
-            df[_id_col] = df[_id_col].map(lambda v: str(v) if pd.notna(v) else None)
-
     if not eq_meta.empty:
         meta = eq_meta.copy().rename(columns={
             "id": "equipamento_id",
@@ -155,8 +151,8 @@ def apply_filters(
         equipamento_ids=None) -> pd.DataFrame:
     f = df.copy()
     if departamento_ids not in (None, []) and "departamento_id" in f.columns:
-        dept_ids = {str(x) for x in departamento_ids if x is not None}
-        f = f[f["departamento_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(dept_ids)]
+        dep_ids = {str(x) for x in departamento_ids if x is not None}
+        f = f[f["departamento_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(dep_ids)]
     if grupo_ids not in (None, []) and "grupo_id" in f.columns:
         grp_ids = {str(x) for x in grupo_ids if x is not None}
         f = f[f["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(grp_ids)]
