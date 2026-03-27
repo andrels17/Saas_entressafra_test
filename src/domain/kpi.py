@@ -100,7 +100,7 @@ def build_group_kpi(
     pct = calc_pct(eq_count, svc_count, done_steps)
     backlog = max(expected - done_steps, 0)
     return GroupKPI(
-        grupo_id=str(grupo_id),
+        grupo_id=grupo_id,
         eq_count=int(eq_count),
         svc_count=int(svc_count),
         done_steps=int(done_steps),
@@ -115,7 +115,6 @@ def calc_global_kpis(df: pd.DataFrame) -> GlobalKPI:
 
     Recebe o DataFrame retornado por kpi_engine.get_group_kpis().
     Filtra grupos sem equipamentos ou serviços configurados.
-    Mantém 1 casa decimal para exibir progresso pequeno corretamente.
     """
     if df is None or df.empty:
         return _EMPTY_GLOBAL

@@ -131,7 +131,7 @@ def _fragment_ranking(
     def _render_grupo_card(row: dict, mode: str) -> None:
         gid = row.get("grupo_id")
         sec = sector_map.get(str(gid), {})
-        pct = int(pd.to_numeric(row.get("pct", 0), errors="coerce") or 0)
+        pct = float(pd.to_numeric(row.get("pct", 0), errors="coerce") or 0)
         total = int(sec.get("setores_total") or 0)
         concl = int(sec.get("setores_concluidos") or 0)
         pend = int(sec.get("setores_pendentes") or 0)
@@ -145,7 +145,8 @@ def _fragment_ranking(
 
             mc1, mc2, mc3 = st.columns(3)
             with mc1:
-                st.metric("Execução", f"{pct}%")
+                pct_label = f"{pct:.1f}%" if pct < 10 and pct % 1 else f"{pct:.0f}%"
+                st.metric("Execução", pct_label)
             with mc2:
                 st.metric(
                     "Setores pend.",

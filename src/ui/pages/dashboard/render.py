@@ -812,10 +812,10 @@ def render_dashboard() -> None:
         else:
             grupos = [g for g in grupos if g.get("departamento_id") in dep_scope_ids]
 
-    dept_map = {d["id"]: d.get("nome", "—")
+    dept_map = {str(d["id"]): d.get("nome", "—")
                 for d in departamentos if d.get("id")}
-    gid_to_name = {g["id"]: g.get("nome", "—") for g in grupos if g.get("id")}
-    gid_to_dept = {g["id"]: g.get("departamento_id")
+    gid_to_name = {str(g["id"]): g.get("nome", "—") for g in grupos if g.get("id")}
+    gid_to_dept = {str(g["id"]): str(g.get("departamento_id")) if g.get("departamento_id") else None
                    for g in grupos if g.get("id")}
 
     base = normalize_matriz_base(raw, eq_meta)
@@ -836,12 +836,17 @@ def render_dashboard() -> None:
     prefer_mv = False  # força leitura raw para manter dashboard sincronizado com a matriz
     group_kpis_df = get_group_kpis(tenant_id, revisao_id, ver, prefer_mv=prefer_mv, _token=st.session_state.get("sb_access_token", ""))
     if group_kpis_df is not None and not group_kpis_df.empty:
+        group_kpis_df = group_kpis_df.copy()
+        group_kpis_df["grupo_id"] = group_kpis_df["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None)
+
         if grp_scope_ids not in (None, []):
-            scoped_group_kpis = group_kpis_df[group_kpis_df["grupo_id"].isin(grp_scope_ids)]
+            grp_scope_set = {str(x) for x in grp_scope_ids}
+            scoped_group_kpis = group_kpis_df[group_kpis_df["grupo_id"].isin(grp_scope_set)]
             if not scoped_group_kpis.empty or dep_scope_ids in (None, []):
                 group_kpis_df = scoped_group_kpis
-        if dep_scope_ids is not None:
-            group_kpis_df = group_kpis_df[group_kpis_df["grupo_id"].map(gid_to_dept).isin(dep_scope_ids)]
+        if dep_scope_ids not in (None, []):
+            dep_scope_set = {str(x) for x in dep_scope_ids}
+            group_kpis_df = group_kpis_df[group_kpis_df["grupo_id"].map(gid_to_dept).isin(dep_scope_set)]
         dashboard_groups = group_kpis_df.copy()
         dashboard_groups["grupo"] = dashboard_groups["grupo_id"].map(
             gid_to_name).fillna("—")
@@ -910,11 +915,15 @@ def render_dashboard() -> None:
     base_filtered = apply_filters(base, effective_dept_ids, effective_group_ids)
     dashboard_groups_filtered = dashboard_groups.copy()
     if effective_dept_ids and "departamento_id" in dashboard_groups_filtered.columns:
-        dashboard_groups_filtered = dashboard_groups_filtered[dashboard_groups_filtered["departamento_id"].isin(
-            effective_dept_ids)]
+        effective_dept_set = {str(x) for x in effective_dept_ids}
+        dashboard_groups_filtered = dashboard_groups_filtered[
+            dashboard_groups_filtered["departamento_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(effective_dept_set)
+        ]
     if effective_group_ids and "grupo_id" in dashboard_groups_filtered.columns:
-        dashboard_groups_filtered = dashboard_groups_filtered[dashboard_groups_filtered["grupo_id"].isin(
-            effective_group_ids)]
+        effective_group_set = {str(x) for x in effective_group_ids}
+        dashboard_groups_filtered = dashboard_groups_filtered[
+            dashboard_groups_filtered["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(effective_group_set)
+        ]
 
     if base_filtered.empty:
         notice_card(
