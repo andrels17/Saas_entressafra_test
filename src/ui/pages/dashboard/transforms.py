@@ -154,19 +154,15 @@ def apply_filters(
         grupo_ids=None,
         equipamento_ids=None) -> pd.DataFrame:
     f = df.copy()
-
-    if departamento_ids not in (None, [] ) and "departamento_id" in f.columns:
+    if departamento_ids not in (None, []) and "departamento_id" in f.columns:
         dept_ids = {str(x) for x in departamento_ids if x is not None}
         f = f[f["departamento_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(dept_ids)]
-
-    if grupo_ids not in (None, [] ) and "grupo_id" in f.columns:
+    if grupo_ids not in (None, []) and "grupo_id" in f.columns:
         grp_ids = {str(x) for x in grupo_ids if x is not None}
         f = f[f["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(grp_ids)]
-
-    if equipamento_ids not in (None, [] ) and "equipamento_id" in f.columns:
+    if equipamento_ids not in (None, []) and "equipamento_id" in f.columns:
         eq_ids = {str(x) for x in equipamento_ids if x is not None}
         f = f[f["equipamento_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(eq_ids)]
-
     return f
 
 
