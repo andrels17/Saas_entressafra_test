@@ -839,10 +839,8 @@ def render_dashboard() -> None:
     dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id, sb)
     role = st.session_state.get("current_role") or ""
     if can_view_all_data(role):
-        if dep_scope_ids == []:
-            dep_scope_ids = None
-        if grp_scope_ids == []:
-            grp_scope_ids = None
+        dep_scope_ids = None
+        grp_scope_ids = None
     if not can_view_all_data(role) and dep_scope_ids == [] and grp_scope_ids == []:
         st.warning("Você não possui departamentos ou grupos vinculados para visualizar o dashboard.")
         return
@@ -975,26 +973,26 @@ def render_dashboard() -> None:
             index=1,
             key="dash_filter_top"))
 
-    # Sem seleção manual, o dashboard deve usar automaticamente todo o escopo disponível.
-    all_visible_dept_ids = [str(d.get("id")) for d in departamentos if d.get("id")]
-    all_visible_group_ids = [str(g.get("id")) for g in grupos if g.get("id")]
+    # A base já vem limitada ao escopo do usuário. Portanto, só aplicamos filtros
+    # quando houver seleção manual. Isso evita zerar o dashboard quando as listas
+    # de departamentos/grupos estiverem desalinhadas da base consolidada.
+    effective_dept_ids = [str(x) for x in (dept_selected_ids or [])]
+    effective_group_ids = [str(x) for x in (group_selected_ids or [])]
 
-    effective_dept_ids = dept_selected_ids or all_visible_dept_ids
-    if group_selected_ids:
-        effective_group_ids = group_selected_ids
-    else:
-        if dept_selected_ids:
-            dept_set = {str(x) for x in dept_selected_ids}
-            effective_group_ids = [
-                str(g.get("id"))
-                for g in grupos
-                if g.get("id") and str(g.get("departamento_id")) in dept_set
-            ]
-        else:
-            effective_group_ids = all_visible_group_ids
+    # Se houver departamento e grupo selecionados ao mesmo tempo, mantém só grupos
+    # compatíveis com os departamentos escolhidos.
+    if effective_dept_ids and effective_group_ids:
+        dept_set = {str(x) for x in effective_dept_ids}
+        allowed_group_ids = {
+            str(g.get("id"))
+            for g in grupos
+            if g.get("id") and str(g.get("departamento_id")) in dept_set
+        }
+        effective_group_ids = [gid for gid in effective_group_ids if gid in allowed_group_ids]
 
-    effective_dept_ids = [str(x) for x in (effective_dept_ids or [])]
-    effective_group_ids = [str(x) for x in (effective_group_ids or [])]
+    # Sem seleção manual, não refiltra a base.
+    effective_dept_ids = effective_dept_ids or None
+    effective_group_ids = effective_group_ids or None
 
     selection_summary(
         "Filtro aplicado",
