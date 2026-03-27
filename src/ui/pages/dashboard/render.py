@@ -143,13 +143,64 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
     grupo_map = {str(r.get("id")): r for r in grupo_rows if r.get("id") is not None}
     serv_map = {str(r.get("id")): r for r in serv_rows if r.get("id") is not None}
 
-    # Fonte única de verdade do dashboard: grade esperada de
-    # equipamento ativo × serviço do template do grupo.
-    #
-    # Isso evita três problemas que distorciam os percentuais:
-    # 1) tarefas órfãs / antigas sem equipamento válido entrando no cálculo;
-    # 2) equipamentos sem nenhuma tarefa ainda sumindo do dashboard;
-    # 3) um único equipamento "—" agregando milhares de linhas.
+    def _status_rank(status: str | None) -> int:
+        s = str(status or "").strip().lower()
+        order = {
+            "concluido": 4,
+            "concluído": 4,
+            "em_andamento": 3,
+            "em andamento": 3,
+            "andamento": 3,
+            "travado": 2,
+            "pendente": 1,
+            "nao_aplica": 0,
+            "não aplica": 0,
+            "nao aplica": 0,
+        }
+        return order.get(s, -1)
+
+    def _merge_task(prev: dict | None, cur: dict) -> dict:
+        if not prev:
+            return dict(cur)
+        merged = dict(prev)
+        for etapa_col in ("etapa_d", "etapa_r", "etapa_m"):
+            merged[etapa_col] = bool(prev.get(etapa_col)) or bool(cur.get(etapa_col))
+        prev_status = prev.get("status")
+        cur_status = cur.get("status")
+        merged["status"] = cur_status if _status_rank(cur_status) >= _status_rank(prev_status) else prev_status
+        prev_upd = str(prev.get("updated_at") or "")
+        cur_upd = str(cur.get("updated_at") or "")
+        merged["updated_at"] = cur.get("updated_at") if cur_upd >= prev_upd else prev.get("updated_at")
+        return merged
+
+    raw_tasks = []
+    task_map: dict[tuple[str, str], dict] = {}
+    for t in task_rows:
+        eid = str(t.get("equipamento_id")) if t.get("equipamento_id") is not None else None
+        sid = str(t.get("servico_id")) if t.get("servico_id") is not None else None
+        eq = eq_map.get(eid, {})
+        gid = eq.get("grupo_id")
+        gid_s = str(gid) if gid is not None else None
+        grp = grupo_map.get(gid_s, {})
+        svc = serv_map.get(sid, {})
+        raw_tasks.append({
+            "equipamento_id": t.get("equipamento_id"),
+            "grupo_id": gid,
+            "grupo_nome": grp.get("nome"),
+            "departamento_id": eq.get("departamento_id") or grp.get("departamento_id"),
+            "frota": eq.get("frota"),
+            "modelo": eq.get("modelo"),
+            "servico_id": t.get("servico_id"),
+            "setor_nome": svc.get("setor") or "—",
+            "status": t.get("status"),
+            "etapa_d": t.get("etapa_d"),
+            "etapa_r": t.get("etapa_r"),
+            "etapa_m": t.get("etapa_m"),
+            "updated_at": t.get("updated_at"),
+        })
+        if eid and sid and eid in eq_map:
+            task_map[(eid, sid)] = _merge_task(task_map.get((eid, sid)), t)
+
     group_services: dict[str, list[str]] = {}
     for row in grupo_servicos_rows:
         gid = row.get("grupo_id")
@@ -161,14 +212,6 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
         group_services.setdefault(gid_s, [])
         if sid_s not in group_services[gid_s]:
             group_services[gid_s].append(sid_s)
-
-    task_map: dict[tuple[str, str], dict] = {}
-    for t in task_rows:
-        eid = str(t.get("equipamento_id")) if t.get("equipamento_id") is not None else None
-        sid = str(t.get("servico_id")) if t.get("servico_id") is not None else None
-        if not eid or not sid or eid not in eq_map:
-            continue
-        task_map[(eid, sid)] = t
 
     raw = []
     for eid, eq in eq_map.items():
@@ -198,6 +241,12 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
                 "etapa_m": t.get("etapa_m"),
                 "updated_at": t.get("updated_at"),
             })
+
+    # Fallback seguro: se a grade esperada não puder ser montada (por exemplo,
+    # template ainda sem vínculo em grupo_servicos), volta ao comportamento raw
+    # anterior para o dashboard não desaparecer.
+    if not raw and raw_tasks:
+        raw = raw_tasks
 
     eq_meta = [
         {
@@ -926,27 +975,26 @@ def render_dashboard() -> None:
             index=1,
             key="dash_filter_top"))
 
-    # A base já vem limitada ao escopo do usuário. Portanto, só aplicamos filtros
-    # quando houve seleção manual. Isso evita zerar o dashboard quando a lista de
-    # metadados (departamentos/grupos) estiver momentaneamente desalinhada da base.
-    effective_dept_ids = [str(x) for x in (dept_selected_ids or [])]
-    effective_group_ids = [str(x) for x in (group_selected_ids or [])]
+    # Sem seleção manual, o dashboard deve usar automaticamente todo o escopo disponível.
+    all_visible_dept_ids = [str(d.get("id")) for d in departamentos if d.get("id")]
+    all_visible_group_ids = [str(g.get("id")) for g in grupos if g.get("id")]
 
-    # Se houver departamento selecionado, mantém apenas grupos pertencentes a ele.
-    # Isso evita combinações inválidas que levam ao estado "Nenhum resultado".
-    if effective_dept_ids and effective_group_ids:
-        dept_set = {str(x) for x in effective_dept_ids}
-        allowed_group_ids = {
-            str(g.get("id"))
-            for g in grupos
-            if g.get("id") and str(g.get("departamento_id")) in dept_set
-        }
-        effective_group_ids = [gid for gid in effective_group_ids if gid in allowed_group_ids]
+    effective_dept_ids = dept_selected_ids or all_visible_dept_ids
+    if group_selected_ids:
+        effective_group_ids = group_selected_ids
+    else:
+        if dept_selected_ids:
+            dept_set = {str(x) for x in dept_selected_ids}
+            effective_group_ids = [
+                str(g.get("id"))
+                for g in grupos
+                if g.get("id") and str(g.get("departamento_id")) in dept_set
+            ]
+        else:
+            effective_group_ids = all_visible_group_ids
 
-    # Sem grupo manual, o filtro efetivo fica só no departamento selecionado.
-    # Sem seleção manual nenhuma, não refiltra a base.
-    effective_dept_ids = effective_dept_ids or None
-    effective_group_ids = effective_group_ids or None
+    effective_dept_ids = [str(x) for x in (effective_dept_ids or [])]
+    effective_group_ids = [str(x) for x in (effective_group_ids or [])]
 
     selection_summary(
         "Filtro aplicado",
