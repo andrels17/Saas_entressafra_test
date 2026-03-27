@@ -213,6 +213,9 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
         if sid_s not in group_services[gid_s]:
             group_services[gid_s].append(sid_s)
 
+    # IDs de equipamentos que já possuem vínculo via grupo_servicos
+    eids_covered: set[str] = set()
+
     raw = []
     for eid, eq in eq_map.items():
         gid = eq.get("grupo_id")
@@ -222,7 +225,10 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
         grp = grupo_map.get(gid_s, {})
         service_ids = group_services.get(gid_s, [])
         if not service_ids:
+            # Sem vínculo em grupo_servicos: equipamento será coberto pelo
+            # fallback por tarefa direta abaixo, se houver tarefas.
             continue
+        eids_covered.add(eid)
         for sid in service_ids:
             svc = serv_map.get(str(sid), {})
             t = task_map.get((eid, str(sid)), {})
@@ -242,9 +248,15 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
                 "updated_at": t.get("updated_at"),
             })
 
-    # Fallback seguro: se a grade esperada não puder ser montada (por exemplo,
-    # template ainda sem vínculo em grupo_servicos), volta ao comportamento raw
-    # anterior para o dashboard não desaparecer.
+    # Fallback granular: para equipamentos sem cobertura via grupo_servicos
+    # (grupo sem serviços vinculados), usa as tarefas diretas da revisão.
+    # Isso evita que equipamentos com movimentações desapareçam do dashboard
+    # quando a tabela grupo_servicos estiver desatualizada ou incompleta.
+    fallback_tasks = [t for t in raw_tasks if str(t.get("equipamento_id") or "") not in eids_covered]
+    if fallback_tasks:
+        raw.extend(fallback_tasks)
+
+    # Fallback total: se nenhuma grade pôde ser montada, usa todas as tarefas.
     if not raw and raw_tasks:
         raw = raw_tasks
 
