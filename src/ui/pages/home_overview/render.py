@@ -362,19 +362,19 @@ def render_home_overview() -> None:
     dept_to_name = {d["id"]: (d.get("nome") or "—")
                     for d in deps if d.get("id")}
 
-  dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id)
-  role = st.session_state.get("current_role") or ""
-  
-  # Admin / visão total
-  if can_view_all_data(role):
-      if dep_scope_ids == []:
-          dep_scope_ids = None
-      if grp_scope_ids == []:
-          grp_scope_ids = None
-  
-  if not can_view_all_data(role) and dep_scope_ids == [] and grp_scope_ids == []:
-      st.warning("Você não possui departamentos ou grupos vinculados para visualizar esta revisão.")
-      return
+    dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id)
+    role = st.session_state.get("current_role") or ""
+
+    # Admin / visão total
+    if can_view_all_data(role):
+        if dep_scope_ids == []:
+            dep_scope_ids = None
+        if grp_scope_ids == []:
+            grp_scope_ids = None
+
+    if not can_view_all_data(role) and dep_scope_ids == [] and grp_scope_ids == []:
+        st.warning("Você não possui departamentos ou grupos vinculados para visualizar esta revisão.")
+        return
 
     if dep_scope_ids is not None:
         deps = [d for d in deps if d.get("id") in dep_scope_ids]
