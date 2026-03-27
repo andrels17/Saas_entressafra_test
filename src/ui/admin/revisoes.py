@@ -318,13 +318,29 @@ def _delete_revisao_cascade(tenant_id: str, revisao_id: str) -> dict:
     result["tarefas"] = _safe_count_rows(
         svc, "tarefas_servico", tenant_id, revisao_id)
 
-    # Ordem importante: histórico -> tarefas -> revisão
+    # Ordem importante: histórico -> tarefas -> cache tables -> revisão
     try:
         svc.table("historico_eventos").delete().eq(
             "tenant_id", tenant_id).eq(
             "revisao_id", revisao_id).execute()
     except Exception as _e:
         import logging; logging.getLogger("saas").warning("revisoes.py: %s", _e)
+
+    # Limpa dados das cache tables persistidas para evitar dados fantasma
+    _CACHE_TABLES = (
+        "dashboard_criticidade_cache",
+        "dashboard_timeline_cache",
+        "dashboard_risco_cache",
+        "dashboard_previsao_cache",
+        "dashboard_heatmap_cache",
+    )
+    for _ct in _CACHE_TABLES:
+        try:
+            svc.table(_ct).delete().eq(
+                "tenant_id", tenant_id).eq(
+                "revisao_id", revisao_id).execute()
+        except Exception as _e:
+            import logging; logging.getLogger("saas").warning("revisoes.py cache clear %s: %s", _ct, _e)
 
     svc.table("tarefas_servico").delete().eq(
         "tenant_id", tenant_id).eq(
@@ -560,8 +576,18 @@ def render_admin_revisoes() -> None:
                 created_row = created[0] if created else None
                 revisao_id = str((created_row or {}).get("id") or "")
                 if revisao_id:
-                    refresh_dashboard_cache(svc, tenant_id, revisao_id)
+                    # Atualiza MVs + cache tables persistidas + cache local
+                    try:
+                        _refresh_revision_analytics(svc, tenant_id, revisao_id)
+                    except Exception as _e:
+                        import logging
+                        logging.getLogger("saas").warning("refresh analytics (criar revisão): %s", _e)
                     bump_data_version()
+                    try:
+                        from src.ui.core.cache_matrix import invalidate_matriz_cache
+                        invalidate_matriz_cache()
+                    except Exception:
+                        pass
                     nav.set_current_revisao(revisao_id, titulo=t)
                 st.toast("✓ Revisão criada", icon=":material/check_circle:")
                 nav.rerun_keep_menu()
@@ -758,6 +784,11 @@ def render_admin_revisoes() -> None:
                                                 res.get(
                                                     'historico',
                                                     0)} evento(s) e 1 revisão.")
+                                        try:
+                                            from src.ui.core.cache_matrix import invalidate_matriz_cache
+                                            invalidate_matriz_cache()
+                                        except Exception:
+                                            pass
                                         nav.rerun_keep_menu()
                                     except Exception as e:
                                         st.error(
@@ -974,8 +1005,14 @@ def render_admin_revisoes() -> None:
                     try:
                         with st.spinner("Inserindo tarefas..."):
                             inserted_count = _insert_tasks(sb, payload)
-                        # Invalida caches para que Dashboard e Home
-                        # reflitam os dados novos imediatamente.
+                        # Atualiza MVs e cache tables persistidas no banco,
+                        # depois invalida caches locais.
+                        try:
+                            with st.spinner("Atualizando dashboard..."):
+                                _refresh_revision_analytics(sb, tenant_id, revisao_id)
+                        except Exception as _e:
+                            import logging
+                            logging.getLogger("saas").warning("refresh analytics (gerar matriz): %s", _e)
                         try:
                             from src.ui.core.cache_matrix import invalidate_matriz_cache
                             invalidate_matriz_cache()
@@ -1054,8 +1091,14 @@ def render_admin_revisoes() -> None:
                         if to_na:
                             _update_tasks_status(
                                 sb, to_na, status="nao_aplica")
-                    # Invalida todos os caches após sincronização para garantir
-                    # que Dashboard e Home reflitam os novos dados imediatamente.
+                    # Atualiza MVs e cache tables persistidas no banco,
+                    # depois invalida todos os caches locais.
+                    try:
+                        with st.spinner("Atualizando dashboard..."):
+                            _refresh_revision_analytics(sb, tenant_id, revisao_id)
+                    except Exception as _e:
+                        import logging
+                        logging.getLogger("saas").warning("refresh analytics (sincronizar matriz): %s", _e)
                     try:
                         from src.ui.core.cache_matrix import invalidate_matriz_cache
                         invalidate_matriz_cache()
