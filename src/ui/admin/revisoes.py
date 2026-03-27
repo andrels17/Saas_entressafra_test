@@ -22,43 +22,6 @@ from src.ui.core.cache import bump_data_version
 STATUSES = ["pendente", "em_andamento", "concluido", "travado", "nao_aplica"]
 
 
-def _hidden_deleted_revisoes() -> set[str]:
-    raw = st.session_state.get("_hidden_deleted_revisoes")
-    if isinstance(raw, set):
-        return {str(x) for x in raw}
-    if isinstance(raw, (list, tuple)):
-        return {str(x) for x in raw}
-    return set()
-
-
-def _mark_revisao_deleted_ui(revisao_id: str) -> None:
-    if not revisao_id:
-        return
-    hidden = _hidden_deleted_revisoes()
-    hidden.add(str(revisao_id))
-    st.session_state["_hidden_deleted_revisoes"] = hidden
-
-
-def _unmark_revisao_deleted_ui(revisao_id: str) -> None:
-    if not revisao_id:
-        return
-    hidden = _hidden_deleted_revisoes()
-    hidden.discard(str(revisao_id))
-    st.session_state["_hidden_deleted_revisoes"] = hidden
-
-
-def _clear_revision_ui_caches() -> None:
-    try:
-        st.cache_data.clear()
-    except Exception:
-        pass
-    try:
-        st.cache_resource.clear()
-    except Exception:
-        pass
-
-
-
 @st.cache_data(ttl=30, show_spinner=False)
 def _fetch_revisoes_cached(tenant_id: str, _token: str = "") -> list[dict]:
     """Carrega revisões com cache (ttl=30s). Usa service role como fallback."""
@@ -281,6 +244,40 @@ def _update_tasks_status(sb, ids, status="nao_aplica"):
         sb.table("tarefas_servico").update(
             {"status": status}).in_("id", batch).execute()
 
+
+def _refresh_mv_matriz_base() -> None:
+    """Atualiza a MV base usada por Dashboard/Home."""
+    svc = get_supabase_service()
+    last_exc = None
+    for rpc_name in ("refresh_mv_matriz_base", "refresh_entressafra_materialized_views"):
+        try:
+            svc.rpc(rpc_name, {}).execute()
+            return
+        except Exception as exc:
+            last_exc = exc
+    if last_exc:
+        raise last_exc
+
+
+def _refresh_mv_revisao_grupo_kpis() -> None:
+    """Atualiza a MV usada por Home/Matriz/Dashboard."""
+    svc = get_supabase_service()
+    last_exc = None
+    for rpc_name in ("refresh_mv_revisao_grupo_kpis", "refresh_entressafra_materialized_views"):
+        try:
+            svc.rpc(rpc_name, {}).execute()
+            return
+        except Exception as exc:
+            last_exc = exc
+    if last_exc:
+        raise last_exc
+
+
+def _refresh_revision_analytics(sb, tenant_id: str, revisao_id: str) -> None:
+    """Atualiza base, agregados e caches persistidos da revisão."""
+    _refresh_mv_matriz_base()
+    _refresh_mv_revisao_grupo_kpis()
+    refresh_dashboard_cache(sb, tenant_id, revisao_id)
 
 def _safe_count_rows(
         client,
@@ -563,10 +560,8 @@ def render_admin_revisoes() -> None:
                 created_row = created[0] if created else None
                 revisao_id = str((created_row or {}).get("id") or "")
                 if revisao_id:
-                    _unmark_revisao_deleted_ui(revisao_id)
                     refresh_dashboard_cache(svc, tenant_id, revisao_id)
                     bump_data_version()
-                    _clear_revision_ui_caches()
                     nav.set_current_revisao(revisao_id, titulo=t)
                 st.toast("✓ Revisão criada", icon=":material/check_circle:")
                 nav.rerun_keep_menu()
@@ -576,9 +571,6 @@ def render_admin_revisoes() -> None:
         st.divider()
         st.markdown("### Revisões existentes")
         revisoes = _fetch_revisoes(sb, tenant_id)
-        hidden_deleted = _hidden_deleted_revisoes()
-        if hidden_deleted:
-            revisoes = [r for r in revisoes if str(r.get("id")) not in hidden_deleted]
 
         if revisoes:
             demo_candidates = [
@@ -628,11 +620,9 @@ def render_admin_revisoes() -> None:
                             with st.spinner("Limpando revisões de teste..."):
                                 n_rev, n_tarefas, n_hist = _bulk_delete_test_revisions(
                                     tenant_id, demo_candidates)
-                            bump_data_version()
-                            _clear_revision_ui_caches()
                             st.success(
                                 f"Limpeza concluída: {n_rev} revisão(ões), {n_tarefas} tarefa(s) e {n_hist} evento(s) removidos.")
-                            st.rerun()
+                            nav.rerun_keep_menu()
                         except Exception as e:
                             st.error(f"Erro ao limpar demo: {e}")
         else:
@@ -760,14 +750,15 @@ def render_admin_revisoes() -> None:
                                         st.session_state.pop(delete_flag, None)
                                         st.session_state.pop(
                                             f"delete_confirm_input_{r['id']}", None)
-                                        _mark_revisao_deleted_ui(r["id"])
-                                        if str(nav.get_current_revisao() or "") == str(r["id"]):
-                                            nav.set_current_revisao(None, titulo=None)
-                                        bump_data_version()
-                                        _clear_revision_ui_caches()
                                         st.success(
-                                            f"Revisão excluída. Removidos: {res.get('tarefas', 0)} tarefa(s), {res.get('historico', 0)} evento(s) e 1 revisão.")
-                                        st.rerun()
+                                            f"Revisão excluída. Removidos: {
+                                                res.get(
+                                                    'tarefas',
+                                                    0)} tarefa(s), {
+                                                res.get(
+                                                    'historico',
+                                                    0)} evento(s) e 1 revisão.")
+                                        nav.rerun_keep_menu()
                                     except Exception as e:
                                         st.error(
                                             f"Erro ao excluir revisão: {e}")
