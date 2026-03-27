@@ -145,7 +145,7 @@ def _fragment_ranking(
 
             mc1, mc2, mc3 = st.columns(3)
             with mc1:
-                pct_label = f"{pct:.1f}%" if pct < 10 and pct % 1 else f"{pct:.0f}%"
+                pct_label = f"{pct:.1f}%" if pct < 10 else f"{pct:.0f}%"
                 st.metric("Execução", pct_label)
             with mc2:
                 st.metric(
