@@ -835,7 +835,7 @@ def render_dashboard() -> None:
         # estiver desatualizada, mantém o filtro por departamento em vez de zerar o dashboard.
         base = apply_filters(base=normalize_matriz_base(raw, eq_meta), departamento_ids=dep_scope_ids, grupo_ids=None)
 
-    prefer_mv = str(rev.get("status") or "").lower() in ("concluida", "encerrada", "fechada")
+    prefer_mv = False
     group_kpis_df = get_group_kpis(tenant_id, revisao_id, ver, prefer_mv=prefer_mv, _token=st.session_state.get("sb_access_token", ""))
     if group_kpis_df is not None and not group_kpis_df.empty:
         if grp_scope_ids not in (None, []):
