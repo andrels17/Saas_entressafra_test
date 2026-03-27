@@ -885,26 +885,27 @@ def render_dashboard() -> None:
             index=1,
             key="dash_filter_top"))
 
-    # Sem seleção manual, o dashboard deve usar automaticamente todo o escopo disponível.
-    all_visible_dept_ids = [str(d.get("id")) for d in departamentos if d.get("id")]
-    all_visible_group_ids = [str(g.get("id")) for g in grupos if g.get("id")]
+    # A base já vem limitada ao escopo do usuário. Portanto, só aplicamos filtros
+    # quando houve seleção manual. Isso evita zerar o dashboard quando a lista de
+    # metadados (departamentos/grupos) estiver momentaneamente desalinhada da base.
+    effective_dept_ids = [str(x) for x in (dept_selected_ids or [])]
+    effective_group_ids = [str(x) for x in (group_selected_ids or [])]
 
-    effective_dept_ids = dept_selected_ids or all_visible_dept_ids
-    if group_selected_ids:
-        effective_group_ids = group_selected_ids
-    else:
-        if dept_selected_ids:
-            dept_set = {str(x) for x in dept_selected_ids}
-            effective_group_ids = [
-                str(g.get("id"))
-                for g in grupos
-                if g.get("id") and str(g.get("departamento_id")) in dept_set
-            ]
-        else:
-            effective_group_ids = all_visible_group_ids
+    # Se houver departamento selecionado, mantém apenas grupos pertencentes a ele.
+    # Isso evita combinações inválidas que levam ao estado "Nenhum resultado".
+    if effective_dept_ids and effective_group_ids:
+        dept_set = {str(x) for x in effective_dept_ids}
+        allowed_group_ids = {
+            str(g.get("id"))
+            for g in grupos
+            if g.get("id") and str(g.get("departamento_id")) in dept_set
+        }
+        effective_group_ids = [gid for gid in effective_group_ids if gid in allowed_group_ids]
 
-    effective_dept_ids = [str(x) for x in (effective_dept_ids or [])]
-    effective_group_ids = [str(x) for x in (effective_group_ids or [])]
+    # Sem grupo manual, o filtro efetivo fica só no departamento selecionado.
+    # Sem seleção manual nenhuma, não refiltra a base.
+    effective_dept_ids = effective_dept_ids or None
+    effective_group_ids = effective_group_ids or None
 
     selection_summary(
         "Filtro aplicado",
