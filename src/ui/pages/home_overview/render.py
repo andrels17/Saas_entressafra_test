@@ -437,7 +437,7 @@ def render_home_overview() -> None:
 
     # ── Carrega KPIs ────────────────────────────────────────────────────────
     with st.spinner("", show_time=False):
-        prefer_mv = str(rev.get("status") or "").lower() in ("concluida", "encerrada", "fechada")
+        prefer_mv = False
         kdf = get_group_kpis(tenant_id, rev["id"], ver, prefer_mv=prefer_mv, _token=st.session_state.get("sb_access_token", ""))
 
     kdf = enforce_home_schema(kdf)
