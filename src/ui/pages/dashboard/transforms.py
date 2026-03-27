@@ -117,10 +117,6 @@ def normalize_matriz_base(raw: Any,
             "modelo": "modelo_meta",
             "departamento_id": "departamento_id_meta",
         })
-        if "equipamento_id" in meta.columns:
-            meta["equipamento_id"] = meta["equipamento_id"].map(lambda v: str(v) if pd.notna(v) else None)
-        if "departamento_id_meta" in meta.columns:
-            meta["departamento_id_meta"] = meta["departamento_id_meta"].map(lambda v: str(v) if pd.notna(v) else None)
         if "equipamento_id" in meta.columns and "equipamento_id" in df.columns:
             df = df.merge(meta, on="equipamento_id", how="left")
     else:
@@ -150,15 +146,19 @@ def apply_filters(
         grupo_ids=None,
         equipamento_ids=None) -> pd.DataFrame:
     f = df.copy()
+
     if departamento_ids not in (None, []) and "departamento_id" in f.columns:
         dep_ids = {str(x) for x in departamento_ids if x is not None}
         f = f[f["departamento_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(dep_ids)]
+
     if grupo_ids not in (None, []) and "grupo_id" in f.columns:
         grp_ids = {str(x) for x in grupo_ids if x is not None}
         f = f[f["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(grp_ids)]
+
     if equipamento_ids not in (None, []) and "equipamento_id" in f.columns:
         eq_ids = {str(x) for x in equipamento_ids if x is not None}
         f = f[f["equipamento_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(eq_ids)]
+
     return f
 
 
