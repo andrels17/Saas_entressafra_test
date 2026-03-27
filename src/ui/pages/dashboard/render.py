@@ -641,52 +641,31 @@ def _fragment_equipamentos(
         st.info("Nenhum equipamento encontrado para o filtro informado.")
         return
 
-    # Consolida por código de frota + modelo para evitar linhas duplicadas no
-    # gráfico.
-    agg = (edf.groupby(["Frota",
-                        "Modelo",
-                        "Departamento"],
-                       dropna=False,
-                       as_index=False) .agg({"Total": "sum",
-                                             "Pendentes": "sum",
-                                             "Em andamento": "sum",
-                                             "Travados": "sum",
-                                             "Não aplica": "sum",
-                                             "Concluídos": "sum",
-                                             "done_steps": "sum",
-                                             "expected_steps": "sum",
-                                             }))
-    agg["% Concluído"] = (
-        (pd.to_numeric(
-            agg["done_steps"],
-            errors="coerce").fillna(0) /
-            pd.to_numeric(
-            agg["expected_steps"],
-            errors="coerce").replace(
-                0,
-                pd.NA)) *
-        100).fillna(0).clip(
-        0,
-        100).round(1)
-    agg["Equipamento"] = agg.apply(
-        lambda r: f"{
-            r['Frota']} — {
-            r['Modelo']}" if str(
-                r["Modelo"]).strip() not in {
-                    "",
-                    "—"} else str(
-                        r["Frota"]),
+    edf["equipamento_id"] = edf["equipamento_id"].map(
+        lambda v: str(v).strip() if pd.notna(v) and str(v).strip() else "—"
+    )
+    edf["Equipamento"] = edf.apply(
+        lambda r: (
+            f"{r['Frota']} — {r['Modelo']}"
+            if str(r["Frota"]).strip() not in {"", "—"} and str(r["Modelo"]).strip() not in {"", "—"}
+            else str(r["Frota"]) if str(r["Frota"]).strip() not in {"", "—"}
+            else str(r["Modelo"]) if str(r["Modelo"]).strip() not in {"", "—"}
+            else f"ID {str(r['equipamento_id'])[:8]}"
+        ),
         axis=1,
     )
 
-    rank_df = agg.sort_values(["% Concluído", "Concluídos", "Equipamento"], ascending=[
-                              False, False, True]).head(top_n)
+    rank_df = edf.sort_values(
+        ["% Concluído", "Concluídos", "Equipamento"],
+        ascending=[False, False, True],
+    ).head(top_n)
     _render_pct_rank_chart(
         rank_df,
         "Equipamento",
         "% Concluído",
         f"Top {top_n} equipamentos por % de conclusão",
-        top_n=top_n)
+        top_n=top_n,
+    )
 
     cols = [
         "Equipamento",
@@ -699,7 +678,8 @@ def _fragment_equipamentos(
         "Em andamento",
         "Travados",
         "Não aplica",
-        "Concluídos"]
+        "Concluídos",
+    ]
     data_table(
         rank_df[cols],
         column_config={
@@ -707,7 +687,9 @@ def _fragment_equipamentos(
                 "% Concluído",
                 min_value=0,
                 max_value=100,
-                format="%.1f%%")},
+                format="%.1f%%",
+            )
+        },
     )
     with st.expander("⬇ Exportar tabela completa", expanded=False):
         from src.utils.ui_helpers import df_to_xlsx
@@ -839,8 +821,10 @@ def render_dashboard() -> None:
     dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id, sb)
     role = st.session_state.get("current_role") or ""
     if can_view_all_data(role):
-        dep_scope_ids = None
-        grp_scope_ids = None
+        if dep_scope_ids == []:
+            dep_scope_ids = None
+        if grp_scope_ids == []:
+            grp_scope_ids = None
     if not can_view_all_data(role) and dep_scope_ids == [] and grp_scope_ids == []:
         st.warning("Você não possui departamentos ou grupos vinculados para visualizar o dashboard.")
         return
@@ -921,31 +905,9 @@ def render_dashboard() -> None:
         # estiver desatualizada, mantém o filtro por departamento em vez de zerar o dashboard.
         base = apply_filters(base=normalize_matriz_base(raw, eq_meta), departamento_ids=dep_scope_ids, grupo_ids=None)
 
-    prefer_mv = False  # força leitura raw para manter dashboard sincronizado com a matriz
-    group_kpis_df = get_group_kpis(tenant_id, revisao_id, ver, prefer_mv=prefer_mv, _token=st.session_state.get("sb_access_token", ""))
-    if group_kpis_df is not None and not group_kpis_df.empty:
-        group_kpis_df = group_kpis_df.copy()
-        group_kpis_df["grupo_id"] = group_kpis_df["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None)
-
-        if grp_scope_ids not in (None, []):
-            grp_scope_set = {str(x) for x in grp_scope_ids}
-            scoped_group_kpis = group_kpis_df[group_kpis_df["grupo_id"].isin(grp_scope_set)]
-            if not scoped_group_kpis.empty or dep_scope_ids in (None, []):
-                group_kpis_df = scoped_group_kpis
-        if dep_scope_ids not in (None, []):
-            dep_scope_set = {str(x) for x in dep_scope_ids}
-            group_kpis_df = group_kpis_df[group_kpis_df["grupo_id"].map(gid_to_dept).isin(dep_scope_set)]
-        dashboard_groups = group_kpis_df.copy()
-        dashboard_groups["grupo"] = dashboard_groups["grupo_id"].map(
-            gid_to_name).fillna("—")
-        dashboard_groups["departamento_id"] = dashboard_groups["grupo_id"].map(
-            gid_to_dept)
-        dashboard_groups["pct_concluido"] = pd.to_numeric(
-            dashboard_groups.get(
-                "pct", 0), errors="coerce").fillna(0).clip(
-            0, 100)
-    else:
-        dashboard_groups = group_progress(base)
+    # Usa sempre a mesma base consolidada do dashboard para grupos.
+    # Isso evita divergência com caches/materialized views fora de sincronia.
+    dashboard_groups = group_progress(base)
 
     st.markdown("### Filtros")
     c1, c2, c3 = st.columns([1.1, 1.4, 0.6])
@@ -973,26 +935,26 @@ def render_dashboard() -> None:
             index=1,
             key="dash_filter_top"))
 
-    # A base já vem limitada ao escopo do usuário. Portanto, só aplicamos filtros
-    # quando houver seleção manual. Isso evita zerar o dashboard quando as listas
-    # de departamentos/grupos estiverem desalinhadas da base consolidada.
-    effective_dept_ids = [str(x) for x in (dept_selected_ids or [])]
-    effective_group_ids = [str(x) for x in (group_selected_ids or [])]
+    # Sem seleção manual, o dashboard deve usar automaticamente todo o escopo disponível.
+    all_visible_dept_ids = [str(d.get("id")) for d in departamentos if d.get("id")]
+    all_visible_group_ids = [str(g.get("id")) for g in grupos if g.get("id")]
 
-    # Se houver departamento e grupo selecionados ao mesmo tempo, mantém só grupos
-    # compatíveis com os departamentos escolhidos.
-    if effective_dept_ids and effective_group_ids:
-        dept_set = {str(x) for x in effective_dept_ids}
-        allowed_group_ids = {
-            str(g.get("id"))
-            for g in grupos
-            if g.get("id") and str(g.get("departamento_id")) in dept_set
-        }
-        effective_group_ids = [gid for gid in effective_group_ids if gid in allowed_group_ids]
+    effective_dept_ids = dept_selected_ids or all_visible_dept_ids
+    if group_selected_ids:
+        effective_group_ids = group_selected_ids
+    else:
+        if dept_selected_ids:
+            dept_set = {str(x) for x in dept_selected_ids}
+            effective_group_ids = [
+                str(g.get("id"))
+                for g in grupos
+                if g.get("id") and str(g.get("departamento_id")) in dept_set
+            ]
+        else:
+            effective_group_ids = all_visible_group_ids
 
-    # Sem seleção manual, não refiltra a base.
-    effective_dept_ids = effective_dept_ids or None
-    effective_group_ids = effective_group_ids or None
+    effective_dept_ids = [str(x) for x in (effective_dept_ids or [])]
+    effective_group_ids = [str(x) for x in (effective_group_ids or [])]
 
     selection_summary(
         "Filtro aplicado",
