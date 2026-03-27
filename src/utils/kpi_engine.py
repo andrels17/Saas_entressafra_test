@@ -232,7 +232,11 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
                 eid = str(t.get("equipamento_id")) if t.get("equipamento_id") else None
                 gid = eq_to_gid.get(eid)
                 if gid:
-                    done_by_gid[gid] += count_etapas(t)
+                    done_by_gid[gid] += (
+                      int(bool(t.get("etapa_d"))) +
+                      int(bool(t.get("etapa_r"))) +
+                      int(bool(t.get("etapa_m")))
+                  )
 
     rows: list[dict[str, Any]] = [
         build_group_kpi(
