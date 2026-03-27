@@ -748,6 +748,13 @@ def render_dashboard() -> None:
     sb = sb_for_user()
     dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id, sb)
     role = st.session_state.get("current_role") or ""
+    
+    # Admin / usuário com visão total: [] deve significar "sem restrição"
+    if can_view_all_data(role):
+        if dep_scope_ids == []:
+            dep_scope_ids = None
+        if grp_scope_ids == []:
+            grp_scope_ids = None
     if not can_view_all_data(role) and dep_scope_ids == [] and grp_scope_ids == []:
         st.warning("Você não possui departamentos ou grupos vinculados para visualizar o dashboard.")
         return
