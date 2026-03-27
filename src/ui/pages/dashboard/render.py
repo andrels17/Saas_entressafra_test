@@ -951,28 +951,31 @@ def render_dashboard() -> None:
     all_visible_dept_ids = [str(d.get("id")) for d in departamentos if d.get("id")]
     all_visible_group_ids = [str(g.get("id")) for g in grupos if g.get("id")]
 
-    effective_dept_ids = dept_selected_ids or all_visible_dept_ids
+    # IMPORTANTE: quando nenhum filtro manual foi selecionado, passa None para
+    # apply_filters em vez de passar a lista completa de IDs. Isso evita que
+    # equipamentos com departamento_id NULL sejam descartados silenciosamente
+    # (apply_filters com lista não-vazia filtra por igualdade, e NULL nunca
+    # está na lista, zerando o dashboard mesmo com dados existentes).
+    effective_dept_ids = [str(x) for x in dept_selected_ids] if dept_selected_ids else None
     if group_selected_ids:
-        effective_group_ids = group_selected_ids
+        effective_group_ids = [str(x) for x in group_selected_ids]
     else:
         if dept_selected_ids:
             dept_set = {str(x) for x in dept_selected_ids}
-            effective_group_ids = [
+            grp_ids = [
                 str(g.get("id"))
                 for g in grupos
                 if g.get("id") and str(g.get("departamento_id")) in dept_set
             ]
+            effective_group_ids = grp_ids if grp_ids else None
         else:
-            effective_group_ids = all_visible_group_ids
-
-    effective_dept_ids = [str(x) for x in (effective_dept_ids or [])]
-    effective_group_ids = [str(x) for x in (effective_group_ids or [])]
+            effective_group_ids = None
 
     selection_summary(
         "Filtro aplicado",
         {
-            "Departamentos": len(dept_selected_ids) or "Todos",
-            "Grupos": len(group_selected_ids) or "Todos",
+            "Departamentos": len(dept_selected_ids) if dept_selected_ids else "Todos",
+            "Grupos": len(group_selected_ids) if group_selected_ids else "Todos",
             "Ranking": f"Top {top_n}",
         },
     )
