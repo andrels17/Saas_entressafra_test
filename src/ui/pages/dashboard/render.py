@@ -102,9 +102,17 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
             sb.table("equipamentos")
             .select("id,frota,modelo,departamento_id,grupo_id")
             .eq("tenant_id", tenant_id)
-            # Sem filtro ativo=True: equipamentos inativos ainda têm tarefas
-            # vinculadas e precisam ser resolvidos para exibir frota/modelo/dept.
+            .eq("ativo", True)
         )
+        # Fallback: se nenhum equipamento ativo for encontrado, busca todos
+        # (inclui inativos). Isso cobre tenants onde ativo=False foi definido
+        # por engano mas as tarefas já existem vinculadas a esses equipamentos.
+        if not eq_rows:
+            eq_rows = _fetch_all(
+                sb.table("equipamentos")
+                .select("id,frota,modelo,departamento_id,grupo_id")
+                .eq("tenant_id", tenant_id)
+            )
     except Exception as exc:
         log_error(exc, context="dashboard._load_base_cached", table="equipamentos")
         eq_rows = []
@@ -114,9 +122,16 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
             sb.table("equip_grupos")
             .select("id,nome,departamento_id")
             .eq("tenant_id", tenant_id)
-            # Sem filtro ativo=True: grupos inativos ainda são necessários para
-            # resolver grupo_nome e departamento_id dos equipamentos vinculados.
+            .eq("ativo", True)
         )
+        # Fallback: se nenhum grupo ativo encontrado, busca todos para
+        # garantir resolução de grupo_nome e departamento_id.
+        if not grupo_rows:
+            grupo_rows = _fetch_all(
+                sb.table("equip_grupos")
+                .select("id,nome,departamento_id")
+                .eq("tenant_id", tenant_id)
+            )
     except Exception as exc:
         log_error(exc, context="dashboard._load_base_cached", table="equip_grupos")
         grupo_rows = []
