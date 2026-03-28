@@ -113,7 +113,8 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
             sb.table("equip_grupos")
             .select("id,nome,departamento_id")
             .eq("tenant_id", tenant_id)
-            .eq("ativo", True)
+            # Sem filtro ativo=True: grupos inativos ainda são necessários para
+            # resolver grupo_nome e departamento_id dos equipamentos vinculados.
         )
     except Exception as exc:
         log_error(exc, context="dashboard._load_base_cached", table="equip_grupos")
@@ -931,6 +932,23 @@ def render_dashboard() -> None:
                    for g in grupos if g.get("id")}
 
     base = normalize_matriz_base(raw, eq_meta)
+
+    # ── DEBUG (remover após diagnóstico) ──────────────────────────────────
+    with st.expander("🔍 DEBUG — dados brutos (remover após diagnóstico)", expanded=False):
+        st.write(f"**raw rows:** {len(raw)} | **eq_meta rows:** {len(eq_meta)}")
+        st.write(f"**base shape:** {base.shape} | **base empty:** {base.empty}")
+        if not base.empty:
+            st.write("**Primeiras 5 linhas de base:**")
+            st.dataframe(base[["equipamento_id","grupo_id","grupo","departamento_id","frota","modelo","state","ok_count"]].head(5))
+            st.write(f"**Valores únicos de departamento_id:** {base['departamento_id'].unique().tolist()[:10]}")
+            st.write(f"**Valores únicos de grupo_id:** {base['grupo_id'].unique().tolist()[:10]}")
+            st.write(f"**dept_map:** {dict(list({str(d['id'])[:8]: d.get('nome') for d in departamentos}.items())[:5])}")
+        if raw:
+            st.write("**raw[0]:**", raw[0])
+        if eq_meta:
+            st.write("**eq_meta[0]:**", eq_meta[0])
+    # ── FIM DEBUG ─────────────────────────────────────────────────────────
+
     if base.empty:
         notice_card(
             "Sem dados de execução",
