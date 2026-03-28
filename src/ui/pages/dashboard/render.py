@@ -455,7 +455,7 @@ def _fragment_grupos(
                     description="Nenhum grupo com tarefas para esta revisão.")
         return
     gdf = gdf.copy()
-    gdf["Departamento"] = gdf["departamento_id"].map(dept_map).fillna("—")
+    gdf["Departamento"] = gdf["departamento_id"].map(lambda v: dept_map.get(str(v)) if pd.notna(v) else None).fillna("—")
     gdf["pct_concluido"] = pd.to_numeric(
         gdf["pct_concluido"],
         errors="coerce").fillna(0).clip(
@@ -523,7 +523,9 @@ def _fragment_departamentos(
     # sem depender de calc_dept_kpis que exige eq_count/svc_count do GroupKPI.
     tmp = group_kpis_df.copy()
     if "departamento_id" not in tmp.columns:
-        tmp["departamento_id"] = tmp["grupo_id"].map(gid_to_dept)
+        tmp["departamento_id"] = tmp["grupo_id"].map(lambda v: gid_to_dept.get(str(v)) if pd.notna(v) else None)
+    # Normaliza para str para garantir compatibilidade com dept_map (chaves são str(uuid))
+    tmp["departamento_id"] = tmp["departamento_id"].map(lambda v: str(v) if pd.notna(v) and v is not None else None)
     tmp = tmp.dropna(subset=["departamento_id"])
     tmp = tmp[pd.to_numeric(tmp.get("expected_steps", 0), errors="coerce").fillna(0) > 0]
     if tmp.empty:
@@ -550,7 +552,7 @@ def _fragment_departamentos(
         return
 
     dsum = dsum.copy()
-    dsum["Departamento"] = dsum["departamento_id"].map(dept_map).fillna("—")
+    dsum["Departamento"] = dsum["departamento_id"].map(lambda v: dept_map.get(str(v)) if pd.notna(v) else None).fillna("—")
     dsum["pct"] = pd.to_numeric(dsum.get("pct", 0), errors="coerce").fillna(0).clip(0, 100)
     dsum["Grupos"] = dsum.get("grupos", pd.Series(dtype=int)).fillna(0).astype(int)
     dsum["Etapas feitas"] = dsum.get("done_steps", pd.Series(dtype=int)).fillna(0).astype(int)
@@ -661,7 +663,7 @@ def _fragment_equipamentos(
     edf = edf.copy()
     edf["Frota"] = edf["Frota"].fillna("—").astype(str).str.strip()
     edf["Modelo"] = edf["Modelo"].fillna("—").astype(str).str.strip()
-    edf["Departamento"] = edf["departamento_id"].map(dept_map).fillna("—")
+    edf["Departamento"] = edf["departamento_id"].map(lambda v: dept_map.get(str(v)) if pd.notna(v) else None).fillna("—")
 
     busca = st.text_input(
         "Buscar frota / modelo",
@@ -731,7 +733,7 @@ def _fragment_equipamentos(
     )
     with st.expander("⬇ Exportar tabela completa", expanded=False):
         from src.utils.ui_helpers import df_to_xlsx
-        _exp = agg[cols].sort_values(
+        _exp = edf[cols].sort_values(
             ["% Concluído", "Equipamento"], ascending=[False, True])
         col_csv, col_xlsx = st.columns(2)
         with col_csv:
