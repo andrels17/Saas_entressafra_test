@@ -949,6 +949,27 @@ def render_dashboard() -> None:
 
     base = normalize_matriz_base(raw, eq_meta)
 
+    # ── DEBUG temporário ──────────────────────────────────────────────────
+    with st.expander("🔍 DEBUG", expanded=True):
+        st.write(f"**tenant_id:** `{tenant_id}`")
+        st.write(f"**revisao_id:** `{revisao_id}`")
+        st.write(f"**raw:** {len(raw)} rows | **eq_meta:** {len(eq_meta)} rows")
+        st.write(f"**base shape:** {base.shape} | **empty:** {base.empty}")
+        if not base.empty:
+            cols_show = [c for c in ["equipamento_id","grupo_id","grupo","departamento_id","frota","modelo","state"] if c in base.columns]
+            st.dataframe(base[cols_show].head(10))
+            st.write("**grupo_id únicos:**", base["grupo_id"].unique().tolist()[:10])
+            st.write("**departamento_id únicos:**", base["departamento_id"].unique().tolist()[:10])
+        if raw:
+            st.write("**raw[0]:**", raw[0])
+        if eq_meta:
+            st.write("**eq_meta[0]:**", eq_meta[0])
+        st.write("**dept_map (5 primeiros):**", dict(list(dept_map.items())[:5]))
+        st.write("**gid_to_dept (5 primeiros):**", dict(list(gid_to_dept.items())[:5]))
+        grp_sample = grupos[:3] if grupos else []
+        st.write("**grupos (3 primeiros):**", grp_sample)
+    # ── FIM DEBUG ─────────────────────────────────────────────────────────
+
     if base.empty:
         notice_card(
             "Sem dados de execução",
