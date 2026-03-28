@@ -196,27 +196,49 @@ def _load_grupo_template(
 
 def _load_equipamentos_ativos(
         sb, tenant_id: str, grupo_ids: list[str]) -> dict[str, list[dict]]:
-    """Retorna {grupo_id: [{id, frota, modelo}]} — equipamentos ativos por grupo."""
+    """Retorna {grupo_id: [{id, frota, modelo}]} — equipamentos ativos por grupo.
+
+    Usa RPC get_equipamentos_dashboard (SECURITY DEFINER) para contornar RLS
+    scope-restritivo que bloqueia SELECT geral na tabela equipamentos.
+    """
     if not grupo_ids:
         return {}
-    rows = _with_fallback(
-        lambda: (
-            sb.table("equipamentos")
-            .select("id,frota,modelo,grupo_id")
-            .eq("tenant_id", tenant_id)
-            .is_("ativo", "true")
-            .in_("grupo_id", grupo_ids)
-            .execute()
-            .data
-        ) or [],
-        [],
-        context=f"Erro ao carregar equipamentos ativos dos grupos {grupo_ids}",
-    )
+
+    grupo_set = set(str(g) for g in grupo_ids)
+
+    # Tenta via RPC primeiro (bypassa RLS)
+    rows = []
+    try:
+        rpc_result = sb.rpc(
+            "get_equipamentos_dashboard",
+            {"p_tenant_id": tenant_id}
+        ).execute()
+        all_rows = rpc_result.data or []
+        rows = [r for r in all_rows if str(r.get("grupo_id") or "") in grupo_set]
+    except Exception:
+        pass
+
+    # Fallback: query direta
+    if not rows:
+        rows = _with_fallback(
+            lambda: (
+                sb.table("equipamentos")
+                .select("id,frota,modelo,grupo_id")
+                .eq("tenant_id", tenant_id)
+                .is_("ativo", "true")
+                .in_("grupo_id", grupo_ids)
+                .execute()
+                .data
+            ) or [],
+            [],
+            context=f"Erro ao carregar equipamentos ativos dos grupos {grupo_ids}",
+        )
+
     out: dict[str, list] = {}
     for r in rows:
         gid = r.get("grupo_id")
         if gid:
-            out.setdefault(gid, []).append(r)
+            out.setdefault(str(gid), []).append(r)
     return out
 
 
@@ -752,9 +774,6 @@ def dispatch_relatorio_semanal(
             )
 
             # Valida integridade do PDF antes de tentar enviar.
-            # A importação é feita fora do try/except para evitar UnboundLocalError:
-            # se o import falhar, PdfValidationError nunca é definida e o except
-            # não consegue referenciar o nome -> "cannot access local variable".
             try:
                 from src.services.reporting.pdf_validator import (
                     validate_pdf as _validate_pdf,
@@ -763,7 +782,7 @@ def dispatch_relatorio_semanal(
                 _pdf_validator_ok = True
             except ImportError:
                 _validate_pdf = None
-                _PdfValidationError = Exception  # fallback genérico
+                _PdfValidationError = Exception
                 _pdf_validator_ok = False
 
             try:
@@ -775,7 +794,7 @@ def dispatch_relatorio_semanal(
                 msg = f"PDF inválido para {grp.departamento_nome}: {pdf_err}"
                 result.errors.append(msg)
                 _log(f"  ❌ {msg}")
-                continue  # pula todos os destinatários deste departamento
+                continue
 
             for rec in grp.recipients:
                 result.total_emails += 1
