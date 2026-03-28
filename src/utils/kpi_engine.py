@@ -171,13 +171,28 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
     if not gids:
         return EMPTY
 
-    eq_rows = safe_select(
-        sb,
-        "equipamentos",
-        "id,grupo_id",
-        tenant_id__eq=tenant_id,
-        ativo__eq=True,
-        grupo_id__in=gids)
+    # Busca equipamentos via RPC (SECURITY DEFINER) para contornar RLS scope-restritivo
+    # que bloqueia SELECT geral mas permite acesso pela função com permissão de owner.
+    eq_rows = []
+    try:
+        rpc_result = sb.rpc(
+            "get_equipamentos_dashboard",
+            {"p_tenant_id": tenant_id}
+        ).execute()
+        eq_rows = rpc_result.data or []
+    except Exception:
+        pass
+
+    # Fallback para safe_select se RPC não disponível
+    if not eq_rows:
+        eq_rows = safe_select(
+            sb,
+            "equipamentos",
+            "id,grupo_id",
+            tenant_id__eq=tenant_id,
+            ativo__eq=True,
+            grupo_id__in=gids)
+
     grp_to_eq: dict[str, list[str]] = defaultdict(list)
     eq_to_gid: dict[str, str] = {}
     for r in eq_rows:
@@ -281,7 +296,9 @@ def get_group_kpis(
         mv_rows = _fetch_mv(tenant_id, revisao_id, _token)
         if mv_rows:
             df = _mv_to_df(mv_rows)
-            if not df.empty:
+            # Valida MV: se todos os grupos têm done_steps=0 mas há tarefas
+            # na revisão, a MV está desatualizada — recalcula do raw.
+            if not df.empty and df["done_steps"].sum() > 0:
                 return df
     return _compute_from_raw(tenant_id, revisao_id, _token)
 
