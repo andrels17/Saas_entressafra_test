@@ -751,12 +751,26 @@ def dispatch_relatorio_semanal(
                 f"_semana{payload.semana_atual}.pdf"
             )
 
-            # Valida integridade do PDF antes de tentar enviar
+            # Valida integridade do PDF antes de tentar enviar.
+            # A importação é feita fora do try/except para evitar UnboundLocalError:
+            # se o import falhar, PdfValidationError nunca é definida e o except
+            # não consegue referenciar o nome -> "cannot access local variable".
             try:
-                from src.services.reporting.pdf_validator import validate_pdf, PdfValidationError
-                validate_pdf(
-                    pdf_bytes, context=f"relatorio_semanal.{grp.departamento_nome[:30]}")
-            except PdfValidationError as pdf_err:
+                from src.services.reporting.pdf_validator import (
+                    validate_pdf as _validate_pdf,
+                    PdfValidationError as _PdfValidationError,
+                )
+                _pdf_validator_ok = True
+            except ImportError:
+                _validate_pdf = None
+                _PdfValidationError = Exception  # fallback genérico
+                _pdf_validator_ok = False
+
+            try:
+                if _validate_pdf is not None:
+                    _validate_pdf(
+                        pdf_bytes, context=f"relatorio_semanal.{grp.departamento_nome[:30]}")
+            except _PdfValidationError as pdf_err:
                 result.failed += 1
                 msg = f"PDF inválido para {grp.departamento_nome}: {pdf_err}"
                 result.errors.append(msg)
