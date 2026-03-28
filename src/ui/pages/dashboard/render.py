@@ -518,7 +518,33 @@ def _fragment_departamentos(
         empty_message("Sem dados de departamentos.")
         return
 
-    dsum = calc_dept_kpis(group_kpis_df, gid_to_dept)
+    # Agrega por departamento diretamente do formato group_progress()
+    # (colunas: grupo_id, departamento_id, done_steps, expected_steps)
+    # sem depender de calc_dept_kpis que exige eq_count/svc_count do GroupKPI.
+    tmp = group_kpis_df.copy()
+    if "departamento_id" not in tmp.columns:
+        tmp["departamento_id"] = tmp["grupo_id"].map(gid_to_dept)
+    tmp = tmp.dropna(subset=["departamento_id"])
+    tmp = tmp[pd.to_numeric(tmp.get("expected_steps", 0), errors="coerce").fillna(0) > 0]
+    if tmp.empty:
+        empty_message("Sem dados de departamentos para esta revisão.")
+        return
+    dsum = (
+        tmp.groupby("departamento_id", dropna=True)
+        .agg(
+            done_steps=("done_steps", "sum"),
+            expected_steps=("expected_steps", "sum"),
+            grupos=("grupo_id", "nunique"),
+        )
+        .reset_index()
+    )
+    dsum["backlog_steps"] = (dsum["expected_steps"] - dsum["done_steps"]).clip(lower=0)
+    dsum["pct"] = (
+        (dsum["done_steps"] / dsum["expected_steps"] * 100)
+        .round(1)
+        .fillna(0.0)
+        .clip(0, 100)
+    )
     if dsum is None or dsum.empty:
         empty_message("Sem dados de departamentos para esta revisão.")
         return
@@ -1001,17 +1027,10 @@ def render_dashboard() -> None:
         )
         return
 
-    if dashboard_groups_filtered is None or dashboard_groups_filtered.empty:
-        overall = overall_from_base(base_filtered)
-    else:
-        overall_calc = calc_global_kpis(dashboard_groups_filtered)
-        overall = {
-            "pct": float(overall_calc.get("pct", 0)),
-            "concl": int((base_filtered["state"] == "concluido").sum()),
-            "andamento": int((base_filtered["state"] == "em_andamento").sum()),
-            "pend": int((base_filtered["state"] == "pendente").sum()),
-            "trav": int((base_filtered["state"] == "travado").sum()),
-        }
+    # overall_from_base usa base_filtered diretamente (fonte única de verdade).
+    # calc_global_kpis foi removido aqui pois espera colunas eq_count/svc_count
+    # do formato GroupKPI (kpi_engine), incompatíveis com group_progress().
+    overall = overall_from_base(base_filtered)
 
     _fragment_kpis_globais(overall)
     st.divider()
