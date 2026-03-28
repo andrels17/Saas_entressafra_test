@@ -116,11 +116,13 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
     except Exception:
         pass
 
+    # Fallbacks sem departamento_id (coluna não existe em equipamentos;
+    # vem do equip_grupos via JOIN na função RPC acima).
     if not eq_rows:
         try:
             eq_rows = _fetch_all(
                 sb.table("equipamentos")
-                .select("id,frota,modelo,departamento_id,grupo_id")
+                .select("id,frota,modelo,grupo_id")
                 .eq("tenant_id", tenant_id)
                 .eq("ativo", True)
             )
@@ -131,7 +133,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
         try:
             eq_rows = _fetch_all(
                 sb.table("equipamentos")
-                .select("id,frota,modelo,departamento_id,grupo_id")
+                .select("id,frota,modelo,grupo_id")
                 .eq("tenant_id", tenant_id)
             )
         except Exception as exc:
@@ -144,7 +146,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
             try:
                 chunk = (
                     sb.table("equipamentos")
-                    .select("id,frota,modelo,departamento_id,grupo_id")
+                    .select("id,frota,modelo,grupo_id")
                     .in_("id", batch)
                     .execute()
                     .data or []
