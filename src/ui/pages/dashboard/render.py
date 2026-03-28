@@ -104,31 +104,41 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
         log_error(exc, context="dashboard._load_base_cached", table="tarefas_servico")
         task_rows = []
 
-    # Busca equipamentos — tenta direto na tabela; se RLS bloquear (eq_rows=[]),
-    # extrai os IDs das tarefas já carregadas e faz IN query.
-    # Isso contorna políticas RLS restritivas em equipamentos sem afetar outros tenants.
+    # Busca equipamentos via RPC (SECURITY DEFINER) para contornar RLS restritivo.
+    # Fallback progressivo: rpc -> table ativo=true -> table all -> IN por tarefa IDs.
     eq_rows = []
     try:
-        eq_rows = _fetch_all(
-            sb.table("equipamentos")
-            .select("id,frota,modelo,departamento_id,grupo_id")
-            .eq("tenant_id", tenant_id)
-            .eq("ativo", True)
-        )
-        if not eq_rows:
+        rpc_result = sb.rpc(
+            "get_equipamentos_dashboard",
+            {"p_tenant_id": tenant_id}
+        ).execute()
+        eq_rows = rpc_result.data or []
+    except Exception:
+        pass
+
+    if not eq_rows:
+        try:
+            eq_rows = _fetch_all(
+                sb.table("equipamentos")
+                .select("id,frota,modelo,departamento_id,grupo_id")
+                .eq("tenant_id", tenant_id)
+                .eq("ativo", True)
+            )
+        except Exception as exc:
+            log_error(exc, context="dashboard._load_base_cached", table="equipamentos")
+
+    if not eq_rows:
+        try:
             eq_rows = _fetch_all(
                 sb.table("equipamentos")
                 .select("id,frota,modelo,departamento_id,grupo_id")
                 .eq("tenant_id", tenant_id)
             )
-    except Exception as exc:
-        log_error(exc, context="dashboard._load_base_cached", table="equipamentos")
+        except Exception as exc:
+            log_error(exc, context="dashboard._load_base_cached.no_ativo", table="equipamentos")
 
-    # Fallback via IN nos IDs das tarefas: contorna RLS scope-restritivo
-    # que bloqueia SELECT * mas permite acesso via equipamento_id específico.
     if not eq_rows and task_rows:
         eq_ids = list({str(t["equipamento_id"]) for t in task_rows if t.get("equipamento_id")})
-        # Busca em lotes de 100 para evitar URLs longas demais
         for i in range(0, len(eq_ids), 100):
             batch = eq_ids[i:i + 100]
             try:
