@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from typing import Any
@@ -137,6 +136,16 @@ def normalize_matriz_base(raw: Any,
         df.get("departamento_id_meta"))
     df["grupo"] = _series_or_default(df, "grupo", "—").fillna("—")
     df["setor"] = _series_or_default(df, "setor", "—").fillna("—")
+
+    # Normaliza colunas de ID para str para garantir compatibilidade com
+    # todos os dicionários de lookup (dept_map, gid_to_dept, etc.) que usam
+    # str(uuid) como chave. UUID objects do Supabase falham silenciosamente
+    # no map() quando as chaves são strings.
+    for _id_col in ("departamento_id", "grupo_id", "equipamento_id"):
+        if _id_col in df.columns:
+            df[_id_col] = df[_id_col].map(
+                lambda v: str(v) if pd.notna(v) and v is not None else None
+            )
     return df
 
 
