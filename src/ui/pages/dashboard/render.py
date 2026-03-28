@@ -73,6 +73,13 @@ def _load_revisao(sb, tenant_id: str, revisao_id: str | None = None) -> dict | N
 @st.cache_data(ttl=30, show_spinner=False)
 def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
                       ver: str = "0") -> tuple[list, list]:
+    # IMPORTANTE: _token tem underscore (excluído do cache key pelo Streamlit).
+    # Para evitar que uma chamada inicial com token vazio cache eq_rows=[] e
+    # contamine chamadas posteriores com token válido, incluímos um hash do
+    # token no ver. Isso garante que o cache é invalidado quando o token muda.
+    import hashlib as _hl
+    _tok_hash = _hl.md5((_token or "").encode()).hexdigest()[:8]
+    ver = f"{ver}_{_tok_hash}"
     sb = _sb_from_token(_token)
 
     def _fetch_all(query, page_size: int = 1000):
@@ -291,6 +298,8 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
 
 @st.cache_data(ttl=120, show_spinner=False)
 def _load_departamentos(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]:
+    import hashlib as _hl
+    ver = f"{ver}_{_hl.md5((_token or '').encode()).hexdigest()[:8]}"
     sb = _sb_from_token(_token)
     try:
         return (
@@ -309,6 +318,8 @@ def _load_departamentos(tenant_id: str, ver: str = "0", _token: str = "") -> lis
 
 @st.cache_data(ttl=120, show_spinner=False)
 def _load_grupos(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]:
+    import hashlib as _hl
+    ver = f"{ver}_{_hl.md5((_token or '').encode()).hexdigest()[:8]}"
     sb = _sb_from_token(_token)
     try:
         return (
@@ -892,7 +903,7 @@ def render_dashboard() -> None:
         st.warning("Nenhuma revisão ativa encontrada para este tenant.")
         return
 
-    revisao_id = rev["id"]
+    revisao_id = str(rev["id"])
     set_current_revisao(revisao_id)
     st.session_state["_sidebar_rev_titulo"] = rev.get("titulo")
 
@@ -948,27 +959,6 @@ def render_dashboard() -> None:
                    for g in grupos if g.get("id")}
 
     base = normalize_matriz_base(raw, eq_meta)
-
-    # ── DEBUG temporário ──────────────────────────────────────────────────
-    with st.expander("🔍 DEBUG", expanded=True):
-        st.write(f"**tenant_id:** `{tenant_id}`")
-        st.write(f"**revisao_id:** `{revisao_id}`")
-        st.write(f"**raw:** {len(raw)} rows | **eq_meta:** {len(eq_meta)} rows")
-        st.write(f"**base shape:** {base.shape} | **empty:** {base.empty}")
-        if not base.empty:
-            cols_show = [c for c in ["equipamento_id","grupo_id","grupo","departamento_id","frota","modelo","state"] if c in base.columns]
-            st.dataframe(base[cols_show].head(10))
-            st.write("**grupo_id únicos:**", base["grupo_id"].unique().tolist()[:10])
-            st.write("**departamento_id únicos:**", base["departamento_id"].unique().tolist()[:10])
-        if raw:
-            st.write("**raw[0]:**", raw[0])
-        if eq_meta:
-            st.write("**eq_meta[0]:**", eq_meta[0])
-        st.write("**dept_map (5 primeiros):**", dict(list(dept_map.items())[:5]))
-        st.write("**gid_to_dept (5 primeiros):**", dict(list(gid_to_dept.items())[:5]))
-        grp_sample = grupos[:3] if grupos else []
-        st.write("**grupos (3 primeiros):**", grp_sample)
-    # ── FIM DEBUG ─────────────────────────────────────────────────────────
 
     if base.empty:
         notice_card(
