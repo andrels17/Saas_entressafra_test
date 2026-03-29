@@ -161,12 +161,15 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
             "backlog_steps",
             "pct"])
 
+    # Busca TODOS os grupos (sem filtro ativo) para garantir que equipamentos
+    # vinculados a grupos inativos sejam contabilizados corretamente.
+    # O filtro ativo=True causava eq_count=0 quando equipamentos apontavam
+    # para grupos com ativo=False, zerando todos os KPIs da Home.
     grupos = safe_select(
         sb,
         "equip_grupos",
         "id",
-        tenant_id__eq=tenant_id,
-        ativo__eq=True)
+        tenant_id__eq=tenant_id)
     gids = [str(g["id"]) for g in grupos if g.get("id")]
     if not gids:
         return EMPTY
