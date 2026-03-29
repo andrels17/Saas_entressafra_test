@@ -594,6 +594,14 @@ def _build_payload(
                     sem_inicio_eq = False
 
             dias_sem_manut = _dias_desde(ultima_mov_eq)
+
+            # Para equipamentos sem NENHUM apontamento (ultima_mov_eq=None),
+            # usa os dias desde o início da revisão como proxy de inatividade.
+            if dias_sem_manut is None and ultima_mov_eq is None:
+                dias_sem_manut_efetivo = _dias_desde(data_inicio) if data_inicio else None
+            else:
+                dias_sem_manut_efetivo = dias_sem_manut
+
             if travado_eq:
                 n_travados += 1
             if sem_inicio_eq and expected_per_eq > 0:
@@ -603,8 +611,8 @@ def _build_payload(
                 expected_per_eq > 0
                 and pct < 100
                 and not travado_eq
-                and dias_sem_manut is not None
-                and dias_sem_manut >= dias_sem_update
+                and dias_sem_manut_efetivo is not None
+                and dias_sem_manut_efetivo >= dias_sem_update
             )
             if parado_eq:
                 n_parados += 1
@@ -613,9 +621,13 @@ def _build_payload(
                     "modelo": str(eq.get("modelo") or ""),
                     "grupo": grupo_nome,
                     "ultima_semana": ultima_semana_eq,
-                    "dias_parado": dias_sem_manut,
+                    "dias_parado": dias_sem_manut_efetivo,
                     "ultima_mov": ultima_mov_eq,
-                    "status": "Sem manutenção desde a semana " + (str(ultima_semana_eq) if ultima_semana_eq else "inicial"),
+                    "status": (
+                        "Sem nenhum apontamento desde o início"
+                        if ultima_mov_eq is None
+                        else "Sem manutenção desde a semana " + (str(ultima_semana_eq) if ultima_semana_eq else "inicial")
+                    ),
                     "progresso": pct,
                 })
 
