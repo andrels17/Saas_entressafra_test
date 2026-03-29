@@ -156,21 +156,15 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
                 log_error(exc, context="dashboard._load_base_cached.fallback_in",
                           table="equipamentos")
 
+    # Busca TODOS os grupos (sem filtro ativo) para garantir resolução de
+    # grupo_nome e departamento_id de equipamentos vinculados a grupos inativos.
+    # 95 equipamentos apontam para grupos com ativo=False neste tenant.
     try:
         grupo_rows = _fetch_all(
             sb.table("equip_grupos")
             .select("id,nome,departamento_id")
             .eq("tenant_id", tenant_id)
-            .eq("ativo", True)
         )
-        # Fallback: se nenhum grupo ativo encontrado, busca todos para
-        # garantir resolução de grupo_nome e departamento_id.
-        if not grupo_rows:
-            grupo_rows = _fetch_all(
-                sb.table("equip_grupos")
-                .select("id,nome,departamento_id")
-                .eq("tenant_id", tenant_id)
-            )
     except Exception as exc:
         log_error(exc, context="dashboard._load_base_cached", table="equip_grupos")
         grupo_rows = []
