@@ -434,11 +434,27 @@ def render_home_overview() -> None:
     )
 
     # ── Carrega KPIs ────────────────────────────────────────────────────────
+    _tok_kpi = st.session_state.get("sb_access_token", "") or ""
     with st.spinner("", show_time=False):
         prefer_mv = False  # força leitura raw para manter Home sincronizada com a matriz
-        kdf = get_group_kpis(tenant_id, rev["id"], ver, prefer_mv=prefer_mv, _token=st.session_state.get("sb_access_token", ""))
+        kdf = get_group_kpis(tenant_id, rev["id"], ver, prefer_mv=prefer_mv, _token=_tok_kpi)
 
     kdf = enforce_home_schema(kdf)
+
+    # Auto-healing: se todos os grupos têm eq_count=0 mas há um token válido,
+    # o cache foi envenenado por uma chamada inicial sem JWT. Limpa e recarrega.
+    if (
+        _tok_kpi
+        and kdf is not None
+        and not (hasattr(kdf, "empty") and kdf.empty)
+        and "eq_count" in kdf.columns
+        and pd.to_numeric(kdf["eq_count"], errors="coerce").fillna(0).sum() == 0
+        and not st.session_state.get("_home_cache_cleared")
+    ):
+        st.cache_data.clear()
+        st.session_state["_home_cache_cleared"] = True
+        st.rerun()
+
     if kdf is None or (hasattr(kdf, "empty") and kdf.empty):
         st.info("Sem KPIs nesta revisão ainda.")
         return
