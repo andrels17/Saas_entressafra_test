@@ -281,6 +281,12 @@ def get_group_kpis(
     O parâmetro `ver` pode ser incrementado via invalidate_kpi_cache()
     para forçar recarregamento sem esperar o TTL expirar.
     """
+    # Inclui hash do token no ver para garantir que o cache seja invalidado
+    # quando o token muda (de vazio para válido), evitando cache envenenado
+    # por chamadas iniciais sem JWT que retornam dados vazios via RLS.
+    import hashlib as _hl
+    ver = f"{ver}_{_hl.md5((_token or '').encode()).hexdigest()[:8]}"
+
     # Ajusta TTL dinamicamente consultando o status da revisão.
     # Revisões concluídas não mudam — podemos cache por muito mais tempo.
     status = _get_revisao_status(tenant_id, revisao_id, _token)
