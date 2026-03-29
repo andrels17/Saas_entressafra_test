@@ -226,35 +226,42 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
         except Exception:
             pass  # fallback seguro — inclui todos
 
-    all_eq_ids = list(eq_to_gid.keys())
+    # Busca TODAS as tarefas da revisão de uma vez (mesma abordagem da Matriz).
+    # Antes filtrava por equipamento_id IN all_eq_ids, o que causava undercount:
+    # tarefas de equipamentos não resolvidos no eq_to_gid eram ignoradas.
     done_by_gid: dict[str, int] = defaultdict(int)
-    if all_eq_ids and revisao_id:
-        for i in range(0, len(all_eq_ids), 500):
-            chunk = all_eq_ids[i: i + 500]
+    if revisao_id:
+        start = 0
+        page_size = 1000
+        while True:
             try:
                 trows = (
                     sb.table("tarefas_servico")
                     .select("equipamento_id,etapa_d,etapa_r,etapa_m")
-                    .eq("tenant_id", tenant_id).eq("revisao_id", revisao_id)
-                    .in_("equipamento_id", chunk).execute().data
+                    .eq("tenant_id", tenant_id)
+                    .eq("revisao_id", revisao_id)
+                    .range(start, start + page_size - 1)
+                    .execute().data
                 ) or []
             except Exception as exc:
                 log_error(
                     exc,
-                    context="kpi_engine._compute_from_raw.chunk",
+                    context="kpi_engine._compute_from_raw.all_tarefas",
                     table="tarefas_servico",
-                    extra={"chunk_index": i, "chunk_size": len(chunk)},
                 )
-                trows = []
+                break
             for t in trows:
                 eid = str(t.get("equipamento_id")) if t.get("equipamento_id") else None
                 gid = eq_to_gid.get(eid)
                 if gid:
                     done_by_gid[gid] += (
-                      int(bool(t.get("etapa_d"))) +
-                      int(bool(t.get("etapa_r"))) +
-                      int(bool(t.get("etapa_m")))
-                  )
+                        int(bool(t.get("etapa_d"))) +
+                        int(bool(t.get("etapa_r"))) +
+                        int(bool(t.get("etapa_m")))
+                    )
+            if len(trows) < page_size:
+                break
+            start += page_size
 
     rows: list[dict[str, Any]] = [
         build_group_kpi(
