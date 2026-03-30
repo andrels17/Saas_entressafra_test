@@ -24,7 +24,8 @@ log = logging.getLogger("saas.recipients")
 TIPO_GESTOR = "gestor"
 TIPO_EXECUTIVO = "executivo"
 ROLE_DEFAULT: dict[str, str] = {
-    "gestor": TIPO_GESTOR,
+    "manager": TIPO_GESTOR,   # role salvo no banco como "manager" (gestor)
+    "gestor": TIPO_GESTOR,    # compatibilidade retroativa com strings legadas
     "supervisor": TIPO_EXECUTIVO,
     "admin": TIPO_EXECUTIVO,
     "superadmin": TIPO_EXECUTIVO,
