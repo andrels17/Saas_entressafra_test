@@ -656,7 +656,7 @@ def _build_payload(
         pct_semana_anterior=pct_semana_anterior,
         pct_semana_atual=pct_semana_atual,
         criticos=sorted(criticos, key=lambda x: x.pct),
-        todos_equipamentos=sorted(all_equipamentos, key=lambda e: e["pct"]),
+        todos_equipamentos=sorted(all_equipamentos, key=lambda e: -e["pct"]),
         n_travados=n_travados,
         n_sem_inicio=n_sem_inicio,
         n_parados=n_parados,
@@ -664,7 +664,7 @@ def _build_payload(
         parados_detalhe=parados_detalhe,
         primary_color=branding.get("primary_color") or "#FFD100",
         logo_url=branding.get("logo_url"),
-    ), sorted(all_equipamentos, key=lambda e: e["pct"])
+    ), sorted(all_equipamentos, key=lambda e: -e["pct"])
 
 
 # ── Resultado do dispatch ───────────────────────────────────────────────
