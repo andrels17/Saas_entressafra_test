@@ -256,6 +256,7 @@ def _load_dashboard_base(sb, tenant_id: str, revisao_id: str, max_semana: int | 
             "etapa_r": t.get("etapa_r"),
             "etapa_m": t.get("etapa_m"),
             "updated_at": t.get("updated_at"),
+            "source_has_task": True,
         })
         if eid and sid and eid in eq_map:
             task_map[(eid, sid)] = _merge_task(task_map.get((eid, sid)), t)
@@ -302,6 +303,7 @@ def _load_dashboard_base(sb, tenant_id: str, revisao_id: str, max_semana: int | 
                 "etapa_r": t.get("etapa_r"),
                 "etapa_m": t.get("etapa_m"),
                 "updated_at": t.get("updated_at"),
+                "source_has_task": bool(t),
             })
 
     fallback_tasks = [t for t in raw_tasks if str(t.get("equipamento_id") or "") not in eids_covered]
@@ -1149,8 +1151,28 @@ def dispatch_relatorio_semanal(
                         dias_travado=dias_travado, dias_sem_update=dias_sem_update,
                     )
 
-                    dept_base = apply_filters(base_exec, grupo_ids=grp.grupo_ids)
-                    dept_prev_base = apply_filters(base_prev_exec, grupo_ids=grp.grupo_ids) if base_prev_exec is not None else None
+                    dept_base_full = apply_filters(base_exec, grupo_ids=grp.grupo_ids)
+                    dept_prev_base_full = apply_filters(base_prev_exec, grupo_ids=grp.grupo_ids) if base_prev_exec is not None else None
+
+                    def _task_only(df):
+                        if df is None:
+                            return None
+                        if getattr(df, "empty", True):
+                            return df
+                        if "source_has_task" not in df.columns:
+                            return df
+                        mask = df["source_has_task"].fillna(False).astype(bool)
+                        return df[mask].copy()
+
+                    dept_base = _task_only(dept_base_full)
+                    dept_prev_base = _task_only(dept_prev_base_full) if dept_prev_base_full is not None else None
+
+                    # O executivo só deve usar departamentos que realmente têm tarefas na revisão.
+                    # Isso evita que departamentos desativados ou sem apontamento herdem equipamentos
+                    # da grade geral do dashboard.
+                    if dept_base is None or dept_base.empty:
+                        continue
+
                     eq_cur = equipment_progress(dept_base)
                     eq_prev = equipment_progress(dept_prev_base) if dept_prev_base is not None else None
                     cur_overall = overall_from_base(dept_base)
@@ -1220,7 +1242,8 @@ def dispatch_relatorio_semanal(
                     ))
 
                     for sem_hist, base_hist in bases_hist.items():
-                        dept_base_hist = apply_filters(base_hist, grupo_ids=grp.grupo_ids)
+                        dept_base_hist_full = apply_filters(base_hist, grupo_ids=grp.grupo_ids)
+                        dept_base_hist = _task_only(dept_base_hist_full)
                         eq_hist = equipment_progress(dept_base_hist)
                         done_hist = int(eq_hist["done_steps"].sum()) if eq_hist is not None and not eq_hist.empty and "done_steps" in eq_hist.columns else 0
                         expected_hist = int(eq_hist["expected_steps"].sum()) if eq_hist is not None and not eq_hist.empty and "expected_steps" in eq_hist.columns else 0
