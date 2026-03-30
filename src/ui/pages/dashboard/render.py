@@ -388,7 +388,7 @@ def _render_pct_rank_chart(
         chart_df[value_col], errors="coerce").fillna(0).clip(0, 100)
     chart_df = chart_df.sort_values(value_col, ascending=False).head(top_n)
     chart_df = chart_df.sort_values(value_col, ascending=True)
-    chart_df["label"] = chart_df[value_col].map(lambda v: f"{v:.1f}%")
+    chart_df["label"] = chart_df[value_col].map(lambda v: f"{int(round(v))}%")
     chart_df["color"] = chart_df[value_col].apply(_pct_bar_color)
 
     fig = px.bar(
@@ -404,7 +404,7 @@ def _render_pct_rank_chart(
     fig.update_traces(
         textposition="outside",
         cliponaxis=False,
-        hovertemplate="%{y}<br>% Concluído: %{x:.1f}%<extra></extra>")
+        hovertemplate="%{y}<br>% Concluído: %{x:.0f}%<extra></extra>")
     fig.update_layout(
         height=max(380, 42 * len(chart_df) + 80),
         margin=dict(l=10, r=90, t=48, b=10),
@@ -424,7 +424,7 @@ def _fragment_kpis_globais(overall: dict) -> None:
     from src.utils.ui_helpers import mobile_columns
     cols = mobile_columns(5, 2)
     labels = [("% Concluído",
-               f"{overall['pct']:.1f}%",
+               f"{int(round(overall['pct']))}%",
                None,
                "off",
                "Percentual global alinhado à mesma regra da Matriz/Home."),
@@ -533,7 +533,7 @@ def _fragment_grupos(
                 "% Concluído",
                 min_value=0,
                 max_value=100,
-                format="%.1f%%")},
+                format="%d%%")},
     )
     with st.expander("⬇ Exportar", expanded=False):
         from src.utils.ui_helpers import df_to_xlsx
@@ -597,7 +597,7 @@ def _fragment_departamentos(
     dsum["backlog_steps"] = (dsum["expected_steps"] - dsum["done_steps"]).clip(lower=0)
     dsum["pct"] = (
         (dsum["done_steps"] / dsum["expected_steps"] * 100)
-        .round(1)
+        .round(0)
         .fillna(0.0)
         .clip(0, 100)
     )
@@ -620,7 +620,7 @@ def _fragment_departamentos(
 
     chart_df = display[["Departamento", "% Concluído"]].copy()
     chart_df = chart_df.sort_values("% Concluído", ascending=True)
-    chart_df["label"] = chart_df["% Concluído"].map(lambda v: f"{v:.1f}%")
+    chart_df["label"] = chart_df["% Concluído"].map(lambda v: f"{int(round(v))}%")
     chart_df["color"] = chart_df["% Concluído"].apply(_pct_bar_color)
 
     fig = px.bar(
@@ -636,7 +636,7 @@ def _fragment_departamentos(
     fig.update_traces(
         textposition="outside",
         cliponaxis=False,
-        hovertemplate="%{y}<br>% Concluído: %{x:.1f}%<br><i>Clique para filtrar</i><extra></extra>",
+        hovertemplate="%{y}<br>% Concluído: %{x:.0f}%<br><i>Clique para filtrar</i><extra></extra>",
     )
     fig.update_layout(
         height=max(320, 52 * len(chart_df) + 80),
@@ -678,7 +678,7 @@ def _fragment_departamentos(
         display,
         column_config={
             "% Concluído": st.column_config.ProgressColumn(
-                "% Concluído", min_value=0, max_value=100, format="%.1f%%"),
+                "% Concluído", min_value=0, max_value=100, format="%d%%"),
             "Grupos": st.column_config.NumberColumn("Grupos", format="%d"),
             "Etapas feitas": st.column_config.NumberColumn("Etapas feitas", format="%d"),
             "Etapas esperadas": st.column_config.NumberColumn("Etapas esperadas", format="%d"),
@@ -781,7 +781,7 @@ def _fragment_equipamentos(
                 "% Concluído",
                 min_value=0,
                 max_value=100,
-                format="%.1f%%",
+                format="%d%%",
             )
         },
     )
