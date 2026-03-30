@@ -7,8 +7,11 @@ Convencao:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Iterable
+
+import streamlit as st
 
 from src.auth.permissions import can_view_all_data
 
@@ -101,7 +104,18 @@ def _derive_departments_from_groups(sb, tenant_id: str, grp_ids: list[str]) -> l
         return []
 
 
-def get_user_scope(sb, tenant_id: str, user_id: str | None, role: str | None = None):
+@st.cache_data(ttl=120, show_spinner=False)
+def get_user_scope(tenant_id: str, user_id: str | None, role: str | None = None, token_hash: str = "", _sb_unused: str = ""):
+    """Retorna (dept_ids, grp_ids) para o usuário no tenant.
+
+    Cacheado por 120s para evitar até 4 queries ao banco a cada rerun do
+    Streamlit. `token_hash` garante isolamento de cache entre usuários.
+    `_sb_unused` existe apenas para compatibilidade retroativa com chamadas
+    que passam o cliente sb como primeiro argumento posicional — é ignorado.
+    """
+    import streamlit as _st
+    from src.db.supabase_client import get_supabase_anon
+
     if can_view_all_data(role):
         return None, None
 
@@ -109,6 +123,16 @@ def get_user_scope(sb, tenant_id: str, user_id: str | None, role: str | None = N
     user_id = _to_id(user_id)
     if not tenant_id or not user_id:
         return empty_scope()
+
+    # Reconstrói o cliente sb a partir do token (não pode passar objetos não
+    # serializáveis como argumento de função cacheada pelo Streamlit).
+    access_token = _st.session_state.get("sb_access_token", "") or ""
+    sb = get_supabase_anon()
+    if access_token:
+        try:
+            sb.postgrest.auth(access_token)
+        except Exception:
+            pass
 
     rows: list[dict] = []
     rows.extend(_load_scope_rows(sb, "tenant_user_departamentos", tenant_id, user_id))
@@ -128,8 +152,6 @@ def get_user_scope(sb, tenant_id: str, user_id: str | None, role: str | None = N
 
 
 def get_my_scope(tenant_id: str, sb=None) -> tuple[list[str] | None, list[str] | None]:
-    import streamlit as st
-
     role = st.session_state.get("current_role") or ""
     if can_view_all_data(role):
         st.session_state["scope_departamento_ids"] = None
@@ -142,18 +164,22 @@ def get_my_scope(tenant_id: str, sb=None) -> tuple[list[str] | None, list[str] |
         or st.session_state.get("auth_user_id")
     )
 
-    if sb is None:
-        from src.utils.supabase_helpers import sb_for_user
-        sb = sb_for_user()
+    access_token = st.session_state.get("sb_access_token", "") or ""
 
-    if not user_id and sb is not None:
-        try:
-            u = sb.auth.get_user()
-            user_id = getattr(getattr(u, "user", None), "id", None) or getattr(u, "id", None)
-        except Exception:
-            pass  # ignorado — operação opcional
+    if not user_id:
+        if sb is None:
+            from src.utils.supabase_helpers import sb_for_user
+            sb = sb_for_user()
+        if sb is not None:
+            try:
+                u = sb.auth.get_user()
+                user_id = getattr(getattr(u, "user", None), "id", None) or getattr(u, "id", None)
+            except Exception:
+                pass  # ignorado — operação opcional
 
-    dept_ids, grp_ids = get_user_scope(sb, tenant_id, user_id, role=role)
+    # Inclui hash do token na chave de cache para isolar sessões de usuários
+    token_hash = hashlib.md5(access_token.encode()).hexdigest()[:8]
+    dept_ids, grp_ids = get_user_scope(tenant_id, user_id, role=role, token_hash=token_hash)
     st.session_state["scope_departamento_ids"] = dept_ids
     st.session_state["scope_grupo_ids"] = grp_ids
     return dept_ids, grp_ids
