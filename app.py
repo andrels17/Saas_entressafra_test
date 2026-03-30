@@ -181,7 +181,10 @@ def _resolve_scope(tenant_id: str, user_id: str, role: str) -> None:
 
     try:
         sb = sb_for_user()
-        dept_ids, grp_ids = get_user_scope(sb, tenant_id, user_id, role=role)
+        _tok = st.session_state.get("sb_access_token", "") or ""
+        import hashlib as _hl
+        _tok_hash = _hl.md5(_tok.encode()).hexdigest()[:8]
+        dept_ids, grp_ids = get_user_scope(tenant_id, user_id, role=role, token_hash=_tok_hash)
     except Exception:
         dept_ids, grp_ids = (None, None) if can_view_all_data(role) else ([], [])
 
