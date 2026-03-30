@@ -577,53 +577,52 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
     status_colors = {"zero": RED, "travado": RED, "atrasado": YELLOW}
 
     if payload.criticos:
-        y = section_title(
-            f"{len(payload.criticos)} equipamento(s) requerem atenção", y)
-        rows = [["Frota", "Modelo", "Grupo", "Progresso", "Situação"]]
-        for eq in payload.criticos:
-            rows.append([
-                eq.frota,
-                eq.modelo[:20] if eq.modelo else "—",
-                eq.grupo[:18] if eq.grupo else "—",
-                f"{eq.pct}%",
-                status_labels.get(eq.status, eq.status),
-            ])
-        pw_useful = w - 32 * mm
-        y = platypus_table(rows,
-                           [pw_useful * 0.12,
-                            pw_useful * 0.26,
-                            pw_useful * 0.24,
-                            pw_useful * 0.14,
-                            pw_useful * 0.24],
-                           y)
+        total_criticos = len(payload.criticos)
+        MAX_POR_PAGINA = 35  # linhas por página (tamanho A4 comporta ~35 linhas de 7pt)
+        MAX_TOTAL = 150      # limite absoluto para não gerar PDFs de centenas de páginas
 
-        # Mini barras individuais por equipamento crítico
-        y -= 2 * mm
-        y = section_title("Progresso individual dos críticos", y)
-        for eq in payload.criticos:
-            if y < 30 * mm:
+        criticos_exibir = payload.criticos[:MAX_TOTAL]
+        truncado = total_criticos > MAX_TOTAL
+
+        y = section_title(
+            f"{total_criticos} equipamento(s) requerem atenção"
+            + (f" — exibindo os {MAX_TOTAL} mais críticos" if truncado else ""),
+            y)
+
+        # Divide em páginas de MAX_POR_PAGINA linhas
+        for page_start in range(0, len(criticos_exibir), MAX_POR_PAGINA):
+            chunk = criticos_exibir[page_start:page_start + MAX_POR_PAGINA]
+            rows = [["Frota", "Modelo", "Grupo", "Progresso", "Situação"]]
+            for eq in chunk:
+                rows.append([
+                    eq.frota,
+                    eq.modelo[:20] if eq.modelo else "—",
+                    eq.grupo[:18] if eq.grupo else "—",
+                    f"{eq.pct}%",
+                    status_labels.get(eq.status, eq.status),
+                ])
+            pw_useful = w - 32 * mm
+            y = platypus_table(rows,
+                               [pw_useful * 0.12,
+                                pw_useful * 0.26,
+                                pw_useful * 0.24,
+                                pw_useful * 0.14,
+                                pw_useful * 0.24],
+                               y)
+
+            # Se há mais páginas, quebra e abre nova
+            if page_start + MAX_POR_PAGINA < len(criticos_exibir):
                 footer()
                 c.showPage()
                 new_page("Equipamentos Críticos (cont.)")
                 y = h - 52 * mm
-            col = status_colors.get(eq.status, RED)
-            c.setFillColor(FG)
-            c.setFont("Helvetica-Bold", 8.5)
-            _frota_c = str(eq.frota or "—")[:8]
-            _modelo_c = str(eq.modelo or "")[:22]
-            label = f"{_frota_c}  —  {_modelo_c}" if _modelo_c else _frota_c
-            c.drawString(16 * mm, y, label)
+
+        if truncado:
             c.setFillColor(MUTED)
-            c.setFont("Helvetica", 7.5)
-            c.drawString(16 * mm, y - 4 * mm,
-                         eq.grupo[:30] if eq.grupo else "")
-            bx = 70 * mm
-            bar_avail = w - 32 * mm - 54 * mm
-            progress_bar(bx, y - 4 * mm, bar_avail, 5 * mm, eq.pct)
-            c.setFillColor(col)
-            c.setFont("Helvetica-Bold", 8.5)
-            c.drawRightString(w - 16 * mm, y, f"{eq.pct}%")
-            y -= 11 * mm
+            c.setFont("Helvetica-Oblique", 7.5)
+            c.drawString(16 * mm, y,
+                f"… e mais {total_criticos - MAX_TOTAL} equipamentos não exibidos.")
+            y -= 6 * mm
     else:
         c.setFillColor(GREEN)
         c.setFont("Helvetica-Bold", 14)
