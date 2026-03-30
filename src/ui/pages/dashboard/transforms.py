@@ -196,7 +196,7 @@ def overall_from_base(base: pd.DataFrame) -> dict:
     valid = _valid_scope(base)
     total = int(len(valid))
     pct = round(float(valid["ok_count"].sum()) /
-                max(total * 3, 1) * 100, 1) if total else 0.0
+                max(total * 3, 1) * 100) if total else 0.0
     return {
         "pct": float(max(0, min(100, pct))),
         "total": total,
@@ -224,7 +224,7 @@ def group_progress(base: pd.DataFrame) -> pd.DataFrame:
             ["grupo_id", "grupo", "departamento_id"], dropna=False):
         expected = int(len(sub) * 3)
         done = float(sub["ok_count"].sum())
-        pct = round(done / max(expected, 1) * 100, 1) if expected else 0.0
+        pct = round(done / max(expected, 1) * 100) if expected else 0
         rows.append({
             "grupo": grupo,
             "grupo_id": gid,
@@ -249,7 +249,7 @@ def sector_progress(base: pd.DataFrame) -> pd.DataFrame:
     for setor, sub in valid.groupby("setor", dropna=False):
         expected = int(len(sub) * 3)
         done = float(sub["ok_count"].sum())
-        pct = round(done / max(expected, 1) * 100, 1) if expected else 0.0
+        pct = round(done / max(expected, 1) * 100) if expected else 0
         rows.append({
             "setor": setor,
             "pct_concluido": max(0.0, min(100.0, pct)),
@@ -296,7 +296,7 @@ def equipment_progress(base: pd.DataFrame) -> pd.DataFrame:
         valid = sub[~sub["na"].astype(bool)] if "na" in sub.columns else sub
         expected = int(len(valid) * 3)
         done = float(valid["ok_count"].sum()) if not valid.empty else 0.0
-        pct = round(done / max(expected, 1) * 100, 1) if expected else 0.0
+        pct = round(done / max(expected, 1) * 100) if expected else 0
         rows.append({
             "equipamento_id": eid,
             "grupo_id": gid,
@@ -366,7 +366,7 @@ def build_inteligencia(
 
     total_valid = len(valid)
     etapas_ok = float(valid["ok_count"].sum())
-    pct = max(0.0, min(100.0, round(etapas_ok / max(total_valid * 3, 1) * 100, 1)))
+    pct = max(0.0, min(100.0, round(etapas_ok / max(total_valid * 3, 1) * 100)))
     pend = int((valid["state"] == "pendente").sum())
     trav = int((valid["state"] == "travado").sum())
     andamento = int((valid["state"] == "em_andamento").sum())
