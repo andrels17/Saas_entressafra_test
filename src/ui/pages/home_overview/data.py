@@ -1,6 +1,7 @@
 """Home Overview — camada de dados."""
 from __future__ import annotations
 
+import hashlib
 import pandas as pd
 import streamlit as st
 
@@ -9,15 +10,7 @@ from src.utils.observability import log_error
 
 
 def _sb_from_token(token: str = ""):
-    """Constrói cliente Supabase autenticado a partir de um token explícito.
-
-    Aceitar token como argumento (em vez de ler st.session_state diretamente)
-    é obrigatório dentro de funções @st.cache_data: o Streamlit serializa todos
-    os argumentos como chave de cache, e acessar session_state dentro do cache
-    causa TypeError em versões recentes.  O underscore (_token) exclui o valor
-    da chave de cache, mas o argumento ainda garante que clientes de tenants /
-    usuários diferentes nunca compartilhem o mesmo resultado cacheado.
-    """
+    """Constrói cliente Supabase autenticado a partir de um token explícito."""
     sb = get_supabase_anon()
     if token:
         try:
@@ -27,9 +20,14 @@ def _sb_from_token(token: str = ""):
     return sb
 
 
-def _token() -> str:
-    """Lê o token de acesso do session_state de forma segura."""
-    return st.session_state.get("sb_access_token", "") or ""
+def _token_hash(token: str) -> str:
+    """Retorna hash curto do token para usar como chave de cache segura.
+
+    Incluir o hash (não o token bruto) na chave garante que sessões de
+    usuários diferentes nunca compartilhem o mesmo resultado cacheado,
+    sem expor o JWT nos logs do Streamlit.
+    """
+    return hashlib.md5((token or "").encode()).hexdigest()[:8]
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -38,6 +36,7 @@ def load_revision(
         ver: str = "0",
         rev_id: str | None = None,
         _token: str = "") -> dict | None:
+    # load_revision não filtra por RLS de usuário — token só garante autenticação
     sb = _sb_from_token(_token)
     try:
         revs = (
@@ -68,7 +67,14 @@ def load_revision(
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def load_groups(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]:
+def load_groups(tenant_id: str, ver: str = "0", token_hash: str = "", _token: str = "") -> list[dict]:
+    """Carrega grupos do tenant.
+
+    `token_hash` é o md5[:8] do JWT e faz parte da chave de cache,
+    garantindo que sessões de usuários diferentes não compartilhem dados.
+    `_token` (underscore) é excluído do cache key pelo Streamlit e serve
+    apenas para autenticar o cliente Supabase.
+    """
     try:
         return (
             _sb_from_token(_token)
@@ -85,7 +91,12 @@ def load_groups(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]:
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def load_depts(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]:
+def load_depts(tenant_id: str, ver: str = "0", token_hash: str = "", _token: str = "") -> list[dict]:
+    """Carrega departamentos do tenant.
+
+    `token_hash` é o md5[:8] do JWT e faz parte da chave de cache,
+    garantindo que sessões de usuários diferentes não compartilhem dados.
+    """
     try:
         return (
             _sb_from_token(_token)
