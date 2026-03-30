@@ -85,6 +85,243 @@ def _semana_atual(data_inicio_str: str | None, semanas_total: int) -> int:
     return semana_da_revisao(data_inicio_str, semanas_total)
 
 
+def _fetch_all(query, page_size: int = 1000) -> list[dict]:
+    rows: list[dict] = []
+    start = 0
+    while True:
+        chunk = query.range(start, start + page_size - 1).execute().data or []
+        rows.extend(chunk)
+        if len(chunk) < page_size:
+            break
+        start += page_size
+    return rows
+
+
+def _status_rank(status: str | None) -> int:
+    s = str(status or "").strip().lower()
+    order = {
+        "concluido": 4,
+        "concluído": 4,
+        "em_andamento": 3,
+        "em andamento": 3,
+        "andamento": 3,
+        "travado": 2,
+        "pendente": 1,
+        "nao_aplica": 0,
+        "não aplica": 0,
+        "nao aplica": 0,
+    }
+    return order.get(s, -1)
+
+
+def _merge_task(prev: dict | None, cur: dict) -> dict:
+    if not prev:
+        return dict(cur)
+    merged = dict(prev)
+    for etapa_col in ("etapa_d", "etapa_r", "etapa_m"):
+        merged[etapa_col] = bool(prev.get(etapa_col)) or bool(cur.get(etapa_col))
+    prev_status = prev.get("status")
+    cur_status = cur.get("status")
+    merged["status"] = cur_status if _status_rank(cur_status) >= _status_rank(prev_status) else prev_status
+    prev_upd = str(prev.get("updated_at") or "")
+    cur_upd = str(cur.get("updated_at") or "")
+    merged["updated_at"] = cur.get("updated_at") if cur_upd >= prev_upd else prev.get("updated_at")
+    prev_sem = int(prev.get("semana") or 0)
+    cur_sem = int(cur.get("semana") or 0)
+    merged["semana"] = cur.get("semana") if cur_sem >= prev_sem else prev.get("semana")
+    return merged
+
+
+def _load_dashboard_base(sb, tenant_id: str, revisao_id: str, max_semana: int | None = None) -> tuple[list[dict], list[dict]]:
+    """Replica a mesma base consolidada usada pelo dashboard.
+
+    A ideia é que o PDF executivo use exatamente o mesmo método de montagem
+    do dashboard: grade equipamentos × serviços do grupo, com fallback para
+    tarefas diretas quando grupo_servicos estiver incompleto.
+    """
+    try:
+        q = (
+            sb.table("tarefas_servico")
+            .select("equipamento_id,servico_id,status,semana,etapa_d,etapa_r,etapa_m,updated_at")
+            .eq("tenant_id", tenant_id)
+            .eq("revisao_id", revisao_id)
+        )
+        if max_semana is not None:
+            q = q.lte("semana", max_semana)
+        task_rows = _fetch_all(q)
+    except Exception as exc:
+        log.warning("Erro ao carregar base do dashboard (tarefas_servico): %s", exc)
+        task_rows = []
+
+    eq_rows: list[dict] = []
+    try:
+        rpc_result = sb.rpc("get_equipamentos_dashboard", {"p_tenant_id": tenant_id}).execute()
+        eq_rows = rpc_result.data or []
+    except Exception:
+        pass
+
+    if not eq_rows:
+        try:
+            eq_rows = _fetch_all(
+                sb.table("equipamentos")
+                .select("id,frota,modelo,grupo_id")
+                .eq("tenant_id", tenant_id)
+                .eq("ativo", True)
+            )
+        except Exception as exc:
+            log.warning("Erro ao carregar equipamentos ativos para base do dashboard: %s", exc)
+
+    if not eq_rows:
+        try:
+            eq_rows = _fetch_all(
+                sb.table("equipamentos")
+                .select("id,frota,modelo,grupo_id")
+                .eq("tenant_id", tenant_id)
+            )
+        except Exception as exc:
+            log.warning("Erro ao carregar equipamentos para base do dashboard: %s", exc)
+
+    if not eq_rows and task_rows:
+        eq_ids = list({str(t.get("equipamento_id")) for t in task_rows if t.get("equipamento_id")})
+        for i in range(0, len(eq_ids), 100):
+            batch = eq_ids[i:i + 100]
+            try:
+                chunk = (
+                    sb.table("equipamentos")
+                    .select("id,frota,modelo,grupo_id")
+                    .in_("id", batch)
+                    .execute()
+                    .data or []
+                )
+                eq_rows.extend(chunk)
+            except Exception as exc:
+                log.warning("Erro no fallback de equipamentos da base do dashboard: %s", exc)
+
+    try:
+        grupo_rows = _fetch_all(
+            sb.table("equip_grupos")
+            .select("id,nome,departamento_id")
+            .eq("tenant_id", tenant_id)
+        )
+    except Exception as exc:
+        log.warning("Erro ao carregar grupos da base do dashboard: %s", exc)
+        grupo_rows = []
+
+    try:
+        serv_rows = _fetch_all(
+            sb.table("servicos")
+            .select("id,nome,setor")
+            .eq("tenant_id", tenant_id)
+        )
+    except Exception as exc:
+        log.warning("Erro ao carregar serviços da base do dashboard: %s", exc)
+        serv_rows = []
+
+    try:
+        grupo_servicos_rows = _fetch_all(
+            sb.table("grupo_servicos")
+            .select("grupo_id,servico_id")
+            .eq("tenant_id", tenant_id)
+        )
+    except Exception as exc:
+        log.warning("Erro ao carregar grupo_servicos da base do dashboard: %s", exc)
+        grupo_servicos_rows = []
+
+    eq_map = {str(r.get("id")): r for r in eq_rows if r.get("id") is not None}
+    grupo_map = {str(r.get("id")): r for r in grupo_rows if r.get("id") is not None}
+    serv_map = {str(r.get("id")): r for r in serv_rows if r.get("id") is not None}
+
+    raw_tasks: list[dict] = []
+    task_map: dict[tuple[str, str], dict] = {}
+    for t in task_rows:
+        eid = str(t.get("equipamento_id")) if t.get("equipamento_id") is not None else None
+        sid = str(t.get("servico_id")) if t.get("servico_id") is not None else None
+        eq = eq_map.get(eid, {})
+        gid = eq.get("grupo_id")
+        gid_s = str(gid) if gid is not None else None
+        grp = grupo_map.get(gid_s, {})
+        svc = serv_map.get(sid, {})
+        raw_tasks.append({
+            "equipamento_id": t.get("equipamento_id"),
+            "grupo_id": gid,
+            "grupo_nome": grp.get("nome"),
+            "departamento_id": eq.get("departamento_id") or grp.get("departamento_id"),
+            "frota": eq.get("frota"),
+            "modelo": eq.get("modelo"),
+            "servico_id": t.get("servico_id"),
+            "setor_nome": svc.get("setor") or "—",
+            "status": t.get("status"),
+            "semana": t.get("semana"),
+            "etapa_d": t.get("etapa_d"),
+            "etapa_r": t.get("etapa_r"),
+            "etapa_m": t.get("etapa_m"),
+            "updated_at": t.get("updated_at"),
+        })
+        if eid and sid and eid in eq_map:
+            task_map[(eid, sid)] = _merge_task(task_map.get((eid, sid)), t)
+
+    group_services: dict[str, list[str]] = {}
+    for row in grupo_servicos_rows:
+        gid = row.get("grupo_id")
+        sid = row.get("servico_id")
+        if gid is None or sid is None:
+            continue
+        gid_s = str(gid)
+        sid_s = str(sid)
+        group_services.setdefault(gid_s, [])
+        if sid_s not in group_services[gid_s]:
+            group_services[gid_s].append(sid_s)
+
+    eids_covered: set[str] = set()
+    raw: list[dict] = []
+    for eid, eq in eq_map.items():
+        gid = eq.get("grupo_id")
+        gid_s = str(gid) if gid is not None else None
+        if not gid_s:
+            continue
+        grp = grupo_map.get(gid_s, {})
+        service_ids = group_services.get(gid_s, [])
+        if not service_ids:
+            continue
+        eids_covered.add(eid)
+        for sid in service_ids:
+            svc = serv_map.get(str(sid), {})
+            t = task_map.get((eid, str(sid)), {})
+            raw.append({
+                "equipamento_id": eq.get("id"),
+                "grupo_id": gid,
+                "grupo_nome": grp.get("nome"),
+                "departamento_id": eq.get("departamento_id") or grp.get("departamento_id"),
+                "frota": eq.get("frota"),
+                "modelo": eq.get("modelo"),
+                "servico_id": sid,
+                "setor_nome": svc.get("setor") or "—",
+                "status": t.get("status") or "pendente",
+                "semana": t.get("semana"),
+                "etapa_d": t.get("etapa_d"),
+                "etapa_r": t.get("etapa_r"),
+                "etapa_m": t.get("etapa_m"),
+                "updated_at": t.get("updated_at"),
+            })
+
+    fallback_tasks = [t for t in raw_tasks if str(t.get("equipamento_id") or "") not in eids_covered]
+    if fallback_tasks:
+        raw.extend(fallback_tasks)
+    if not raw and raw_tasks:
+        raw = raw_tasks
+
+    eq_meta = [
+        {
+            "equipamento_id": r.get("id"),
+            "frota": r.get("frota"),
+            "modelo": r.get("modelo"),
+            "departamento_id": r.get("departamento_id"),
+        }
+        for r in eq_rows
+    ]
+    return raw, eq_meta
+
+
 # ── Carregamento de dados ───────────────────────────────────────────────
 
 def _load_tarefas_all(
@@ -287,237 +524,6 @@ def _load_branding(sb, tenant_id: str) -> dict:
 
 # ── Construção do payload ───────────────────────────────────────────────
 
-def _status_rank(status: str | None) -> int:
-    s = str(status or "").strip().lower()
-    order = {
-        "concluido": 4,
-        "concluído": 4,
-        "em_andamento": 3,
-        "em andamento": 3,
-        "andamento": 3,
-        "travado": 2,
-        "pendente": 1,
-        "nao_aplica": 0,
-        "não aplica": 0,
-        "nao aplica": 0,
-    }
-    return order.get(s, -1)
-
-
-def _merge_task(prev: dict | None, cur: dict) -> dict:
-    if not prev:
-        return dict(cur)
-    merged = dict(prev)
-    for etapa_col in ("etapa_d", "etapa_r", "etapa_m"):
-        merged[etapa_col] = bool(prev.get(etapa_col)) or bool(cur.get(etapa_col))
-    prev_status = prev.get("status")
-    cur_status = cur.get("status")
-    merged["status"] = cur_status if _status_rank(cur_status) >= _status_rank(prev_status) else prev_status
-    prev_upd = str(prev.get("updated_at") or "")
-    cur_upd = str(cur.get("updated_at") or "")
-    merged["updated_at"] = cur.get("updated_at") if cur_upd >= prev_upd else prev.get("updated_at")
-    prev_sem = int(prev.get("semana") or 0)
-    cur_sem = int(cur.get("semana") or 0)
-    merged["semana"] = max(prev_sem, cur_sem)
-    for dt_col in ("dt_etapa_d", "dt_etapa_r", "dt_etapa_m"):
-        merged[dt_col] = _best_ts(prev.get(dt_col), cur.get(dt_col))
-    return merged
-
-
-def _fetch_all(query, page_size: int = 1000):
-    rows = []
-    start = 0
-    while True:
-        chunk = query.range(start, start + page_size - 1).execute().data or []
-        rows.extend(chunk)
-        if len(chunk) < page_size:
-            break
-        start += page_size
-    return rows
-
-
-def _load_dashboard_base_for_groups(sb, tenant_id: str, grupo_ids: list[str], tarefas: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
-    """Monta a mesma base consolidada usada no dashboard, porém escopada aos grupos.
-
-    Retorna (raw, eq_meta, scoped_tasks).
-    """
-    grupo_ids = [str(g) for g in (grupo_ids or []) if g]
-    if not grupo_ids:
-        return [], [], []
-
-    grupo_set = set(grupo_ids)
-
-    eq_rows: list[dict] = []
-    try:
-        rpc_result = sb.rpc("get_equipamentos_dashboard", {"p_tenant_id": tenant_id}).execute()
-        all_rows = rpc_result.data or []
-        eq_rows = [r for r in all_rows if str(r.get("grupo_id") or "") in grupo_set]
-    except Exception:
-        eq_rows = []
-
-    if not eq_rows:
-        eq_rows = _with_fallback(
-            lambda: _fetch_all(
-                sb.table("equipamentos")
-                .select("id,frota,modelo,grupo_id")
-                .eq("tenant_id", tenant_id)
-                .in_("grupo_id", grupo_ids)
-            ),
-            [],
-            context=f"Erro ao carregar equipamentos para grupos {grupo_ids}",
-        )
-
-    grupo_rows = _with_fallback(
-        lambda: _fetch_all(
-            sb.table("equip_grupos")
-            .select("id,nome,departamento_id")
-            .eq("tenant_id", tenant_id)
-            .in_("id", grupo_ids)
-        ),
-        [],
-        context=f"Erro ao carregar grupos {grupo_ids}",
-    )
-
-    grupo_servicos_rows = _with_fallback(
-        lambda: _fetch_all(
-            sb.table("grupo_servicos")
-            .select("grupo_id,servico_id")
-            .eq("tenant_id", tenant_id)
-            .in_("grupo_id", grupo_ids)
-        ),
-        [],
-        context=f"Erro ao carregar grupo_servicos {grupo_ids}",
-    )
-
-    serv_ids = sorted({str(r.get("servico_id")) for r in grupo_servicos_rows if r.get("servico_id")})
-    tarefa_serv_ids = {str(t.get("servico_id")) for t in (tarefas or []) if t.get("servico_id")}
-    serv_ids = sorted(set(serv_ids) | tarefa_serv_ids)
-    serv_rows: list[dict] = []
-    for i in range(0, len(serv_ids), 100):
-        batch = serv_ids[i:i+100]
-        if not batch:
-            continue
-        serv_rows.extend(_with_fallback(
-            lambda batch=batch: (
-                sb.table("servicos")
-                .select("id,nome,setor")
-                .eq("tenant_id", tenant_id)
-                .in_("id", batch)
-                .execute()
-                .data
-            ) or [],
-            [],
-            context="Erro ao carregar serviços para dashboard/pdf",
-        ))
-
-    eq_map = {str(r.get("id")): r for r in eq_rows if r.get("id") is not None}
-    grupo_map = {str(r.get("id")): r for r in grupo_rows if r.get("id") is not None}
-    serv_map = {str(r.get("id")): r for r in serv_rows if r.get("id") is not None}
-
-    eq_ids = set(eq_map.keys())
-    scoped_tasks = [
-        t for t in (tarefas or [])
-        if str(t.get("equipamento_id") or "") in eq_ids
-    ]
-
-    task_map: dict[tuple[str, str], dict] = {}
-    raw_tasks: list[dict] = []
-    for t in scoped_tasks:
-        eid = str(t.get("equipamento_id")) if t.get("equipamento_id") is not None else None
-        sid = str(t.get("servico_id")) if t.get("servico_id") is not None else None
-        eq = eq_map.get(eid, {})
-        gid = eq.get("grupo_id")
-        gid_s = str(gid) if gid is not None else None
-        grp = grupo_map.get(gid_s, {})
-        svc = serv_map.get(sid, {})
-        raw_tasks.append({
-            "equipamento_id": t.get("equipamento_id"),
-            "grupo_id": gid,
-            "grupo_nome": grp.get("nome"),
-            "departamento_id": eq.get("departamento_id") or grp.get("departamento_id"),
-            "frota": eq.get("frota"),
-            "modelo": eq.get("modelo"),
-            "servico_id": t.get("servico_id"),
-            "setor_nome": svc.get("setor") or "—",
-            "status": t.get("status"),
-            "etapa_d": t.get("etapa_d"),
-            "etapa_r": t.get("etapa_r"),
-            "etapa_m": t.get("etapa_m"),
-            "updated_at": t.get("updated_at"),
-            "semana": t.get("semana"),
-            "dt_etapa_d": t.get("dt_etapa_d"),
-            "dt_etapa_r": t.get("dt_etapa_r"),
-            "dt_etapa_m": t.get("dt_etapa_m"),
-        })
-        if eid and sid and eid in eq_map:
-            task_map[(eid, sid)] = _merge_task(task_map.get((eid, sid)), t)
-
-    group_services: dict[str, list[str]] = {}
-    for row in grupo_servicos_rows:
-        gid = row.get("grupo_id")
-        sid = row.get("servico_id")
-        if gid is None or sid is None:
-            continue
-        gid_s = str(gid)
-        sid_s = str(sid)
-        group_services.setdefault(gid_s, [])
-        if sid_s not in group_services[gid_s]:
-            group_services[gid_s].append(sid_s)
-
-    eids_covered: set[str] = set()
-    raw: list[dict] = []
-    for eid, eq in eq_map.items():
-        gid = eq.get("grupo_id")
-        gid_s = str(gid) if gid is not None else None
-        if not gid_s:
-            continue
-        grp = grupo_map.get(gid_s, {})
-        service_ids = group_services.get(gid_s, [])
-        if not service_ids:
-            continue
-        eids_covered.add(eid)
-        for sid in service_ids:
-            svc = serv_map.get(str(sid), {})
-            t = task_map.get((eid, str(sid)), {})
-            raw.append({
-                "equipamento_id": eq.get("id"),
-                "grupo_id": gid,
-                "grupo_nome": grp.get("nome"),
-                "departamento_id": eq.get("departamento_id") or grp.get("departamento_id"),
-                "frota": eq.get("frota"),
-                "modelo": eq.get("modelo"),
-                "servico_id": sid,
-                "setor_nome": svc.get("setor") or "—",
-                "status": t.get("status") or "pendente",
-                "etapa_d": t.get("etapa_d"),
-                "etapa_r": t.get("etapa_r"),
-                "etapa_m": t.get("etapa_m"),
-                "updated_at": t.get("updated_at"),
-                "semana": t.get("semana"),
-                "dt_etapa_d": t.get("dt_etapa_d"),
-                "dt_etapa_r": t.get("dt_etapa_r"),
-                "dt_etapa_m": t.get("dt_etapa_m"),
-            })
-
-    fallback_tasks = [t for t in raw_tasks if str(t.get("equipamento_id") or "") not in eids_covered]
-    if fallback_tasks:
-        raw.extend(fallback_tasks)
-    if not raw and raw_tasks:
-        raw = raw_tasks
-
-    eq_meta = [
-        {
-            "equipamento_id": r.get("id"),
-            "frota": r.get("frota"),
-            "modelo": r.get("modelo"),
-            "departamento_id": r.get("departamento_id"),
-        }
-        for r in eq_rows
-    ]
-    return raw, eq_meta, scoped_tasks
-
-
-
 def _build_payload(
     *,
     tarefas: list[dict],
@@ -525,7 +531,7 @@ def _build_payload(
     departamento_nome: str,
     tenant_nome: str,
     branding: dict,
-    sb,
+    sb,                         # conexão supabase para consultar template
     tenant_id: str,
     grupo_ids: list[str],
     dias_travado: int = 2,
@@ -534,202 +540,333 @@ def _build_payload(
     from src.services.reporting.pdf_relatorio_semanal import (
         RelatorioDeptPayload, SemanaSnapshot, EquipamentoCritico,
     )
-    from src.ui.pages.dashboard.transforms import (
-        apply_filters, normalize_matriz_base, overall_from_base,
-    )
 
     semanas_total = int(revisao.get("semanas_total") or 1)
     data_inicio = revisao.get("data_inicio")
     semana_atual = _semana_atual(data_inicio, semanas_total)
 
-    raw, eq_meta, scoped_tasks = _load_dashboard_base_for_groups(
-        sb, tenant_id, grupo_ids, tarefas
+    # ── Fonte de verdade: mesma fórmula da Matriz ───────────────────────────
+    # denominador = eq_count_ativo × svc_count_template × 3
+    svc_por_grupo = _load_grupo_template(sb, tenant_id, grupo_ids)
+    eq_por_grupo = _load_equipamentos_ativos(sb, tenant_id, grupo_ids)
+
+    # Exclui equipamentos ocultos nesta revisão
+    try:
+        from src.utils.eq_oculto import get_ocultos
+        _ocultos = get_ocultos(sb, tenant_id, revisao.get("id", ""))
+        if _ocultos:
+            eq_por_grupo = {
+                gid: [e for e in eqs if e.get("id") not in _ocultos]
+                for gid, eqs in eq_por_grupo.items()
+            }
+    except Exception:
+        pass
+
+    # Nomes dos grupos direto da tabela (independente de ter tarefas)
+    grupo_nomes: dict[str, str] = {}
+    gnrows = _with_fallback(
+        lambda: (
+            sb.table("equip_grupos")
+            .select("id,nome")
+            .in_("id", grupo_ids)
+            .execute()
+            .data
+        ) or [],
+        [],
+        context=f"Erro ao carregar nomes dos grupos {grupo_ids}",
     )
-    base = normalize_matriz_base(raw, eq_meta)
-    base = apply_filters(base, None, [str(g) for g in grupo_ids])
+    grupo_nomes = {r["id"]: r.get("nome") or r["id"] for r in gnrows if r.get("id")}
 
-    if base.empty:
-        return RelatorioDeptPayload(
-            tenant_nome=tenant_nome or "AgroSafra",
-            departamento_nome=departamento_nome,
-            revisao_titulo=revisao.get("titulo") or "Revisão",
-            semana_atual=semana_atual,
-            semanas_total=semanas_total,
-            data_inicio=data_inicio,
-            pct_geral=0,
-            n_equipamentos=0,
-            n_concluidos=0,
-            n_alertas_total=0,
-            done_steps=0,
-            expected_steps=0,
-            evolucao=[],
-            pct_semana_anterior=0,
-            pct_semana_atual=0,
-            criticos=[],
-            todos_equipamentos=[],
-            n_travados=0,
-            n_sem_inicio=0,
-            n_parados=0,
-            n_risco_prazo=0,
-            parados_detalhe=[],
-            primary_color=branding.get("primary_color") or "#FFD100",
-            logo_url=branding.get("logo_url"),
-        ), []
+    # Mapa eid → info do equipamento (frota, modelo, grupo_nome, grupo_id)
+    eid_to_info: dict[str, dict] = {}
+    for gid, eqs in eq_por_grupo.items():
+        for eq in eqs:
+            eid_to_info[eq["id"]] = {
+                "frota": str(eq.get("frota") or eq["id"]),
+                "modelo": str(eq.get("modelo") or ""),
+                "grupo_id": gid,
+            }
 
-    valid = base.copy()
-    if "na" in valid.columns:
-        valid = valid[~valid["na"].astype(bool)]
-
-    overall = overall_from_base(base)
-    total_done = int(round(float(valid.get("ok_count", []).sum()))) if not valid.empty else 0
-    total_expected = int(len(valid) * 3)
-
+    # Agrupa tarefas por equipamento_id (sem JOIN — tarefas agora são flat)
     eq_tasks: dict[str, list] = {}
-    for t in scoped_tasks:
+    for t in tarefas:
         eid = str(t.get("equipamento_id") or "")
         if eid:
             eq_tasks.setdefault(eid, []).append(t)
 
+    # done_steps até semana anterior por equipamento (para calcular evolução)
     semana_anterior = max(semana_atual - 1, 0)
     eq_done_anterior: dict[str, int] = {}
     for eid, tasks in eq_tasks.items():
         eq_done_anterior[eid] = sum(
-            _sum_done_steps(t) for t in tasks if int(t.get("semana") or 0) <= semana_anterior
+            _sum_done_steps(t)
+            for t in tasks if int(t.get("semana") or 0) <= semana_anterior
         )
 
-    all_equipamentos: list[dict] = []
+    # Acumula done_steps por grupo (para pct_geral com denominador correto)
+    done_by_grupo: dict[str, int] = {}
+    for gid in grupo_ids:
+        done_by_grupo[gid] = 0
+
+    # Progresso por equipamento (denominador = svc_count × 3)
     criticos: list[EquipamentoCritico] = []
+    all_equipamentos: list[dict] = []
     n_concluidos = 0
-    n_travados = 0
-    n_sem_inicio = 0
-    n_parados = 0
-    n_risco_prazo = 0
-    parados_detalhe: list[dict] = []
-    esperado_pct = _pct(semana_atual, semanas_total)
 
-    for eid, sub in valid.groupby("equipamento_id", dropna=False):
-        if eid is None:
-            continue
-        eid_s = str(eid)
-        expected_per_eq = int(len(sub) * 3)
-        done = int(round(float(sub["ok_count"].sum())))
-        pct = max(0, min(100, round(done / max(expected_per_eq, 1) * 100))) if expected_per_eq > 0 else 0
-        done_ant = eq_done_anterior.get(eid_s, 0)
-        pct_anterior = max(0, min(100, round(done_ant / max(expected_per_eq, 1) * 100))) if expected_per_eq > 0 else 0
+    for gid, eqs in eq_por_grupo.items():
+        svc_count = svc_por_grupo.get(gid, 0)
+        expected_per_eq = svc_count * 3  # denominador correto por equipamento
 
-        row0 = sub.iloc[0]
-        frota = str(row0.get("frota") or eid_s)
-        modelo = str(row0.get("modelo") or "")
-        grupo_nome = str(row0.get("grupo") or "—")
-        tasks = eq_tasks.get(eid_s, [])
-        any_travado = bool((sub.get("trav", False)).any()) or any((t.get("status") == "travado") for t in tasks)
+        # nome do grupo direto da tabela
+        grupo_nome = grupo_nomes.get(gid) or gid
 
-        if pct == 100 and expected_per_eq > 0:
-            n_concluidos += 1
+        for eq in eqs:
+            eid = eq["id"]
+            frota = str(eq.get("frota") or eid)
+            modelo = str(eq.get("modelo") or "")
+            tasks = eq_tasks.get(eid, [])
 
-        if expected_per_eq == 0:
-            status_eq = "sem_template"
-        elif any_travado:
-            status_eq = "travado"
-        elif done == 0:
-            status_eq = "zero"
-        elif pct == 100:
-            status_eq = "concluido"
-        else:
-            status_eq = "em_andamento"
-
-        ultima_mov = None
-        ultima_semana = None
-        for t in tasks:
-            mov_ts = _best_ts(
-                t.get("dt_etapa_m"),
-                t.get("dt_etapa_r"),
-                t.get("dt_etapa_d"),
-                t.get("updated_at"),
+            done = sum(
+                _sum_done_steps(t)
+                for t in tasks
             )
-            if mov_ts and (ultima_mov is None or mov_ts > ultima_mov):
-                ultima_mov = mov_ts
-            sem_t = int(t.get("semana") or 0)
-            if _sum_done_steps(t) > 0 and sem_t > 0 and (ultima_semana is None or sem_t > ultima_semana):
-                ultima_semana = sem_t
+            done_by_grupo[gid] = done_by_grupo.get(gid, 0) + done
 
-        dias_sem_manut = _dias_desde(ultima_mov)
-        dias_sem_manut_efetivo = dias_sem_manut
-        if dias_sem_manut_efetivo is None and ultima_mov is None:
-            dias_sem_manut_efetivo = _dias_desde(data_inicio) if data_inicio else None
+            # pct usando denominador correto (eq × svc × 3)
+            if expected_per_eq > 0:
+                pct = max(0, min(100, round(done / expected_per_eq * 100)))
+                done_ant = eq_done_anterior.get(eid, 0)
+                pct_anterior = max(
+                    0, min(
+                        100, round(
+                            done_ant / expected_per_eq * 100)))
+            else:
+                pct = 0
+                pct_anterior = 0
 
-        if any_travado:
-            n_travados += 1
-        if done == 0 and expected_per_eq > 0:
-            n_sem_inicio += 1
+            if pct == 100:
+                n_concluidos += 1
 
-        parado_eq = (
-            expected_per_eq > 0
-            and pct < 100
-            and not any_travado
-            and dias_sem_manut_efetivo is not None
-            and dias_sem_manut_efetivo >= dias_sem_update
-        )
-        if parado_eq:
-            n_parados += 1
-            parados_detalhe.append({
-                "frota": frota,
-                "modelo": modelo,
-                "grupo": grupo_nome,
-                "ultima_semana": ultima_semana,
-                "dias_parado": dias_sem_manut_efetivo,
+            any_travado = any(t.get("status") == "travado" for t in tasks)
+            if expected_per_eq == 0:
+                status_eq = "sem_template"
+            elif any_travado:
+                status_eq = "travado"
+            elif done == 0:
+                status_eq = "zero"
+            elif pct == 100:
+                status_eq = "concluido"
+            else:
+                status_eq = "em_andamento"
+
+            ultima_mov = None
+            ultima_semana = None
+            for t in tasks:
+                mov_ts = _best_ts(
+                    t.get("dt_etapa_m"),
+                    t.get("dt_etapa_r"),
+                    t.get("dt_etapa_d"),
+                    t.get("updated_at"),
+                )
+                if mov_ts and (ultima_mov is None or mov_ts > ultima_mov):
+                    ultima_mov = mov_ts
+                sem_t = int(t.get("semana") or 0)
+                if _sum_done_steps(t) > 0 and sem_t > 0 and (
+                        ultima_semana is None or sem_t > ultima_semana):
+                    ultima_semana = sem_t
+
+            dias_sem_manut = _dias_desde(ultima_mov)
+
+            if done == 0 and expected_per_eq > 0:
+                criticos.append(
+                    EquipamentoCritico(
+                        frota=frota,
+                        modelo=modelo,
+                        grupo=grupo_nome,
+                        pct=0,
+                        status="zero"))
+            elif any_travado:
+                criticos.append(
+                    EquipamentoCritico(
+                        frota=frota,
+                        modelo=modelo,
+                        grupo=grupo_nome,
+                        pct=pct,
+                        status="travado"))
+
+            all_equipamentos.append({
+                "frota": frota, "modelo": modelo, "grupo": grupo_nome,
+                "grupo_id": gid,
+                "pct": pct, "pct_anterior": pct_anterior, "status": status_eq,
                 "ultima_mov": ultima_mov,
-                "status": (
-                    "Sem nenhum apontamento desde o início"
-                    if ultima_mov is None
-                    else "Sem manutenção desde a semana " + (str(ultima_semana) if ultima_semana else "inicial")
-                ),
-                "progresso": pct,
+                "ultima_semana": ultima_semana,
+                "dias_sem_manut": dias_sem_manut,
             })
 
-        if expected_per_eq > 0 and pct < esperado_pct - 15 and pct < 100:
-            n_risco_prazo += 1
+    # pct_geral ponderado (mesma fórmula do kpi_engine: sum(done) /
+    # sum(expected))
+    total_done = 0
+    total_expected = 0
+    for gid in grupo_ids:
+        eq_list = eq_por_grupo.get(gid, [])
+        svc_c = svc_por_grupo.get(gid, 0)
+        eq_c = len(eq_list)
+        if eq_c > 0 and svc_c > 0:
+            total_done += done_by_grupo.get(gid, 0)
+            total_expected += eq_c * svc_c * 3
 
-        if done == 0 and expected_per_eq > 0:
-            criticos.append(EquipamentoCritico(frota=frota, modelo=modelo, grupo=grupo_nome, pct=0, status="zero"))
-        elif any_travado:
-            criticos.append(EquipamentoCritico(frota=frota, modelo=modelo, grupo=grupo_nome, pct=pct, status="travado"))
+    pct_geral = max(
+        0, min(100, round(total_done / max(total_expected, 1) * 100)))
+    n_equipamentos = sum(len(v) for v in eq_por_grupo.values())
 
-        all_equipamentos.append({
-            "frota": frota,
-            "modelo": modelo,
-            "grupo": grupo_nome,
-            "grupo_id": row0.get("grupo_id"),
-            "pct": pct,
-            "pct_anterior": pct_anterior,
-            "grupo_pct": pct,
-            "status": status_eq,
-            "ultima_mov": ultima_mov,
-            "ultima_semana": ultima_semana,
-            "dias_sem_manut": dias_sem_manut_efetivo,
-        })
+    # pct por grupo — para cabeçalho de seção no PDF
+    grupo_pct: dict[str, int] = {}
+    for gid in grupo_ids:
+        eq_c = len(eq_por_grupo.get(gid, []))
+        svc_c = svc_por_grupo.get(gid, 0)
+        if eq_c > 0 and svc_c > 0:
+            done_g = done_by_grupo.get(gid, 0)
+            expected_g = eq_c * svc_c * 3
+            grupo_pct[gid] = max(0, min(100, round(done_g / expected_g * 100)))
+        else:
+            grupo_pct[gid] = 0
 
+    # injeta grupo_pct em cada equipamento
+    for eq in all_equipamentos:
+        eq["grupo_pct"] = grupo_pct.get(eq.get("grupo_id", ""), 0)
+
+    # ── evolução semanal ────────────────────────────────────────────────────
+    # Denominador: total_expected distribuído linearmente pelas semanas.
+    # Mesma fórmula do pct_geral — garante que Sem.N acumulado bate com o %
+    # global ao final da última semana processada.
+    # done por semana: soma etapa_d + etapa_r + etapa_m das tarefas apontadas
+    # nessa semana (campo `semana` em tarefas_servico).
+    evolucao: list[SemanaSnapshot] = []
     semana_done_steps: dict[int, int] = {}
-    for t in scoped_tasks:
+
+    for t in tarefas:
         sem = int(t.get("semana") or 0)
         if sem <= 0:
             continue
-        semana_done_steps[sem] = semana_done_steps.get(sem, 0) + _sum_done_steps(t)
+        semana_done_steps[sem] = semana_done_steps.get(
+            sem, 0) + _sum_done_steps(t)
 
-    evolucao: list[SemanaSnapshot] = []
-    expected_por_semana = round(total_expected / max(semanas_total, 1)) if total_expected > 0 else 0
+    # Expected por semana: total_expected / semanas_total (distribuição linear)
+    # Usa o mesmo total_expected já calculado com eq × svc × 3
+    expected_por_semana = round(
+        total_expected / max(semanas_total, 1)) if total_expected > 0 else 0
+
     cumulative_done = 0
     cumulative_expected = 0
     for sem in range(1, semana_atual + 1):
         cumulative_done += semana_done_steps.get(sem, 0)
         cumulative_expected += expected_por_semana
+        # Garante que o acumulado não ultrapasse o total real
         cumulative_expected = min(cumulative_expected, total_expected)
-        pct_sem = max(0, min(100, round(cumulative_done / max(cumulative_expected, 1) * 100)))
-        evolucao.append(SemanaSnapshot(semana=sem, concluidos=cumulative_done, total=cumulative_expected, pct=pct_sem))
+        pct_sem = max(
+            0, min(100, round(cumulative_done / max(cumulative_expected, 1) * 100)))
+        evolucao.append(SemanaSnapshot(
+            semana=sem,
+            concluidos=cumulative_done,
+            total=cumulative_expected,
+            pct=pct_sem,
+        ))
 
-    pct_semana_atual = evolucao[-1].pct if evolucao else int(overall.get("pct") or 0)
+    pct_semana_atual = evolucao[-1].pct if evolucao else pct_geral
     pct_semana_anterior = evolucao[-2].pct if len(evolucao) >= 2 else 0
-    n_equipamentos = int(valid["equipamento_id"].nunique()) if "equipamento_id" in valid.columns else 0
+
+    # ── alertas ─────────────────────────────────────────────────────────────
+    n_travados = n_sem_inicio = n_parados = n_risco_prazo = 0
+    esperado_pct = _pct(semana_atual, semanas_total)
+    parados_detalhe: list[dict] = []
+
+    for gid, eqs in eq_por_grupo.items():
+        svc_count = svc_por_grupo.get(gid, 0)
+        expected_per_eq = svc_count * 3
+        grupo_nome = grupo_nomes.get(gid) or gid
+        for eq in eqs:
+            eid = eq["id"]
+            tasks = eq_tasks.get(eid, [])
+            done = sum(_sum_done_steps(t) for t in tasks)
+            pct = max(0, min(100, round(done / max(expected_per_eq, 1)
+                      * 100))) if expected_per_eq > 0 else 0
+
+            travado_eq = False
+            sem_inicio_eq = bool(tasks)
+            ultima_mov_eq = None
+            ultima_semana_eq = None
+            for t in tasks:
+                status = t.get("status") or "pendente"
+                # Usa apenas timestamps de etapas reais (D/R/M) para detectar
+                # inatividade — updated_at é tocado na criação e não indica trabalho real
+                etapa_ts = _best_ts(
+                    t.get("dt_etapa_m"),
+                    t.get("dt_etapa_r"),
+                    t.get("dt_etapa_d"),
+                )
+                # Fallback para updated_at só se alguma etapa foi marcada
+                if _sum_done_steps(t) > 0:
+                    updated = etapa_ts or t.get("updated_at")
+                else:
+                    updated = etapa_ts  # sem etapa concluída → sem timestamp real
+                dias = _dias_desde(updated)
+                if updated and (
+                        ultima_mov_eq is None or updated > ultima_mov_eq):
+                    ultima_mov_eq = updated
+                sem_t = int(t.get("semana") or 0)
+                if _sum_done_steps(t) > 0 and sem_t > 0 and (
+                        ultima_semana_eq is None or sem_t > ultima_semana_eq):
+                    ultima_semana_eq = sem_t
+                if status == "travado" and (
+                        dias is None or dias >= dias_travado):
+                    travado_eq = True
+                if _sum_done_steps(t) > 0:
+                    sem_inicio_eq = False
+
+            dias_sem_manut = _dias_desde(ultima_mov_eq)
+
+            # Para equipamentos sem NENHUM apontamento (ultima_mov_eq=None),
+            # usa os dias desde o início da revisão como proxy de inatividade.
+            if dias_sem_manut is None and ultima_mov_eq is None:
+                dias_sem_manut_efetivo = _dias_desde(data_inicio) if data_inicio else None
+            else:
+                dias_sem_manut_efetivo = dias_sem_manut
+
+            if travado_eq:
+                n_travados += 1
+            if sem_inicio_eq and expected_per_eq > 0:
+                n_sem_inicio += 1
+
+            parado_eq = (
+                expected_per_eq > 0
+                and pct < 100
+                and not travado_eq
+                and dias_sem_manut_efetivo is not None
+                and dias_sem_manut_efetivo >= dias_sem_update
+            )
+            if parado_eq:
+                n_parados += 1
+                parados_detalhe.append({
+                    "frota": str(eq.get("frota") or eid),
+                    "modelo": str(eq.get("modelo") or ""),
+                    "grupo": grupo_nome,
+                    "ultima_semana": ultima_semana_eq,
+                    "dias_parado": dias_sem_manut_efetivo,
+                    "ultima_mov": ultima_mov_eq,
+                    "status": (
+                        "Sem nenhum apontamento desde o início"
+                        if ultima_mov_eq is None
+                        else "Sem manutenção desde a semana " + (str(ultima_semana_eq) if ultima_semana_eq else "inicial")
+                    ),
+                    "progresso": pct,
+                })
+
+            if expected_per_eq > 0 and pct < esperado_pct - 15 and pct < 100:
+                n_risco_prazo += 1
+
+    parados_detalhe = sorted(parados_detalhe,
+                             key=lambda x: (-(x.get("dias_parado") or 0),
+                                            str(x.get("frota") or "")))
     n_alertas_total = n_travados + n_parados + n_risco_prazo + n_sem_inicio
 
     return RelatorioDeptPayload(
@@ -739,7 +876,7 @@ def _build_payload(
         semana_atual=semana_atual,
         semanas_total=semanas_total,
         data_inicio=data_inicio,
-        pct_geral=int(overall.get("pct") or 0),
+        pct_geral=pct_geral,
         n_equipamentos=n_equipamentos,
         n_concluidos=n_concluidos,
         n_alertas_total=n_alertas_total,
@@ -749,15 +886,15 @@ def _build_payload(
         pct_semana_anterior=pct_semana_anterior,
         pct_semana_atual=pct_semana_atual,
         criticos=sorted(criticos, key=lambda x: x.pct),
-        todos_equipamentos=sorted(all_equipamentos, key=lambda e: (-e["pct"], str(e["frota"]))),
+        todos_equipamentos=sorted(all_equipamentos, key=lambda e: -e["pct"]),
         n_travados=n_travados,
         n_sem_inicio=n_sem_inicio,
         n_parados=n_parados,
         n_risco_prazo=n_risco_prazo,
-        parados_detalhe=sorted(parados_detalhe, key=lambda x: (-(x.get("dias_parado") or 0), str(x.get("frota") or ""))),
+        parados_detalhe=parados_detalhe,
         primary_color=branding.get("primary_color") or "#FFD100",
         logo_url=branding.get("logo_url"),
-    ), sorted(all_equipamentos, key=lambda e: (-e["pct"], str(e["frota"])))
+    ), sorted(all_equipamentos, key=lambda e: -e["pct"])
 
 
 # ── Resultado do dispatch ───────────────────────────────────────────────
@@ -969,75 +1106,135 @@ def dispatch_relatorio_semanal(
 
         exec_recs = get_executive_recipients(tenant_id)
         if exec_recs:
-            # Constrói DeptSnapshot para cada grupo de departamento já
-            # processado
+            from src.ui.pages.dashboard.transforms import (
+                apply_filters,
+                equipment_progress,
+                normalize_matriz_base,
+                overall_from_base,
+            )
+
             dept_snapshots: list[DeptSnapshot] = []
             sem_atual_rev = _semana_atual(
-                revisao.get("data_inicio"), int(
-                    revisao.get("semanas_total") or 1))
+                revisao.get("data_inicio"), int(revisao.get("semanas_total") or 1)
+            )
             trend_acc: dict[int, dict[str, int]] = {}
             heatmap_semanal: list[dict] = []
             alertas_parados = {"atencao": 0, "critico": 0, "urgente": 0}
 
-            for grp in all_dept_groups:  # TODOS os deptos, não só os com gestores
+            # Base principal do executivo: mesma montagem consolidada do dashboard.
+            raw_exec, eq_meta_exec = _load_dashboard_base(sb, tenant_id, revisao_id)
+            base_exec = normalize_matriz_base(raw_exec, eq_meta_exec)
+
+            # Mantém uma janela curta (até 4 semanas) para tendência/heatmap,
+            # usando a mesma base do dashboard acumulada até cada semana.
+            sem_ini_hist = max(1, sem_atual_rev - 3)
+            bases_hist: dict[int, Any] = {}
+            for sem_hist in range(sem_ini_hist, sem_atual_rev + 1):
+                raw_hist, eq_meta_hist = _load_dashboard_base(sb, tenant_id, revisao_id, max_semana=sem_hist)
+                bases_hist[sem_hist] = normalize_matriz_base(raw_hist, eq_meta_hist)
+            base_prev_exec = bases_hist.get(sem_atual_rev - 1)
+
+            for grp in all_dept_groups:
                 try:
+                    # Payload legado só para alertas/parados e compatibilidade visual.
                     tarefas_g = _load_tarefas(
                         sb, tenant_id, revisao_id, grp.grupo_ids,
                         _tarefas_index=tarefas_index,
                     )
-                    p, eq_list_g = _build_payload(
+                    p_aux, _ = _build_payload(
                         tarefas=tarefas_g, revisao=revisao,
                         departamento_nome=grp.departamento_nome,
                         tenant_nome=tenant_nome, branding=branding,
                         sb=sb, tenant_id=tenant_id, grupo_ids=grp.grupo_ids,
                         dias_travado=dias_travado, dias_sem_update=dias_sem_update,
                     )
-                    todos = p.todos_equipamentos or []
-                    top_criticos = sorted(
-                        [e for e in todos if e.get("pct", 0) < 100],
-                        key=lambda e: e.get("pct", 0)
-                    )[:3]
-                    top_melhores = sorted(
-                        [e for e in todos if e.get("pct", 0) < 100],
-                        key=lambda e: -e.get("pct", 0)
-                    )[:3]
+
+                    dept_base = apply_filters(base_exec, grupo_ids=grp.grupo_ids)
+                    dept_prev_base = apply_filters(base_prev_exec, grupo_ids=grp.grupo_ids) if base_prev_exec is not None else None
+                    eq_cur = equipment_progress(dept_base)
+                    eq_prev = equipment_progress(dept_prev_base) if dept_prev_base is not None else None
+                    cur_overall = overall_from_base(dept_base)
+                    prev_overall = overall_from_base(dept_prev_base) if dept_prev_base is not None else {"pct": 0}
+
+                    prev_pct_map: dict[str, int] = {}
+                    if eq_prev is not None and not eq_prev.empty:
+                        for _, row_prev in eq_prev.iterrows():
+                            prev_pct_map[str(row_prev.get("equipamento_id"))] = int(round(float(row_prev.get("% Concluído", 0) or 0)))
+
+                    todos: list[dict] = []
+                    if eq_cur is not None and not eq_cur.empty:
+                        for _, row in eq_cur.iterrows():
+                            eid = str(row.get("equipamento_id"))
+                            pct_eq = int(round(float(row.get("% Concluído", 0) or 0)))
+                            travados_eq = int(row.get("Travados", 0) or 0)
+                            done_steps_eq = int(row.get("done_steps", 0) or 0)
+                            expected_steps_eq = int(row.get("expected_steps", 0) or 0)
+                            if travados_eq > 0:
+                                status_eq = "travado"
+                            elif expected_steps_eq > 0 and done_steps_eq == 0:
+                                status_eq = "zero"
+                            elif pct_eq >= 100:
+                                status_eq = "concluido"
+                            else:
+                                status_eq = "em_andamento"
+                            todos.append({
+                                "equipamento_id": eid,
+                                "frota": row.get("Frota") or "—",
+                                "modelo": row.get("Modelo") or "—",
+                                "grupo": row.get("grupo") or "—",
+                                "pct": pct_eq,
+                                "pct_anterior": prev_pct_map.get(eid, 0),
+                                "status": status_eq,
+                            })
+
+                    top_criticos = sorted([e for e in todos if e.get("pct", 0) < 100], key=lambda e: (e.get("pct", 0), e.get("frota") or ""))[:3]
+                    top_melhores = sorted([e for e in todos if e.get("pct", 0) < 100], key=lambda e: (-(e.get("pct", 0)), e.get("frota") or ""))[:3]
                     maiores_evolucoes = sorted(
                         [e for e in todos if e.get("pct", 0) - int(e.get("pct_anterior", 0)) > 0],
-                        key=lambda e: -(e.get("pct", 0) - int(e.get("pct_anterior", 0)))
+                        key=lambda e: (-(e.get("pct", 0) - int(e.get("pct_anterior", 0))), -(e.get("pct", 0))),
                     )[:3]
+
+                    n_equip = int(len(eq_cur)) if eq_cur is not None and not eq_cur.empty else 0
+                    n_concl = int((eq_cur["% Concluído"] >= 100).sum()) if eq_cur is not None and not eq_cur.empty and "% Concluído" in eq_cur.columns else 0
+                    n_trav = int((eq_cur["Travados"] > 0).sum()) if eq_cur is not None and not eq_cur.empty and "Travados" in eq_cur.columns else 0
+                    n_sem_inicio = int(((eq_cur["done_steps"] <= 0) & (eq_cur["expected_steps"] > 0)).sum()) if eq_cur is not None and not eq_cur.empty and {"done_steps", "expected_steps"}.issubset(eq_cur.columns) else 0
+                    done_total = int(eq_cur["done_steps"].sum()) if eq_cur is not None and not eq_cur.empty and "done_steps" in eq_cur.columns else 0
+                    expected_total = int(eq_cur["expected_steps"].sum()) if eq_cur is not None and not eq_cur.empty and "expected_steps" in eq_cur.columns else 0
+
                     dept_snapshots.append(DeptSnapshot(
                         nome=grp.departamento_nome,
-                        pct_geral=p.pct_geral,
-                        pct_anterior=p.pct_semana_anterior,
-                        n_equipamentos=p.n_equipamentos,
-                        n_concluidos=p.n_concluidos,
-                        n_travados=p.n_travados,
-                        n_sem_inicio=p.n_sem_inicio,
-                        n_risco_prazo=p.n_risco_prazo,
+                        pct_geral=int(cur_overall.get("pct", 0) or 0),
+                        pct_anterior=int(prev_overall.get("pct", 0) or 0),
+                        n_equipamentos=n_equip,
+                        n_concluidos=n_concl,
+                        n_travados=n_trav,
+                        n_sem_inicio=n_sem_inicio,
+                        n_risco_prazo=p_aux.n_risco_prazo,
                         top_criticos=top_criticos,
                         top_melhores=top_melhores,
                         maiores_evolucoes=maiores_evolucoes,
-                        n_parados=p.n_parados,
-                        max_dias_parado=max([int(x.get("dias_parado") or 0) for x in (p.parados_detalhe or [])] or [0]),
-                        _done_steps=p.done_steps,
-                        _expected_steps=p.expected_steps,
+                        n_parados=p_aux.n_parados,
+                        max_dias_parado=max([int(x.get("dias_parado") or 0) for x in (p_aux.parados_detalhe or [])] or [0]),
+                        _done_steps=done_total,
+                        _expected_steps=expected_total,
                     ))
 
-                    for wk in (p.evolucao or []):
-                        sem = int(getattr(wk, "semana", 0) or 0)
-                        if sem <= 0:
-                            continue
-                        acc = trend_acc.setdefault(
-                            sem, {"done": 0, "total": 0})
-                        acc["done"] += int(getattr(wk, "concluidos", 0) or 0)
-                        acc["total"] += int(getattr(wk, "total", 0) or 0)
+                    for sem_hist, base_hist in bases_hist.items():
+                        dept_base_hist = apply_filters(base_hist, grupo_ids=grp.grupo_ids)
+                        eq_hist = equipment_progress(dept_base_hist)
+                        done_hist = int(eq_hist["done_steps"].sum()) if eq_hist is not None and not eq_hist.empty and "done_steps" in eq_hist.columns else 0
+                        expected_hist = int(eq_hist["expected_steps"].sum()) if eq_hist is not None and not eq_hist.empty and "expected_steps" in eq_hist.columns else 0
+                        pct_hist = max(0, min(100, round(done_hist / expected_hist * 100))) if expected_hist > 0 else 0
+                        acc = trend_acc.setdefault(sem_hist, {"done": 0, "total": 0})
+                        acc["done"] += done_hist
+                        acc["total"] += expected_hist
                         heatmap_semanal.append({
                             "departamento": grp.departamento_nome,
-                            "semana": sem,
-                            "pct": int(getattr(wk, "pct", 0) or 0),
+                            "semana": sem_hist,
+                            "pct": pct_hist,
                         })
 
-                    for par in (p.parados_detalhe or []):
+                    for par in (p_aux.parados_detalhe or []):
                         dias = int(par.get("dias_parado") or 0)
                         if dias > 21:
                             alertas_parados["urgente"] += 1
@@ -1046,8 +1243,7 @@ def dispatch_relatorio_semanal(
                         elif dias > 7:
                             alertas_parados["atencao"] += 1
                 except Exception as e_g:
-                    _log(
-                        f"    ↳ Aviso: erro ao montar snapshot de {grp.departamento_nome}: {e_g}")
+                    _log(f"    ↳ Aviso: erro ao montar snapshot de {grp.departamento_nome}: {e_g}")
 
             if dept_snapshots:
                 # pct_global ponderado: sum(done_steps) / sum(expected_steps)
