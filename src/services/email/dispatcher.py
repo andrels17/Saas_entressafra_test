@@ -351,11 +351,29 @@ def _build_payload(
             }
 
     # Agrupa tarefas por equipamento_id (sem JOIN — tarefas agora são flat)
+    # e filtra para o escopo real deste departamento.
+    #
+    # Importante: o dashboard calcula progresso sobre a base da revisão
+    # (equipamentos que possuem tarefas no escopo filtrado), não sobre todos os
+    # equipamentos ativos do grupo/template. Se incluirmos todos os ativos aqui,
+    # o PDF executivo fica "diluído" com vários 0%, mesmo quando há progresso
+    # real no dashboard/heatmap.
     eq_tasks: dict[str, list] = {}
     for t in tarefas:
         eid = str(t.get("equipamento_id") or "")
-        if eid:
+        if eid and eid in eid_to_info:
             eq_tasks.setdefault(eid, []).append(t)
+
+    # Alinha o escopo do PDF ao dashboard: mantém apenas equipamentos que
+    # realmente pertencem à revisão/departamento atual.
+    eq_ids_escopo = set(eq_tasks.keys())
+    if eq_ids_escopo:
+        eq_por_grupo = {
+            gid: [e for e in eqs if str(e.get("id")) in eq_ids_escopo]
+            for gid, eqs in eq_por_grupo.items()
+        }
+    else:
+        eq_por_grupo = {gid: [] for gid in eq_por_grupo}
 
     # done_steps até semana anterior por equipamento (para calcular evolução)
     semana_anterior = max(semana_atual - 1, 0)
@@ -366,64 +384,43 @@ def _build_payload(
             for t in tasks if int(t.get("semana") or 0) <= semana_anterior
         )
 
-    # ── Escopo operacional idêntico ao dashboard ───────────────────────────
-    # O dashboard consolida apenas combinações equipamento×serviço realmente
-    # presentes em tarefas_servico da revisão. Para o PDF bater com a tela,
-    # o denominador deve sair desse mesmo escopo operacional — e não de todos
-    # os equipamentos ativos × template completo.
-    task_scope_by_gid: dict[str, set[tuple[str, str]]] = {gid: set() for gid in grupo_ids}
-    task_scope_by_eq: dict[str, set[str]] = {}
-    task_eq_ids_by_gid: dict[str, set[str]] = {gid: set() for gid in grupo_ids}
-    fallback_eq_ids_by_gid: dict[str, set[str]] = {gid: set() for gid in grupo_ids}
-    for gid, eqs in eq_por_grupo.items():
-        fallback_eq_ids_by_gid.setdefault(gid, set()).update(
-            str(eq.get("id")) for eq in eqs if eq.get("id")
-        )
-
-    scoped_tarefas: list[dict] = []
-    for t in tarefas:
-        eid = str(t.get("equipamento_id") or "")
-        sid = str(t.get("servico_id") or "")
-        info = eid_to_info.get(eid)
-        if not eid or not sid or not info:
-            continue
-        gid = str(info.get("grupo_id") or "")
-        if gid not in task_scope_by_gid:
-            continue
-        scoped_tarefas.append(t)
-        task_scope_by_gid[gid].add((eid, sid))
-        task_scope_by_eq.setdefault(eid, set()).add(sid)
-        task_eq_ids_by_gid.setdefault(gid, set()).add(eid)
-
     # Acumula done_steps por grupo (para pct_geral com denominador correto)
-    done_by_grupo: dict[str, int] = {gid: 0 for gid in grupo_ids}
+    done_by_grupo: dict[str, int] = {}
+    for gid in grupo_ids:
+        done_by_grupo[gid] = 0
 
-    # Progresso por equipamento (denominador = serviços realmente existentes
-    # na revisão × 3; fallback para template apenas se não houver tarefas)
+    # Progresso por equipamento (denominador = svc_count × 3)
     criticos: list[EquipamentoCritico] = []
     all_equipamentos: list[dict] = []
     n_concluidos = 0
 
     for gid, eqs in eq_por_grupo.items():
+        svc_count = svc_por_grupo.get(gid, 0)
+        expected_per_eq = svc_count * 3  # denominador correto por equipamento
+
         # nome do grupo direto da tabela
         grupo_nome = grupo_nomes.get(gid) or gid
 
         for eq in eqs:
-            eid = str(eq["id"])
+            eid = eq["id"]
             frota = str(eq.get("frota") or eid)
             modelo = str(eq.get("modelo") or "")
             tasks = eq_tasks.get(eid, [])
-            task_servicos_eq = task_scope_by_eq.get(eid, set())
-            svc_count_eq = len(task_servicos_eq) if task_servicos_eq else svc_por_grupo.get(gid, 0)
-            expected_per_eq = svc_count_eq * 3
 
-            done = sum(_sum_done_steps(t) for t in tasks)
+            done = sum(
+                _sum_done_steps(t)
+                for t in tasks
+            )
             done_by_grupo[gid] = done_by_grupo.get(gid, 0) + done
 
+            # pct usando denominador correto (eq × svc × 3)
             if expected_per_eq > 0:
                 pct = max(0, min(100, round(done / expected_per_eq * 100)))
                 done_ant = eq_done_anterior.get(eid, 0)
-                pct_anterior = max(0, min(100, round(done_ant / expected_per_eq * 100)))
+                pct_anterior = max(
+                    0, min(
+                        100, round(
+                            done_ant / expected_per_eq * 100)))
             else:
                 pct = 0
                 pct_anterior = 0
@@ -492,30 +489,28 @@ def _build_payload(
     total_done = 0
     total_expected = 0
     for gid in grupo_ids:
-        done_g = done_by_grupo.get(gid, 0)
-        expected_g = len(task_scope_by_gid.get(gid, set())) * 3
-        if expected_g <= 0:
-            # fallback defensivo para departamentos ainda sem tarefas geradas
-            eq_ids_fallback = fallback_eq_ids_by_gid.get(gid, set())
-            expected_g = len(eq_ids_fallback) * int(svc_por_grupo.get(gid, 0) or 0) * 3
-        total_done += done_g
-        total_expected += expected_g
+        eq_list = eq_por_grupo.get(gid, [])
+        svc_c = svc_por_grupo.get(gid, 0)
+        eq_c = len(eq_list)
+        if eq_c > 0 and svc_c > 0:
+            total_done += done_by_grupo.get(gid, 0)
+            total_expected += eq_c * svc_c * 3
 
-    pct_geral = max(0, min(100, round(total_done / max(total_expected, 1) * 100)))
-    n_equipamentos = sum(
-        len(task_eq_ids_by_gid.get(gid, set()) or fallback_eq_ids_by_gid.get(gid, set()))
-        for gid in grupo_ids
-    )
+    pct_geral = max(
+        0, min(100, round(total_done / max(total_expected, 1) * 100)))
+    n_equipamentos = sum(len(v) for v in eq_por_grupo.values())
 
     # pct por grupo — para cabeçalho de seção no PDF
     grupo_pct: dict[str, int] = {}
     for gid in grupo_ids:
-        done_g = done_by_grupo.get(gid, 0)
-        expected_g = len(task_scope_by_gid.get(gid, set())) * 3
-        if expected_g <= 0:
-            eq_ids_fallback = fallback_eq_ids_by_gid.get(gid, set())
-            expected_g = len(eq_ids_fallback) * int(svc_por_grupo.get(gid, 0) or 0) * 3
-        grupo_pct[gid] = max(0, min(100, round(done_g / expected_g * 100))) if expected_g > 0 else 0
+        eq_c = len(eq_por_grupo.get(gid, []))
+        svc_c = svc_por_grupo.get(gid, 0)
+        if eq_c > 0 and svc_c > 0:
+            done_g = done_by_grupo.get(gid, 0)
+            expected_g = eq_c * svc_c * 3
+            grupo_pct[gid] = max(0, min(100, round(done_g / expected_g * 100)))
+        else:
+            grupo_pct[gid] = 0
 
     # injeta grupo_pct em cada equipamento
     for eq in all_equipamentos:
@@ -530,11 +525,15 @@ def _build_payload(
     evolucao: list[SemanaSnapshot] = []
     semana_done_steps: dict[int, int] = {}
 
-    for t in scoped_tarefas:
+    for t in tarefas:
+        eid = str(t.get("equipamento_id") or "")
+        if eid not in eq_ids_escopo:
+            continue
         sem = int(t.get("semana") or 0)
         if sem <= 0:
             continue
-        semana_done_steps[sem] = semana_done_steps.get(sem, 0) + _sum_done_steps(t)
+        semana_done_steps[sem] = semana_done_steps.get(
+            sem, 0) + _sum_done_steps(t)
 
     # Expected por semana: total_expected / semanas_total (distribuição linear)
     # Usa o mesmo total_expected já calculado com eq × svc × 3
@@ -566,15 +565,15 @@ def _build_payload(
     parados_detalhe: list[dict] = []
 
     for gid, eqs in eq_por_grupo.items():
+        svc_count = svc_por_grupo.get(gid, 0)
+        expected_per_eq = svc_count * 3
         grupo_nome = grupo_nomes.get(gid) or gid
         for eq in eqs:
-            eid = str(eq["id"])
+            eid = eq["id"]
             tasks = eq_tasks.get(eid, [])
-            task_servicos_eq = task_scope_by_eq.get(eid, set())
-            svc_count_eq = len(task_servicos_eq) if task_servicos_eq else svc_por_grupo.get(gid, 0)
-            expected_per_eq = svc_count_eq * 3
             done = sum(_sum_done_steps(t) for t in tasks)
-            pct = max(0, min(100, round(done / max(expected_per_eq, 1) * 100))) if expected_per_eq > 0 else 0
+            pct = max(0, min(100, round(done / max(expected_per_eq, 1)
+                      * 100))) if expected_per_eq > 0 else 0
 
             travado_eq = False
             sem_inicio_eq = bool(tasks)
