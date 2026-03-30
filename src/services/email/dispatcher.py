@@ -477,7 +477,6 @@ def _load_dashboard_base(sb, tenant_id: str, revisao_id: str) -> tuple[list[dict
     eq_meta = [
         {
             "id": r.get("id"),
-            "equipamento_id": r.get("id"),
             "frota": r.get("frota"),
             "modelo": r.get("modelo"),
             "departamento_id": r.get("departamento_id"),
