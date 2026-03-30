@@ -919,10 +919,12 @@ def dispatch_relatorio_semanal(
             alertas_parados = {"atencao": 0, "critico": 0, "urgente": 0}
 
             # Carrega todas as tarefas da revisão uma vez e filtra em memória por departamento.
-            tarefas_all = _load_tarefas(
-                sb, tenant_id, revisao_id, None,
-                _tarefas_index=tarefas_index,
-            )
+            # Aqui precisa usar _load_tarefas_all diretamente, porque _load_tarefas(...)
+            # retorna [] quando grupo_ids vem vazio/None.
+            tarefas_index_all = tarefas_index or _load_tarefas_all(sb, tenant_id, revisao_id)
+            tarefas_all = []
+            for _eid, _tasks in (tarefas_index_all or {}).items():
+                tarefas_all.extend(_tasks or [])
 
             for grp in all_dept_groups:  # TODOS os deptos, não só os com gestores
                 try:
