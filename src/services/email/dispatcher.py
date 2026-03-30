@@ -89,10 +89,11 @@ def _semana_atual(data_inicio_str: str | None, semanas_total: int) -> int:
 
 def _load_tarefas_all(
         sb, tenant_id: str, revisao_id: str) -> dict[str, list[dict]]:
-    """Carrega TODAS as tarefas da revisão de uma vez e indexa por grupo_id.
+    """Carrega TODAS as tarefas da revisão de uma vez e indexa por equipamento_id.
 
-    Use antes de loops por departamento para evitar N queries idênticas.
-    Retorna: {grupo_id: [tarefa, ...]}
+    Não usa JOIN com equipamentos para evitar bloqueio de RLS scope-restritivo.
+    A resolução grupo_id é feita em build_dept_payload via eid_to_info (RPC).
+    Retorna: {equipamento_id: [tarefa, ...]}
     """
     rows = _with_fallback(
         lambda: (
@@ -100,9 +101,7 @@ def _load_tarefas_all(
             .select(
                 "id,equipamento_id,servico_id,status,semana,"
                 "etapa_d,etapa_r,etapa_m,observacao,updated_at,"
-                "dt_etapa_d,dt_etapa_r,dt_etapa_m,"
-                "equipamentos(id,frota,modelo,grupo_id,"
-                "equip_grupos(id,nome,departamento_id))"
+                "dt_etapa_d,dt_etapa_r,dt_etapa_m"
             )
             .eq("tenant_id", tenant_id)
             .eq("revisao_id", revisao_id)
@@ -114,9 +113,9 @@ def _load_tarefas_all(
     )
     index: dict[str, list[dict]] = {}
     for t in rows:
-        gid = (t.get("equipamentos") or {}).get("grupo_id")
-        if gid:
-            index.setdefault(gid, []).append(t)
+        eid = t.get("equipamento_id")
+        if eid:
+            index.setdefault(str(eid), []).append(t)
     return index
 
 
@@ -135,21 +134,21 @@ def _load_tarefas(
         return []
 
     if _tarefas_index is not None:
+        # _tarefas_index is now keyed by equipamento_id (not grupo_id)
+        # Return ALL tasks - caller filters by eid via eid_to_info
         out: list[dict] = []
-        for gid in grupo_ids:
-            out.extend(_tarefas_index.get(gid, []))
+        for tasks in _tarefas_index.values():
+            out.extend(tasks)
         return out
 
-    # Fallback: query direta (chamadas avulsas fora do loop do dispatcher)
+    # Fallback: query direta sem JOIN (evita RLS em equipamentos)
     rows = _with_fallback(
         lambda: (
             sb.table("tarefas_servico")
             .select(
                 "id,equipamento_id,servico_id,status,semana,"
                 "etapa_d,etapa_r,etapa_m,observacao,updated_at,"
-                "dt_etapa_d,dt_etapa_r,dt_etapa_m,"
-                "equipamentos(id,frota,modelo,grupo_id,"
-                "equip_grupos(id,nome,departamento_id))"
+                "dt_etapa_d,dt_etapa_r,dt_etapa_m"
             )
             .eq("tenant_id", tenant_id)
             .eq("revisao_id", revisao_id)
@@ -159,11 +158,7 @@ def _load_tarefas(
         [],
         context=f"Erro ao carregar tarefas da revisão {revisao_id}",
     )
-    grupo_set = set(grupo_ids)
-    return [
-        t for t in rows
-        if (t.get("equipamentos") or {}).get("grupo_id") in grupo_set
-    ]
+    return rows
 
 
 def _load_grupo_template(
@@ -355,12 +350,10 @@ def _build_payload(
                 "grupo_id": gid,
             }
 
-    # Agrupa tarefas por equipamento_id
+    # Agrupa tarefas por equipamento_id (sem JOIN — tarefas agora são flat)
     eq_tasks: dict[str, list] = {}
     for t in tarefas:
-        eid = t.get("equipamento_id") or (
-            t.get("equipamentos") or {}).get(
-            "id", "")
+        eid = str(t.get("equipamento_id") or "")
         if eid:
             eq_tasks.setdefault(eid, []).append(t)
 
