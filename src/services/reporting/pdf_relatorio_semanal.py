@@ -796,7 +796,7 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
             key=lambda g: grupos_meta[g]["pct"])
 
         for gi, gid in enumerate(grupos_sorted):
-            eqs_grupo = sorted(grupos_dict[gid], key=lambda e: e.get("pct", 0))
+            eqs_grupo = sorted(grupos_dict[gid], key=lambda e: -e.get("pct", 0))
             gmeta = grupos_meta[gid]
             gname = gmeta["nome"]
             gpct = gmeta["pct"]
