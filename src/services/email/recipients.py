@@ -193,11 +193,14 @@ def _fetch_active_departments(svc, tenant_id: str) -> list[dict[str, Any]]:
 
 
 def _fetch_groups_by_department(svc, tenant_id: str) -> dict[str, list[str]]:
+    # Importante: NÃO filtrar apenas grupos ativos aqui.
+    # O dashboard executivo precisa enxergar também equipamentos/tarefas
+    # vinculados a grupos hoje inativos, para não zerar departamentos que
+    # tiveram movimentação real na revisão.
     grupos = (
         svc.table("equip_grupos")
         .select("id,departamento_id")
         .eq("tenant_id", tenant_id)
-        .eq("ativo", True)
         .execute()
         .data
     ) or []
