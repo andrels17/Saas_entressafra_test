@@ -37,6 +37,7 @@ def render_tab_criar(svc, tenant_id: str, rerun_fn, safe_json_fn) -> None:
         if password != password2:
             st.warning("As senhas não conferem.")
             st.stop()
+        new_user_id = None
         try:
             created = svc.auth.admin.create_user({
                 "email": email.strip().lower(),
@@ -44,14 +45,22 @@ def render_tab_criar(svc, tenant_id: str, rerun_fn, safe_json_fn) -> None:
                 "email_confirm": bool(email_confirm),
             })
             new_user_id = created.user.id
+
             try:
                 svc.table("user_profiles").upsert(
                     {"user_id": new_user_id, "nome": nome}).execute()
-            except Exception as _e:
-                st.error(f"Erro ao salvar: {_e}")
-            svc.table("tenant_users").upsert(
-                {"tenant_id": tenant_id, "user_id": new_user_id, "role": user_role}
-            ).execute()
+                svc.table("tenant_users").upsert(
+                    {"tenant_id": tenant_id, "user_id": new_user_id, "role": user_role}
+                ).execute()
+            except Exception as db_err:
+                # Rollback: remove o usuário do Auth para não deixar registro órfão
+                try:
+                    svc.auth.admin.delete_user(new_user_id)
+                except Exception:
+                    pass
+                st.error(f"Erro ao salvar perfil. Usuário removido para evitar inconsistência: {db_err}")
+                st.stop()
+
             audit_user_created(new_user_id, email.strip().lower(), user_role)
             st.success(f"Usuário criado: {email} (role: {user_role}).")
             rerun_fn()
