@@ -264,8 +264,11 @@ def render_auditoria() -> None:
     sb = sb_for_user()
     user_id = st.session_state.get("sb_user_id") or ""
 
+    _tok = st.session_state.get("sb_access_token", "") or ""
+    import hashlib as _hl
+    _tok_hash = _hl.md5(_tok.encode()).hexdigest()[:8]
     scope_dept_ids, scope_grp_ids = get_user_scope(
-        sb, tenant_id, user_id, role=role)
+        tenant_id, user_id, role=role, token_hash=_tok_hash)
 
     # Seletor de revisão (fora do fragment para persistir no URL)
     with st.spinner("", show_time=False):
