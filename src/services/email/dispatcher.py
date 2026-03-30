@@ -918,17 +918,25 @@ def dispatch_relatorio_semanal(
             heatmap_semanal: list[dict] = []
             alertas_parados = {"atencao": 0, "critico": 0, "urgente": 0}
 
+            # Carrega todas as tarefas da revisão uma vez e filtra em memória por departamento.
+            tarefas_all = _load_tarefas(
+                sb, tenant_id, revisao_id, None,
+                _tarefas_index=tarefas_index,
+            )
+
             for grp in all_dept_groups:  # TODOS os deptos, não só os com gestores
                 try:
-                    tarefas_g = _load_tarefas(
-                        sb, tenant_id, revisao_id, grp.grupo_ids,
-                        _tarefas_index=tarefas_index,
-                    )
+                    grupo_ids_norm = {str(gid) for gid in (grp.grupo_ids or []) if gid is not None}
 
-                    # Só entra no executivo se houver tarefa real da revisão.
+                    tarefas_g = [
+                        t for t in (tarefas_all or [])
+                        if str(t.get("grupo_id") or "") in grupo_ids_norm
+                    ]
+
+                    # Só entra no executivo se houver tarefa real da revisão nesse departamento.
                     task_eids = {
                         str(t.get("equipamento_id") or "")
-                        for t in (tarefas_g or [])
+                        for t in tarefas_g
                         if t.get("equipamento_id")
                     }
                     if not task_eids:
