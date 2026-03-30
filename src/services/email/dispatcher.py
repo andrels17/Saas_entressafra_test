@@ -652,9 +652,19 @@ def _build_payload(
                 n_risco_prazo += 1
 
             all_equipamentos.append({
-                "frota": frota, "modelo": modelo, "grupo": grupo_nome, "grupo_id": grupo_id,
-                "pct": pct, "pct_anterior": pct_anterior, "status": status_eq,
-                "ultima_mov": ultima_mov, "ultima_semana": ultima_semana, "dias_sem_manut": dias_sem_manut_efetivo,
+                "equipamento_id": eid,
+                "frota": frota,
+                "modelo": modelo,
+                "grupo": grupo_nome,
+                "grupo_id": grupo_id,
+                "pct": pct,
+                "pct_anterior": pct_anterior,
+                "status": status_eq,
+                "done_steps": done_steps,
+                "total_steps": expected_steps,
+                "ultima_mov": ultima_mov,
+                "ultima_semana": ultima_semana,
+                "dias_sem_manut": dias_sem_manut_efetivo,
                 "grupo_pct": pct,
             })
 
@@ -910,29 +920,18 @@ def dispatch_relatorio_semanal(
 
             for grp in all_dept_groups:  # TODOS os deptos, não só os com gestores
                 try:
-                    # Para o executivo, só entra departamento que tenha
-                    # tarefa real da revisão em equipamentos do próprio escopo.
-                    eq_by_group = _load_equipamentos_ativos(sb, tenant_id, grp.grupo_ids)
-                    dept_eids = {
-                        str(eq.get("id"))
-                        for arr in (eq_by_group or {}).values()
-                        for eq in (arr or [])
-                        if eq.get("id")
-                    }
-
-                    tarefas_g_all = _load_tarefas(
+                    tarefas_g = _load_tarefas(
                         sb, tenant_id, revisao_id, grp.grupo_ids,
                         _tarefas_index=tarefas_index,
                     )
 
-                    tarefas_g = [
-                        t for t in (tarefas_g_all or [])
-                        if str(t.get("equipamento_id") or "") in dept_eids
-                    ]
-
-                    # Evita contaminar o executivo com departamentos
-                    # desativados/sem apontamento real na revisão.
-                    if not tarefas_g:
+                    # Só entra no executivo se houver tarefa real da revisão.
+                    task_eids = {
+                        str(t.get("equipamento_id") or "")
+                        for t in (tarefas_g or [])
+                        if t.get("equipamento_id")
+                    }
+                    if not task_eids:
                         continue
 
                     p, eq_list_g = _build_payload(
@@ -942,7 +941,39 @@ def dispatch_relatorio_semanal(
                         sb=sb, tenant_id=tenant_id, grupo_ids=grp.grupo_ids,
                         dias_travado=dias_travado, dias_sem_update=dias_sem_update,
                     )
-                    todos = p.todos_equipamentos or []
+
+                    # Mantém somente equipamentos que realmente têm tarefa da revisão
+                    # nesse departamento, evitando herdar dados de outros deptos.
+                    todos = [
+                        e for e in (p.todos_equipamentos or [])
+                        if str(e.get("equipamento_id") or "") in task_eids
+                    ]
+                    if not todos:
+                        continue
+
+                    done_total = sum(int(e.get("done_steps", 0) or 0) for e in todos)
+                    expected_total = sum(int(e.get("total_steps", 0) or 0) for e in todos)
+                    pct_geral = int(round((done_total / expected_total) * 100)) if expected_total > 0 else 0
+                    n_equip = len(todos)
+                    n_conc = sum(1 for e in todos if int(e.get("pct", 0) or 0) >= 100)
+                    n_trav = sum(1 for e in todos if (e.get("status") or "") == "travado")
+                    n_sem_inicio = sum(
+                        1 for e in todos
+                        if int(e.get("done_steps", 0) or 0) == 0 and int(e.get("total_steps", 0) or 0) > 0
+                    )
+                    n_parados = sum(
+                        1 for e in todos
+                        if int(e.get("total_steps", 0) or 0) > 0
+                        and int(e.get("pct", 0) or 0) < 100
+                        and (e.get("status") or "") != "travado"
+                        and e.get("dias_sem_manut") is not None
+                        and int(e.get("dias_sem_manut") or 0) >= dias_sem_update
+                    )
+                    n_risco_prazo = sum(
+                        1 for e in todos
+                        if int(e.get("total_steps", 0) or 0) > 0 and int(e.get("pct", 0) or 0) < 100
+                    )
+
                     top_criticos = sorted(
                         [e for e in todos if e.get("pct", 0) < 100],
                         key=lambda e: e.get("pct", 0)
@@ -955,22 +986,23 @@ def dispatch_relatorio_semanal(
                         [e for e in todos if e.get("pct", 0) - int(e.get("pct_anterior", 0)) > 0],
                         key=lambda e: -(e.get("pct", 0) - int(e.get("pct_anterior", 0)))
                     )[:3]
+
                     dept_snapshots.append(DeptSnapshot(
                         nome=grp.departamento_nome,
-                        pct_geral=p.pct_geral,
+                        pct_geral=pct_geral,
                         pct_anterior=p.pct_semana_anterior,
-                        n_equipamentos=p.n_equipamentos,
-                        n_concluidos=p.n_concluidos,
-                        n_travados=p.n_travados,
-                        n_sem_inicio=p.n_sem_inicio,
-                        n_risco_prazo=p.n_risco_prazo,
+                        n_equipamentos=n_equip,
+                        n_concluidos=n_conc,
+                        n_travados=n_trav,
+                        n_sem_inicio=n_sem_inicio,
+                        n_risco_prazo=n_risco_prazo,
                         top_criticos=top_criticos,
                         top_melhores=top_melhores,
                         maiores_evolucoes=maiores_evolucoes,
-                        n_parados=p.n_parados,
-                        max_dias_parado=max([int(x.get("dias_parado") or 0) for x in (p.parados_detalhe or [])] or [0]),
-                        _done_steps=p.done_steps,
-                        _expected_steps=p.expected_steps,
+                        n_parados=n_parados,
+                        max_dias_parado=max([int(x.get("dias_sem_manut") or 0) for x in todos] or [0]),
+                        _done_steps=done_total,
+                        _expected_steps=expected_total,
                     ))
 
                     for wk in (p.evolucao or []):
