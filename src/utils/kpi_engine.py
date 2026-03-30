@@ -226,42 +226,57 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
         except Exception:
             pass  # fallback seguro — inclui todos
 
-    # Busca TODAS as tarefas da revisão de uma vez (mesma abordagem da Matriz).
-    # Antes filtrava por equipamento_id IN all_eq_ids, o que causava undercount:
-    # tarefas de equipamentos não resolvidos no eq_to_gid eram ignoradas.
+    # Busca TODAS as tarefas da revisão de uma vez.
+    # Usa RPC SECURITY DEFINER para contornar RLS que bloqueia SELECT direto
+    # em tarefas_servico para roles não-admin (gestor, supervisor, executor, etc).
     done_by_gid: dict[str, int] = defaultdict(int)
     if revisao_id:
-        start = 0
-        page_size = 1000
-        while True:
-            try:
-                trows = (
-                    sb.table("tarefas_servico")
-                    .select("equipamento_id,etapa_d,etapa_r,etapa_m")
-                    .eq("tenant_id", tenant_id)
-                    .eq("revisao_id", revisao_id)
-                    .range(start, start + page_size - 1)
-                    .execute().data
-                ) or []
-            except Exception as exc:
-                log_error(
-                    exc,
-                    context="kpi_engine._compute_from_raw.all_tarefas",
-                    table="tarefas_servico",
-                )
-                break
-            for t in trows:
-                eid = str(t.get("equipamento_id")) if t.get("equipamento_id") else None
-                gid = eq_to_gid.get(eid)
-                if gid:
-                    done_by_gid[gid] += (
-                        int(bool(t.get("etapa_d"))) +
-                        int(bool(t.get("etapa_r"))) +
-                        int(bool(t.get("etapa_m")))
+        trows = []
+        # Tenta via RPC primeiro (bypassa RLS para todos os roles)
+        try:
+            rpc_result = sb.rpc(
+                "get_tarefas_kpi_dashboard",
+                {"p_tenant_id": tenant_id, "p_revisao_id": revisao_id}
+            ).execute()
+            trows = rpc_result.data or []
+        except Exception:
+            pass
+
+        # Fallback: query direta (funciona para admin/superadmin via RLS)
+        if not trows:
+            start = 0
+            page_size = 1000
+            while True:
+                try:
+                    page = (
+                        sb.table("tarefas_servico")
+                        .select("equipamento_id,etapa_d,etapa_r,etapa_m")
+                        .eq("tenant_id", tenant_id)
+                        .eq("revisao_id", revisao_id)
+                        .range(start, start + page_size - 1)
+                        .execute().data
+                    ) or []
+                except Exception as exc:
+                    log_error(
+                        exc,
+                        context="kpi_engine._compute_from_raw.all_tarefas",
+                        table="tarefas_servico",
                     )
-            if len(trows) < page_size:
-                break
-            start += page_size
+                    break
+                trows.extend(page)
+                if len(page) < page_size:
+                    break
+                start += page_size
+
+        for t in trows:
+            eid = str(t.get("equipamento_id")) if t.get("equipamento_id") else None
+            gid = eq_to_gid.get(eid)
+            if gid:
+                done_by_gid[gid] += (
+                    int(bool(t.get("etapa_d"))) +
+                    int(bool(t.get("etapa_r"))) +
+                    int(bool(t.get("etapa_m")))
+                )
 
     rows: list[dict[str, Any]] = [
         build_group_kpi(
