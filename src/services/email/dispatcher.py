@@ -918,13 +918,34 @@ def dispatch_relatorio_semanal(
             heatmap_semanal: list[dict] = []
             alertas_parados = {"atencao": 0, "critico": 0, "urgente": 0}
 
-            # Carrega todas as tarefas da revisão uma vez e filtra em memória por departamento.
-            # Aqui precisa usar _load_tarefas_all diretamente, porque _load_tarefas(...)
-            # retorna [] quando grupo_ids vem vazio/None.
+            # Carrega todas as tarefas da revisão uma vez e resolve o grupo_id
+            # de cada tarefa via equipamento_id. As tarefas não vêm com grupo_id
+            # nativo, então sem esse enriquecimento o filtro por departamento zera.
             tarefas_index_all = tarefas_index or _load_tarefas_all(sb, tenant_id, revisao_id)
+
+            all_group_ids = []
+            for _grp in (all_dept_groups or []):
+                all_group_ids.extend([str(g) for g in (_grp.grupo_ids or []) if g])
+
+            eq_all_by_group = _load_equipamentos_ativos(
+                sb, tenant_id, sorted(set(all_group_ids))
+            )
+
+            eid_to_gid: dict[str, str] = {}
+            for _gid, _eqs in (eq_all_by_group or {}).items():
+                for _eq in (_eqs or []):
+                    _eid = str(_eq.get("id") or "")
+                    if _eid:
+                        eid_to_gid[_eid] = str(_gid)
+
             tarefas_all = []
             for _eid, _tasks in (tarefas_index_all or {}).items():
-                tarefas_all.extend(_tasks or [])
+                _gid = eid_to_gid.get(str(_eid))
+                for _t in (_tasks or []):
+                    _row = dict(_t)
+                    if _gid:
+                        _row["grupo_id"] = _gid
+                    tarefas_all.append(_row)
 
             for grp in all_dept_groups:  # TODOS os deptos, não só os com gestores
                 try:
