@@ -237,6 +237,65 @@ def _load_equipamentos_ativos(
     return out
 
 
+def _load_equipamentos_por_ids(
+        sb, tenant_id: str, equipamento_ids: list[str]) -> dict[str, dict]:
+    """Retorna {equipamento_id: {id,frota,modelo,grupo_id}} para IDs exatos.
+
+    Diferente de _load_equipamentos_ativos(), aqui não filtramos por ativo.
+    Isso é importante para relatórios históricos: a revisão pode ter tarefas em
+    equipamentos que hoje estão inativos, movidos de grupo ou fora do escopo
+    padrão do dashboard. Se ignorarmos esses IDs, o PDF zera departamentos que
+    possuem apontamentos reais.
+    """
+    if not equipamento_ids:
+        return {}
+
+    eq_ids = [str(eid) for eid in equipamento_ids if eid]
+    if not eq_ids:
+        return {}
+
+    rows: list[dict] = []
+
+    # Tenta query direta por IDs exatos (sem filtro de ativo).
+    try:
+        rows = (
+            sb.table("equipamentos")
+            .select("id,frota,modelo,grupo_id")
+            .eq("tenant_id", tenant_id)
+            .in_("id", eq_ids)
+            .execute()
+            .data
+        ) or []
+    except Exception:
+        rows = []
+
+    # Fallback: RPC já usada no dashboard. Pode não trazer inativos, mas ajuda
+    # quando a query direta estiver restrita por RLS.
+    if not rows:
+        try:
+            rpc_result = sb.rpc(
+                "get_equipamentos_dashboard",
+                {"p_tenant_id": tenant_id}
+            ).execute()
+            all_rows = rpc_result.data or []
+            wanted = set(eq_ids)
+            rows = [r for r in all_rows if str(r.get("id") or "") in wanted]
+        except Exception:
+            rows = []
+
+    out: dict[str, dict] = {}
+    for r in rows:
+        eid = str(r.get("id") or "")
+        if eid:
+            out[eid] = {
+                "id": eid,
+                "frota": r.get("frota"),
+                "modelo": r.get("modelo"),
+                "grupo_id": r.get("grupo_id"),
+            }
+    return out
+
+
 def _load_revisao(sb, revisao_id: str) -> dict:
     rows = _with_fallback(
         lambda: (
@@ -308,22 +367,45 @@ def _build_payload(
     data_inicio = revisao.get("data_inicio")
     semana_atual = _semana_atual(data_inicio, semanas_total)
 
-    # ── Fonte de verdade: mesma fórmula da Matriz ───────────────────────────
-    # denominador = eq_count_ativo × svc_count_template × 3
+    # ── Fonte de verdade do relatório ───────────────────────────────────────
+    # Para evitar divergência entre heatmap e resumo executivo, o escopo do PDF
+    # deve ser a própria revisão: equipamentos que realmente possuem tarefas
+    # neste departamento/revisão. Usar todos os equipamentos ativos "dilui" o
+    # percentual e pode zerar departamentos que tiveram apontamentos reais.
     svc_por_grupo = _load_grupo_template(sb, tenant_id, grupo_ids)
-    eq_por_grupo = _load_equipamentos_ativos(sb, tenant_id, grupo_ids)
 
-    # Exclui equipamentos ocultos nesta revisão
+    # Tarefas do escopo deste payload: filtradas pelos equipamentos que
+    # pertencem aos grupos do departamento.
+    task_eq_ids = [str(t.get("equipamento_id") or "") for t in tarefas if t.get("equipamento_id")]
+    eid_info_task_scope = _load_equipamentos_por_ids(sb, tenant_id, task_eq_ids)
+
+    # Exclui equipamentos ocultos nesta revisão.
+    ocultos: set[str] = set()
     try:
         from src.utils.eq_oculto import get_ocultos
-        _ocultos = get_ocultos(sb, tenant_id, revisao.get("id", ""))
-        if _ocultos:
-            eq_por_grupo = {
-                gid: [e for e in eqs if e.get("id") not in _ocultos]
-                for gid, eqs in eq_por_grupo.items()
-            }
+        ocultos = set(str(x) for x in (get_ocultos(sb, tenant_id, revisao.get("id", "")) or []))
     except Exception:
-        pass
+        ocultos = set()
+
+    tarefas = [
+        t for t in tarefas
+        if str(t.get("equipamento_id") or "")
+        and str(t.get("equipamento_id") or "") in eid_info_task_scope
+        and str((eid_info_task_scope.get(str(t.get("equipamento_id") or "")) or {}).get("grupo_id") or "") in set(grupo_ids)
+        and str(t.get("equipamento_id") or "") not in ocultos
+    ]
+
+    # Agora o mapa de equipamentos do payload vem do escopo real da revisão.
+    eq_por_grupo: dict[str, list[dict]] = {gid: [] for gid in grupo_ids}
+    for eid, info in eid_info_task_scope.items():
+        gid = str(info.get("grupo_id") or "")
+        if gid in eq_por_grupo and eid not in ocultos:
+            eq_por_grupo[gid].append({
+                "id": eid,
+                "frota": info.get("frota"),
+                "modelo": info.get("modelo"),
+                "grupo_id": gid,
+            })
 
     # Nomes dos grupos direto da tabela (independente de ter tarefas)
     grupo_nomes: dict[str, str] = {}
@@ -351,29 +433,11 @@ def _build_payload(
             }
 
     # Agrupa tarefas por equipamento_id (sem JOIN — tarefas agora são flat)
-    # e filtra para o escopo real deste departamento.
-    #
-    # Importante: o dashboard calcula progresso sobre a base da revisão
-    # (equipamentos que possuem tarefas no escopo filtrado), não sobre todos os
-    # equipamentos ativos do grupo/template. Se incluirmos todos os ativos aqui,
-    # o PDF executivo fica "diluído" com vários 0%, mesmo quando há progresso
-    # real no dashboard/heatmap.
     eq_tasks: dict[str, list] = {}
     for t in tarefas:
         eid = str(t.get("equipamento_id") or "")
-        if eid and eid in eid_to_info:
+        if eid:
             eq_tasks.setdefault(eid, []).append(t)
-
-    # Alinha o escopo do PDF ao dashboard: mantém apenas equipamentos que
-    # realmente pertencem à revisão/departamento atual.
-    eq_ids_escopo = set(eq_tasks.keys())
-    if eq_ids_escopo:
-        eq_por_grupo = {
-            gid: [e for e in eqs if str(e.get("id")) in eq_ids_escopo]
-            for gid, eqs in eq_por_grupo.items()
-        }
-    else:
-        eq_por_grupo = {gid: [] for gid in eq_por_grupo}
 
     # done_steps até semana anterior por equipamento (para calcular evolução)
     semana_anterior = max(semana_atual - 1, 0)
@@ -526,9 +590,6 @@ def _build_payload(
     semana_done_steps: dict[int, int] = {}
 
     for t in tarefas:
-        eid = str(t.get("equipamento_id") or "")
-        if eid not in eq_ids_escopo:
-            continue
         sem = int(t.get("semana") or 0)
         if sem <= 0:
             continue
