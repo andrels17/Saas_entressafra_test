@@ -80,7 +80,7 @@ def calc_pct(eq_count: int, svc_count: int, done: int) -> float:
     if expected <= 0:
         return 0.0
     raw = (done / expected) * 100
-    return max(0.0, min(100.0, round(raw, 1)))
+    return max(0.0, min(100.0, round(raw)))
 
 
 def calc_backlog(eq_count: int, svc_count: int, done: int) -> int:
@@ -126,7 +126,7 @@ def calc_global_kpis(df: pd.DataFrame) -> GlobalKPI:
     done = int(scope["done_steps"].sum())
     expected = int(scope["expected_steps"].sum())
     backlog = int(scope["backlog_steps"].sum())
-    pct = round(done / expected * 100, 1) if expected > 0 else 0.0
+    pct = round(done / expected * 100) if expected > 0 else 0.0
     return GlobalKPI(
         pct=max(0.0, min(100.0, pct)),
         done_steps=done,
@@ -170,7 +170,7 @@ def calc_dept_kpis(df: pd.DataFrame,
 
     g["pct"] = (
         (g["done_steps"] / g["expected_steps"] * 100)
-        .round(1)
+        .round(0).astype(int)
         .fillna(0.0)
         .clip(0, 100)
     )
