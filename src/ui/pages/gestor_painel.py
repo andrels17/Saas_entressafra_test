@@ -421,7 +421,9 @@ def render_gestor_painel() -> None:
     user_id = st.session_state.get("sb_user_id") or ""
     token   = st.session_state.get("sb_access_token", "")
 
-    scope_dept_ids, scope_grp_ids = get_user_scope(sb, tenant_id, user_id, role=role)
+    import hashlib as _hl
+    _tok_hash = _hl.md5(token.encode()).hexdigest()[:8]
+    scope_dept_ids, scope_grp_ids = get_user_scope(tenant_id, user_id, role=role, token_hash=_tok_hash)
 
     # Revisão ativa — cacheada TTL=30s
     rev = _load_revisao_ativa(tenant_id, _token=token)
