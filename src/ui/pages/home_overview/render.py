@@ -145,7 +145,7 @@ def _fragment_ranking(
 
             mc1, mc2, mc3 = st.columns(3)
             with mc1:
-                pct_label = f"{pct:.1f}%" if pct < 10 else f"{pct:.0f}%"
+                pct_label = f"{int(round(pct))}%"
                 st.metric("Execução", pct_label)
             with mc2:
                 st.metric(
@@ -268,8 +268,8 @@ def _fragment_tendencia(
     g = build_trend_chart_data(sdf)
     fig_t = px.line(g, x="week_number", y="pct", markers=True, text="pct")
     fig_t.update_traces(
-        texttemplate="%{text:.1f}%", textposition="top center",
-        hovertemplate="Semana %{x}<br>%{y:.1f}%<extra></extra>",
+        texttemplate="%{text:.0f}%", textposition="top center",
+        hovertemplate="Semana %{x}<br>%{y:.0f}%<extra></extra>",
     )
     fig_t.update_layout(
         height=340, margin=dict(l=12, r=12, t=10, b=10),
