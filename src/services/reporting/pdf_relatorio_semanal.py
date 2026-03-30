@@ -798,7 +798,17 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
             eqs_grupo = sorted(grupos_dict[gid], key=lambda e: -e.get("pct", 0))
             gmeta = grupos_meta[gid]
             gname = gmeta["nome"]
-            gpct = gmeta["pct"]
+
+            # Recalcula o percentual do header a partir dos próprios
+            # equipamentos exibidos na página do grupo.
+            done_sum = sum(int(e.get("done_steps", 0) or 0) for e in eqs_grupo)
+            total_sum = sum(int(e.get("total_steps", 0) or 0) for e in eqs_grupo)
+            if total_sum > 0:
+                gpct = int(round((done_sum / total_sum) * 100))
+            else:
+                pcts = [float(e.get("pct", 0) or 0) for e in eqs_grupo]
+                gpct = int(round(sum(pcts) / len(pcts))) if pcts else int(gmeta.get("pct", 0) or 0)
+
             gcol = _risk_color(gpct)
             n_eq_g = len(eqs_grupo)
             n_conc_g = sum(1 for e in eqs_grupo if e.get("pct", 0) == 100)
