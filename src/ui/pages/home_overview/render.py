@@ -354,8 +354,10 @@ def render_home_overview() -> None:
         set_current_revisao(rev["id"])
         st.session_state["_sidebar_rev_titulo"] = rev.get("titulo")
         st.session_state["_sidebar_rev_semana"] = week
-    grupos = load_groups(tenant_id, ver, _token=_tok)
-    deps = load_depts(tenant_id, ver, _token=_tok)
+    from src.ui.pages.home_overview.data import _token_hash
+    _tok_hash = _token_hash(_tok)
+    grupos = load_groups(tenant_id, ver, token_hash=_tok_hash, _token=_tok)
+    deps = load_depts(tenant_id, ver, token_hash=_tok_hash, _token=_tok)
     gid_to_name = {g["id"]: (g.get("nome") or "—")
                    for g in grupos if g.get("id")}
     gid_to_dept = {g["id"]: g.get("departamento_id")
