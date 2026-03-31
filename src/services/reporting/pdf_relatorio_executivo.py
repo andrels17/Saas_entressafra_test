@@ -150,37 +150,6 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     def real_delta_dept(dept: DeptSnapshot) -> int:
         return int(real_pct_dept(dept)) - int(getattr(dept, "pct_anterior", 0) or 0)
 
-
-
-    def _trend_has_meaningful_history(rows: list[dict] | None) -> bool:
-        vals = [int((r or {}).get("pct", 0) or 0) for r in (rows or [])]
-        if len(vals) >= 2 and any(v > 0 for v in vals):
-            return True
-        return False
-
-    def _heatmap_has_meaningful_history(rows: list[dict] | None) -> bool:
-        vals = [int((r or {}).get("pct", 0) or 0) for r in (rows or [])]
-        if len(vals) >= 2 and any(v > 0 for v in vals):
-            return True
-        return False
-
-    def _build_snapshot_trend() -> list[dict]:
-        return [{
-            "semana": max(int(payload.semana_atual or 1), 1),
-            "pct": pct_global_real,
-        }]
-
-    def _build_snapshot_heatmap() -> list[dict]:
-        current_week = max(int(payload.semana_atual or 1), 1)
-        return [
-            {
-                "departamento": d.nome,
-                "semana": current_week,
-                "pct": real_pct_dept(d),
-            }
-            for d in deptos
-        ]
-
     def section_title(txt: str, y: float) -> float:
         c.setFillColor(accent)
         c.rect(16 * mm, y - 0.8 * mm, 3, 5 * mm, fill=1, stroke=0)
@@ -260,37 +229,15 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     )
 
     trend_display = list(payload.trend_semanal or [])
-    if not _trend_has_meaningful_history(trend_display):
-        trend_display = _build_snapshot_trend()
+    if not trend_display:
+        trend_display = [{"semana": max(int(payload.semana_atual or 1), 1), "pct": pct_global_real}]
 
     heatmap_display = list(payload.heatmap_semanal or [])
-    if not _heatmap_has_meaningful_history(heatmap_display):
-        heatmap_display = _build_snapshot_heatmap()
-
-    # Quando houver histórico parcial, garante coerência mínima da semana atual:
-    # a última semana exibida nunca deve contradizer o snapshot consolidado atual.
-    try:
-        current_week = max(int(payload.semana_atual or 1), 1)
-        if trend_display:
-            last_idx = max(
-                range(len(trend_display)),
-                key=lambda i: int((trend_display[i] or {}).get("semana", 0) or 0),
-            )
-            trend_display[last_idx]["semana"] = current_week
-            trend_display[last_idx]["pct"] = pct_global_real
-
-        if heatmap_display:
-            by_dept = {(str(r.get("departamento") or ""), int(r.get("semana") or 0)): r for r in heatmap_display}
-            for d in deptos:
-                key = (d.nome, current_week)
-                if key in by_dept:
-                    by_dept[key]["pct"] = real_pct_dept(d)
-                else:
-                    heatmap_display.append(
-                        {"departamento": d.nome, "semana": current_week, "pct": real_pct_dept(d)}
-                    )
-    except Exception:
-        pass
+    if not heatmap_display:
+        heatmap_display = [
+            {"departamento": d.nome, "semana": max(int(payload.semana_atual or 1), 1), "pct": real_pct_dept(d)}
+            for d in deptos
+        ]
 
     # Página 1
     c.setFillColor(DARK)
@@ -512,7 +459,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         c.setFillColor(MUTED)
         c.setFont('Helvetica', 8)
         c.drawCentredString(16 * mm + (w - 32 * mm) / 2, y - chart_h / 2,
-                            'Sem histórico semanal consolidado. Exibindo o snapshot atual.')
+                            'Sem histórico suficiente de semanas fechadas. Exibindo o snapshot atual.')
     y -= chart_h + 8 * mm
 
     footer()
@@ -664,19 +611,36 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     y_col = [PAGE_TOP, PAGE_TOP]
     ci = 0
 
+    def _eq_pct(eq: dict) -> int:
+        try:
+            return int(eq.get('pct', 0) or 0)
+        except Exception:
+            return 0
+
+    def _eq_delta(eq: dict) -> int:
+        try:
+            return int(eq.get('pct', 0) or 0) - int(eq.get('pct_anterior', 0) or 0)
+        except Exception:
+            return 0
+
     def dept_block_height(dept: DeptSnapshot) -> float:
         base = 15 * mm
         section_gap = 6.5 * mm
         row_gap = 6.5 * mm
         bottom_pad = 6 * mm
-        sections = [min(len(dept.top_criticos), 3), min(
-            len(dept.top_melhores), 3), min(len(dept.maiores_evolucoes), 3)]
+        top_criticos_v = [eq for eq in (dept.top_criticos or []) if _eq_pct(eq) < 100][:3]
+        top_melhores_v = [eq for eq in (dept.top_melhores or []) if 0 < _eq_pct(eq) < 100][:3]
+        maiores_evolucoes_v = [eq for eq in (dept.maiores_evolucoes or []) if _eq_delta(eq) > 0][:3]
+        sections = [len(top_criticos_v), len(top_melhores_v), len(maiores_evolucoes_v)]
         active_sections = [n for n in sections if n > 0]
         return base + sum(section_gap + (n * row_gap)
                           for n in active_sections) + bottom_pad
 
     def draw_dept_block(dept: DeptSnapshot, bx: float, by: float, bh: float):
         dept_pct = real_pct_dept(dept)
+        top_criticos_v = [eq for eq in (dept.top_criticos or []) if _eq_pct(eq) < 100][:3]
+        top_melhores_v = [eq for eq in (dept.top_melhores or []) if 0 < _eq_pct(eq) < 100][:3]
+        maiores_evolucoes_v = [eq for eq in (dept.maiores_evolucoes or []) if _eq_delta(eq) > 0][:3]
         col_dep = _risk_color(dept_pct)
         c.setFillColor(SURFACE)
         c.setStrokeColor(BORDER)
@@ -693,12 +657,12 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         c.setStrokeColor(BORDER)
         c.line(bx + 4, by - 9 * mm, bx + col_w - 4, by - 9 * mm)
         iy = by - 11 * mm
-        if dept.top_criticos:
+        if top_criticos_v:
             c.setFillColor(RED)
             c.setFont('Helvetica-Bold', 7)
             c.drawString(bx + 6, iy, 'Piores:')
             iy -= 5.5 * mm
-            for eq in dept.top_criticos[:3]:
+            for eq in top_criticos_v:
                 pct_eq = int(eq.get('pct', 0))
                 c.setFillColor(FG)
                 c.setFont('Helvetica-Bold', 7.5)
@@ -717,12 +681,12 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
                 c.setFont('Helvetica-Bold', 7.5)
                 c.drawRightString(bx + col_w - 4, iy, f"{pct_eq}%")
                 iy -= 6 * mm
-        if dept.top_melhores:
+        if top_melhores_v:
             c.setFillColor(GREEN)
             c.setFont('Helvetica-Bold', 7)
             c.drawString(bx + 6, iy, 'Quase concluídos:')
             iy -= 5.5 * mm
-            for eq in dept.top_melhores[:3]:
+            for eq in top_melhores_v:
                 pct_eq = int(eq.get('pct', 0))
                 c.setFillColor(FG)
                 c.setFont('Helvetica-Bold', 7.5)
@@ -737,12 +701,12 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
                 c.setFont('Helvetica-Bold', 7.5)
                 c.drawRightString(bx + col_w - 4, iy, f"{pct_eq}%")
                 iy -= 6 * mm
-        if dept.maiores_evolucoes:
+        if maiores_evolucoes_v:
             c.setFillColor(INDIGO)
             c.setFont('Helvetica-Bold', 7)
             c.drawString(bx + 6, iy, 'Evoluções:')
             iy -= 5.5 * mm
-            for eq in dept.maiores_evolucoes[:3]:
+            for eq in maiores_evolucoes_v:
                 pct_eq = int(eq.get('pct', 0))
                 delta_v = pct_eq - int(eq.get('pct_anterior', pct_eq))
                 c.setFillColor(FG)
