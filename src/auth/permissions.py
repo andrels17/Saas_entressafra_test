@@ -21,8 +21,7 @@ def can_view_all_data(role: str | Role | None) -> bool:
         Role.ADMIN.value,
         Role.SUPERVISOR.value,
         Role.SUPERADMIN.value,
-        Role.MANAGER.value,
-        Role.GESTOR.value,   # alias PT-BR de manager
+        Role.MANAGER.value,  # gestor também tem visão irrestrita por departamento
     }
 
 
@@ -32,4 +31,4 @@ def has_restricted_data_scope(role: str | Role | None) -> bool:
 
 def can_edit_matriz(role: str | Role | None) -> bool:
     norm = _norm_role(role)
-    return norm in {Role.ADMIN.value, Role.SUPERVISOR.value, Role.SUPERADMIN.value, Role.GESTOR.value}
+    return norm in {Role.ADMIN.value, Role.SUPERVISOR.value, Role.SUPERADMIN.value}
