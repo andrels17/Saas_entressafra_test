@@ -192,27 +192,53 @@ def _fetch_active_departments(svc, tenant_id: str) -> list[dict[str, Any]]:
     return list(by_dep.values()) + sem_dep
 
 
-def _fetch_groups_by_department(svc, tenant_id: str) -> dict[str, list[str]]:
-    # Importante: NÃO filtrar apenas grupos ativos aqui.
-    # O dashboard executivo precisa enxergar também equipamentos/tarefas
-    # vinculados a grupos hoje inativos, para não zerar departamentos que
-    # tiveram movimentação real na revisão.
+def _fetch_groups_by_department(svc, tenant_id: str, revisao_id: str) -> dict[str, list[str]]:
+    """
+    Mapeia departamentos → grupos baseado em dados reais da revisão,
+    não só no cadastro estrutural.
+    """
+    rows = (
+        svc.table("tarefas_servico")
+        .select("equipamento_id")
+        .eq("tenant_id", tenant_id)
+        .eq("revisao_id", revisao_id)
+        .execute()
+        .data
+    ) or []
+
+    if not rows:
+        return {}
+
+    # buscar equipamentos
+    eq_ids = list({r["equipamento_id"] for r in rows if r.get("equipamento_id")})
+
+    eqs = (
+        svc.table("equipamentos")
+        .select("id,grupo_id")
+        .in_("id", eq_ids)
+        .execute()
+        .data
+    ) or []
+
+    grupo_ids = list({e["grupo_id"] for e in eqs if e.get("grupo_id")})
+
     grupos = (
         svc.table("equip_grupos")
         .select("id,departamento_id")
-        .eq("tenant_id", tenant_id)
+        .in_("id", grupo_ids)
         .execute()
         .data
     ) or []
 
     dep_to_grupos: dict[str, list[str]] = {}
-    for grupo in grupos:
-        gid = grupo.get("id")
-        dep_id = grupo.get("departamento_id")
+
+    for g in grupos:
+        gid = g.get("id")
+        dep_id = g.get("departamento_id")
+
         if gid and dep_id:
             dep_to_grupos.setdefault(dep_id, []).append(gid)
-        elif gid and not dep_id:
-            dep_to_grupos[f"grupo:{gid}"] = [gid]
+
     return dep_to_grupos
 
 
@@ -225,7 +251,7 @@ def get_recipient_groups(tenant_id: str) -> list[RecipientGroup]:
     if not deps:
         return []
     dep_map = {dep["id"]: dep["nome"] for dep in deps}
-    dep_to_grupos = _fetch_groups_by_department(svc, tenant_id)
+    dep_to_grupos = _fetch_groups_by_department(svc, tenant_id, revisao_id)
 
     try:
         links = (
