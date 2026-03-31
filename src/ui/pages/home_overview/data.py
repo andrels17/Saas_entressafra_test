@@ -65,7 +65,7 @@ def load_revision(
 def load_groups(tenant_id: str, ver: str = "0", token_hash: str = "", _token: str = "") -> list[dict]:
     """Carrega grupos do tenant. `token_hash` isola cache por usuário."""
     try:
-        return (
+        rows = (
             _sb_from_token(_token)
             .table("equip_grupos")
             .select("id,nome,departamento_id,ativo")
@@ -73,6 +73,7 @@ def load_groups(tenant_id: str, ver: str = "0", token_hash: str = "", _token: st
             .execute()
             .data
         ) or []
+        return [{**r, "id": str(r.get("id")) if r.get("id") is not None else None, "departamento_id": str(r.get("departamento_id")) if r.get("departamento_id") is not None else None} for r in rows]
     except Exception as exc:
         log_error(exc, context="home_overview.load_groups", table="equip_grupos")
         return []
@@ -82,7 +83,7 @@ def load_groups(tenant_id: str, ver: str = "0", token_hash: str = "", _token: st
 def load_depts(tenant_id: str, ver: str = "0", token_hash: str = "", _token: str = "") -> list[dict]:
     """Carrega departamentos do tenant. `token_hash` isola cache por usuário."""
     try:
-        return (
+        rows = (
             _sb_from_token(_token)
             .table("departamentos")
             .select("id,nome,ativo")
@@ -90,6 +91,7 @@ def load_depts(tenant_id: str, ver: str = "0", token_hash: str = "", _token: str
             .execute()
             .data
         ) or []
+        return [{**r, "id": str(r.get("id")) if r.get("id") is not None else None} for r in rows]
     except Exception as exc:
         log_error(exc, context="home_overview.load_depts", table="departamentos")
         return []
