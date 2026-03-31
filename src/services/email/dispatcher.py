@@ -410,7 +410,7 @@ def _build_dashboard_base(
             continue
         grp = grupo_map.get(gid_s, {})
         svc = serv_map.get(sid, {})
-        raw_tasks.append({
+        enriched = {
             "equipamento_id": t.get("equipamento_id"),
             "grupo_id": gid,
             "grupo_nome": grp.get("nome"),
@@ -424,9 +424,10 @@ def _build_dashboard_base(
             "etapa_r": t.get("etapa_r"),
             "etapa_m": t.get("etapa_m"),
             "updated_at": t.get("updated_at"),
-        })
-        if eid and sid and eid in eq_map:
-            task_map[(eid, sid)] = _merge_task(task_map.get((eid, sid)), t)
+        }
+        raw_tasks.append(enriched)
+        if eid and sid:
+            task_map[(eid, sid)] = _merge_task(task_map.get((eid, sid)), enriched)
 
     group_services: dict[str, list[str]] = {}
     for row in grupo_servicos_rows:
@@ -440,9 +441,18 @@ def _build_dashboard_base(
         if sid_s not in group_services[gid_s]:
             group_services[gid_s].append(sid_s)
 
-    eids_covered: set[str] = set()
-    raw = []
+    # Fonte principal: tarefas reais da revisão.
+    raw = list(task_map.values())
+    eids_with_task = {
+        str(r.get("equipamento_id"))
+        for r in raw
+        if r.get("equipamento_id") is not None
+    }
+
+    # Fallback estrutural apenas para equipamentos sem qualquer tarefa ainda.
     for eid, eq in eq_map.items():
+        if eid in eids_with_task:
+            continue
         gid_s = str(eq.get("grupo_id") or "")
         if not gid_s or gid_s not in grupo_map:
             continue
@@ -450,10 +460,8 @@ def _build_dashboard_base(
         service_ids = group_services.get(gid_s, [])
         if not service_ids:
             continue
-        eids_covered.add(eid)
         for sid in service_ids:
             svc = serv_map.get(str(sid), {})
-            t = task_map.get((eid, str(sid)), {})
             raw.append({
                 "equipamento_id": eq.get("id"),
                 "grupo_id": eq.get("grupo_id"),
@@ -463,19 +471,13 @@ def _build_dashboard_base(
                 "modelo": eq.get("modelo"),
                 "servico_id": sid,
                 "setor_nome": svc.get("setor") or "—",
-                "status": t.get("status") or "pendente",
-                "etapa_d": t.get("etapa_d"),
-                "etapa_r": t.get("etapa_r"),
-                "etapa_m": t.get("etapa_m"),
-                "updated_at": t.get("updated_at"),
+                "status": "pendente",
+                "etapa_d": False,
+                "etapa_r": False,
+                "etapa_m": False,
+                "updated_at": None,
             })
 
-    fallback_tasks = [
-        t for t in raw_tasks
-        if str(t.get("equipamento_id") or "") not in eids_covered
-    ]
-    if fallback_tasks:
-        raw.extend(fallback_tasks)
     if not raw and raw_tasks:
         raw = raw_tasks
 
@@ -576,10 +578,13 @@ def _build_payload(
             pct_sem = int(round(overall.get("pct", 0)))
         evolucao.append(SemanaSnapshot(semana=sem, concluidos=cumulative_done, total=cumulative_expected, pct=pct_sem))
 
-    # Se a evolução calculou tudo 0 mas overall tem progresso real, usa overall como âncora
-    pct_semana_atual = evolucao[-1].pct if evolucao else int(round(overall.get("pct", 0)))
-    if pct_semana_atual == 0 and overall.get("pct", 0) > 0:
-        pct_semana_atual = int(round(overall.get("pct", 0)))
+    pct_geral_snapshot = int(round(overall.get("pct", 0)))
+    # A evolução semanal é apenas complementar. Quando a revisão ainda está no
+    # início e a coluna semana está vazia, o snapshot atual precisa continuar
+    # vindo do cálculo real por etapas da base consolidada.
+    pct_semana_atual = evolucao[-1].pct if evolucao else pct_geral_snapshot
+    if pct_semana_atual == 0 and pct_geral_snapshot > 0:
+        pct_semana_atual = pct_geral_snapshot
         if evolucao:
             evolucao[-1] = SemanaSnapshot(
                 semana=evolucao[-1].semana,
@@ -697,11 +702,9 @@ def _build_payload(
         semana_atual=semana_atual,
         semanas_total=semanas_total,
         data_inicio=data_inicio,
-        # Usa pct_semana_atual (calculado por etapas done/expected) para
-        # manter consistência com o comparativo na capa do relatório semanal.
-        # overall.pct retorna 0% quando a base está vazia (nenhum apontamento),
-        # gerando a divergência "Progresso geral 0% / Semana atual 55%".
-        pct_geral=pct_semana_atual,
+        # Snapshot atual do departamento: sempre usa a base consolidada real
+        # da revisão, independentemente de haver semana preenchida.
+        pct_geral=pct_geral_snapshot,
         n_equipamentos=int(len(eq_prog)) if not eq_prog.empty else 0,
         n_concluidos=n_concluidos,
         n_alertas_total=n_alertas_total,
@@ -989,10 +992,7 @@ def dispatch_relatorio_semanal(
 
                     dept_snapshots.append(DeptSnapshot(
                         nome=grp.departamento_nome,
-                        # pct_semana_atual usa cálculo por etapas (done/expected),
-                        # alinhado com o heatmap e a tendência semanal.
-                        # pct_geral ficaria 0% quando a base está vazia (sem apontamentos).
-                        pct_geral=p.pct_semana_atual,
+                        pct_geral=p.pct_geral,
                         pct_anterior=p.pct_semana_anterior,
                         n_equipamentos=p.n_equipamentos,
                         n_concluidos=p.n_concluidos,

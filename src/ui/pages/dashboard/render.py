@@ -233,7 +233,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
         gid_s = str(gid) if gid is not None else None
         grp = grupo_map.get(gid_s, {})
         svc = serv_map.get(sid, {})
-        raw_tasks.append({
+        enriched = {
             "equipamento_id": t.get("equipamento_id"),
             "grupo_id": gid,
             "grupo_nome": grp.get("nome"),
@@ -247,9 +247,10 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
             "etapa_r": t.get("etapa_r"),
             "etapa_m": t.get("etapa_m"),
             "updated_at": t.get("updated_at"),
-        })
-        if eid and sid and eid in eq_map:
-            task_map[(eid, sid)] = _merge_task(task_map.get((eid, sid)), t)
+        }
+        raw_tasks.append(enriched)
+        if eid and sid:
+            task_map[(eid, sid)] = _merge_task(task_map.get((eid, sid)), enriched)
 
     group_services: dict[str, list[str]] = {}
     for row in grupo_servicos_rows:
@@ -263,11 +264,21 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
         if sid_s not in group_services[gid_s]:
             group_services[gid_s].append(sid_s)
 
-    # IDs de equipamentos que já possuem vínculo via grupo_servicos
-    eids_covered: set[str] = set()
+    # Fonte principal: as tarefas reais da revisão já enriquecidas.
+    # Isso evita zerar progresso quando grupo_servicos/template mudou depois
+    # da criação da revisão.
+    raw = list(task_map.values())
+    eids_with_task = {
+        str(r.get("equipamento_id"))
+        for r in raw
+        if r.get("equipamento_id") is not None
+    }
 
-    raw = []
+    # Completa apenas equipamentos sem nenhuma tarefa na revisão usando a
+    # malha atual de grupo_servicos como fallback estrutural.
     for eid, eq in eq_map.items():
+        if eid in eids_with_task:
+            continue
         gid = eq.get("grupo_id")
         gid_s = str(gid) if gid is not None else None
         if not gid_s:
@@ -275,13 +286,9 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
         grp = grupo_map.get(gid_s, {})
         service_ids = group_services.get(gid_s, [])
         if not service_ids:
-            # Sem vínculo em grupo_servicos: equipamento será coberto pelo
-            # fallback por tarefa direta abaixo, se houver tarefas.
             continue
-        eids_covered.add(eid)
         for sid in service_ids:
             svc = serv_map.get(str(sid), {})
-            t = task_map.get((eid, str(sid)), {})
             raw.append({
                 "equipamento_id": eq.get("id"),
                 "grupo_id": gid,
@@ -291,22 +298,13 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
                 "modelo": eq.get("modelo"),
                 "servico_id": sid,
                 "setor_nome": svc.get("setor") or "—",
-                "status": t.get("status") or "pendente",
-                "etapa_d": t.get("etapa_d"),
-                "etapa_r": t.get("etapa_r"),
-                "etapa_m": t.get("etapa_m"),
-                "updated_at": t.get("updated_at"),
+                "status": "pendente",
+                "etapa_d": False,
+                "etapa_r": False,
+                "etapa_m": False,
+                "updated_at": None,
             })
 
-    # Fallback granular: para equipamentos sem cobertura via grupo_servicos
-    # (grupo sem serviços vinculados), usa as tarefas diretas da revisão.
-    # Isso evita que equipamentos com movimentações desapareçam do dashboard
-    # quando a tabela grupo_servicos estiver desatualizada ou incompleta.
-    fallback_tasks = [t for t in raw_tasks if str(t.get("equipamento_id") or "") not in eids_covered]
-    if fallback_tasks:
-        raw.extend(fallback_tasks)
-
-    # Fallback total: se nenhuma grade pôde ser montada, usa todas as tarefas.
     if not raw and raw_tasks:
         raw = raw_tasks
 
