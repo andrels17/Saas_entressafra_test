@@ -140,6 +140,16 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     def delta_str(d: int) -> str:
         return f"+{d}p.p." if d > 0 else f"{d}p.p."
 
+    def real_pct_dept(dept: DeptSnapshot) -> int:
+        expected = int(getattr(dept, "_expected_steps", 0) or 0)
+        done = int(getattr(dept, "_done_steps", 0) or 0)
+        if expected > 0:
+            return max(0, min(100, int(round(done / expected * 100))))
+        return max(0, min(100, int(getattr(dept, "pct_geral", 0) or 0)))
+
+    def real_delta_dept(dept: DeptSnapshot) -> int:
+        return int(real_pct_dept(dept)) - int(getattr(dept, "pct_anterior", 0) or 0)
+
     def section_title(txt: str, y: float) -> float:
         c.setFillColor(accent)
         c.rect(16 * mm, y - 0.8 * mm, 3, 5 * mm, fill=1, stroke=0)
@@ -179,11 +189,11 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         return y_top - card_h - 6 * mm
 
     deptos = sorted(payload.departamentos,
-                    key=lambda d: (-int(d.pct_geral or 0), d.nome))
+                    key=lambda d: (-real_pct_dept(d), d.nome))
     n_deptos = len(deptos)
-    n_verde = sum(1 for d in deptos if d.pct_geral >= 80)
-    n_amarelo = sum(1 for d in deptos if 50 <= d.pct_geral < 80)
-    n_vermelho = sum(1 for d in deptos if d.pct_geral < 50)
+    n_verde = sum(1 for d in deptos if real_pct_dept(d) >= 80)
+    n_amarelo = sum(1 for d in deptos if 50 <= real_pct_dept(d) < 80)
+    n_vermelho = sum(1 for d in deptos if real_pct_dept(d) < 50)
     total_parados = sum(int(getattr(d, 'n_parados', 0) or 0) for d in deptos)
     deptos_com_parados = [
         d for d in deptos if int(
@@ -194,9 +204,10 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     maior_dias = max([int(getattr(d, 'max_dias_parado', 0) or 0)
                      for d in deptos] or [0])
     top_atrasados = sorted(deptos, key=lambda d: (
-        int(d.pct_geral or 0), -int(d.n_travados or 0), d.nome))[:5]
-    top_evolucao = sorted(deptos, key=lambda d: (int(d.pct_geral or 0) -
-                                                 int(d.pct_anterior or 0), int(d.pct_geral or 0)), reverse=True)[:5]
+        real_pct_dept(d), -int(d.n_travados or 0), d.nome))[:5]
+    top_evolucao = sorted(deptos, key=lambda d: (
+        real_delta_dept(d), real_pct_dept(d)
+    ), reverse=True)[:5]
 
     alertas_cfg = payload.alertas_parados or {}
     if alertas_cfg:
@@ -210,6 +221,13 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
             getattr(d, 'max_dias_parado', 0) or 0) <= 21)
         n_atencao = sum(int(getattr(d, 'n_parados', 0) or 0) for d in deptos if 7 < int(
             getattr(d, 'max_dias_parado', 0) or 0) <= 14)
+
+    total_done_exec = sum(int(getattr(d, "_done_steps", 0) or 0) for d in deptos)
+    total_expected_exec = sum(int(getattr(d, "_expected_steps", 0) or 0) for d in deptos)
+    pct_global_real = (
+        max(0, min(100, int(round(total_done_exec / total_expected_exec * 100))))
+        if total_expected_exec > 0 else int(payload.pct_global or 0)
+    )
 
     # Página 1
     c.setFillColor(DARK)
@@ -233,14 +251,14 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         3.5,
         fill=1,
         stroke=0)
-    fw = max((w - 32 * mm) * payload.pct_global / 100,
-             7 * mm if payload.pct_global > 0 else 0)
-    c.setFillColor(_risk_color(payload.pct_global))
+    fw = max((w - 32 * mm) * pct_global_real / 100,
+             7 * mm if pct_global_real > 0 else 0)
+    c.setFillColor(_risk_color(pct_global_real))
     c.roundRect(16 * mm, h - 34 * mm, fw, 7 * mm, 3.5, fill=1, stroke=0)
     c.setFillColor(WHITE)
     c.setFont('Helvetica-Bold', 9)
     c.drawRightString(w - 18 * mm, h - 31 * mm,
-                      f"{payload.pct_global}% concluído")
+                      f"{pct_global_real}% concluído")
 
     y = h - 40 * mm
     y = mini_kpi_row(y, [
@@ -282,7 +300,8 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
             y = h - 20 * mm
         c.setFillColor(SURFACE if i % 2 == 0 else WHITE)
         c.rect(16 * mm, y - row_h, w - 32 * mm, row_h, fill=1, stroke=0)
-        col = _risk_color(dept.pct_geral)
+        dept_pct = real_pct_dept(dept)
+        col = _risk_color(dept_pct)
         c.setFillColor(col)
         c.rect(16 * mm, y - row_h, 3, row_h, fill=1, stroke=0)
         c.setFillColor(MUTED)
@@ -297,11 +316,11 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
             32 * mm, y - row_h * 0.72, f"{dept.n_equipamentos} equip · {dept.n_concluidos} OK · {dept.n_travados} travados · {dept.n_sem_inicio} sem início")
         bar_x = w / 2
         bar_w = w - 32 * mm - (bar_x - 16 * mm) - 18 * mm
-        pbar(bar_x, y - row_h + 3 * mm, bar_w, 5 * mm, dept.pct_geral)
+        pbar(bar_x, y - row_h + 3 * mm, bar_w, 5 * mm, dept_pct)
         c.setFillColor(col)
         c.setFont('Helvetica-Bold', 9)
-        c.drawRightString(w - 18 * mm, y - row_h * 0.38, f"{dept.pct_geral}%")
-        delta = dept.pct_geral - dept.pct_anterior
+        c.drawRightString(w - 18 * mm, y - row_h * 0.38, f"{dept_pct}%")
+        delta = dept_pct - int(dept.pct_anterior or 0)
         if delta != 0:
             c.setFillColor(GREEN if delta > 0 else RED)
             c.setFont('Helvetica-Bold', 7)
@@ -339,7 +358,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         c.drawString(x + 4, y_top - 5.4 * mm, title)
         ry = y_top - 13 * mm
         for idx, d in enumerate(items[:5], start=1):
-            pct = int(d.pct_geral or 0)
+            pct = real_pct_dept(d)
             delta = pct - int(d.pct_anterior or 0)
             c.setFillColor(MUTED)
             c.setFont('Helvetica', 7)
@@ -595,7 +614,8 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
                           for n in active_sections) + bottom_pad
 
     def draw_dept_block(dept: DeptSnapshot, bx: float, by: float, bh: float):
-        col_dep = _risk_color(dept.pct_geral)
+        dept_pct = real_pct_dept(dept)
+        col_dep = _risk_color(dept_pct)
         c.setFillColor(SURFACE)
         c.setStrokeColor(BORDER)
         c.setLineWidth(0.5)
@@ -607,7 +627,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         c.drawString(bx + 7, by - 6 * mm, dept.nome[:22])
         c.setFillColor(col_dep)
         c.setFont('Helvetica-Bold', 9)
-        c.drawRightString(bx + col_w - 4, by - 6 * mm, f"{dept.pct_geral}%")
+        c.drawRightString(bx + col_w - 4, by - 6 * mm, f"{dept_pct}%")
         c.setStrokeColor(BORDER)
         c.line(bx + 4, by - 9 * mm, bx + col_w - 4, by - 9 * mm)
         iy = by - 11 * mm
