@@ -42,15 +42,6 @@ from .transforms import (
 )
 
 
-def _fmt_int_br(value: object) -> str:
-    try:
-        n = int(float(pd.to_numeric(value, errors="coerce") or 0))
-        return f"{n:,}".replace(",", ".")
-    except Exception:
-        return "0"
-
-
-
 # ── Fragment: KPIs principais ───────────────────────────────────────────
 
 @st.fragment
@@ -69,7 +60,7 @@ def _fragment_kpis(
         st.metric(
             "% concluído",
             f"{gk['pct']}%",
-            delta=f"Etapas: {_fmt_int_br(gk['done_steps'])}/{_fmt_int_br(gk['expected_steps'])}",
+            delta=f"Etapas: {gk['done_steps']:,}/{gk['expected_steps']:,}",
             delta_color="off",
             help="Percentual global ponderado por expected_steps de cada grupo.",
         )
@@ -77,7 +68,7 @@ def _fragment_kpis(
         st.metric(
             "Departamentos concluídos",
             f"{dep_done}/{dep_total}",
-            delta=f"Frotas: {_fmt_int_br(cov['eq_done'])}/{_fmt_int_br(cov['eq_total'])}",
+            delta=f"Frotas: {cov['eq_done']}/{cov['eq_total']}",
             delta_color="off",
         )
 
@@ -129,6 +120,19 @@ def _fragment_ranking(
         st.info("Sem grupos configurados (equipamentos + template) para ranquear.")
         return
 
+    st.markdown("""
+    <style>
+    div[data-testid="stMetricValue"] {
+        font-size: 22px !important;
+        font-weight: 600 !important;
+        line-height: 1.1 !important;
+    }
+    div[data-testid="stMetricLabel"] {
+        font-size: 12px !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     best = scope.sort_values(["pct", "done_steps"],
                              ascending=[False, False]).head(5)
     worst = scope.sort_values(["pct", "done_steps"],
@@ -168,17 +172,10 @@ def _fragment_ranking(
                 pct_label = f"{int(round(pct))}%"
                 st.metric("Execução", pct_label)
             with mc2:
-                st.metric("Equipamentos", _fmt_int_br(eq_count))
+                st.metric("Equipamentos", eq_count)
             with mc3:
-                etapas_display = (
-                    f"{_fmt_int_br(done_steps)}/{_fmt_int_br(expected_steps)}"
-                    if expected_steps > 0 else "—"
-                )
-                st.metric(
-                    "Etapas",
-                    etapas_display,
-                    help="Etapas concluídas / etapas totais do grupo.",
-                )
+                etapas_display = f"{done_steps:,}/{expected_steps:,}" if expected_steps > 0 else "—"
+                st.metric("Etapas", etapas_display)
             st.caption("Grupo fecha quando D+R+M concluído em todos os equipamentos.")
             if st.button("Abrir na Matriz", key=f"rank_open_{mode}_{gid}",
                          use_container_width=True, type="secondary"):
