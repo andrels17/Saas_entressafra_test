@@ -315,7 +315,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
             "equipamento_id": r.get("id"),
             "frota": r.get("frota"),
             "modelo": r.get("modelo"),
-            "departamento_id": (r.get("departamento_id") if r.get("departamento_id") is not None else (grupo_map.get(str(r.get("grupo_id")), {}) or {}).get("departamento_id")),
+            "departamento_id": r.get("departamento_id"),
         }
         for r in eq_rows
     ]
@@ -328,15 +328,15 @@ def _load_departamentos(tenant_id: str, ver: str = "0", _token: str = "") -> lis
     ver = f"{ver}_{_hl.md5((_token or '').encode()).hexdigest()[:8]}"
     sb = _sb_from_token(_token)
     try:
-        rows = (
+        return (
             sb.table("departamentos")
             .select("id,nome")
             .eq("tenant_id", tenant_id)
+            .eq("ativo", True)
             .order("nome")
             .execute()
             .data or []
         )
-        return [{**r, "id": str(r.get("id")) if r.get("id") is not None else None} for r in rows]
     except Exception as exc:
         log_error(exc, context="dashboard._load_departamentos", table="departamentos")
         return []
@@ -348,15 +348,15 @@ def _load_grupos(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]
     ver = f"{ver}_{_hl.md5((_token or '').encode()).hexdigest()[:8]}"
     sb = _sb_from_token(_token)
     try:
-        rows = (
+        return (
             sb.table("equip_grupos")
             .select("id,nome,departamento_id")
             .eq("tenant_id", tenant_id)
+            .eq("ativo", True)
             .order("nome")
             .execute()
             .data or []
         )
-        return [{**r, "id": str(r.get("id")) if r.get("id") is not None else None, "departamento_id": str(r.get("departamento_id")) if r.get("departamento_id") is not None else None} for r in rows]
     except Exception as exc:
         log_error(exc, context="dashboard._load_grupos", table="equip_grupos")
         return []
@@ -903,6 +903,47 @@ def _fragment_timeline(tl: pd.DataFrame) -> None:
     )
 
 
+def _dashboard_groups_from_kpi(
+    tenant_id: str,
+    revisao_id: str,
+    ver: str,
+    token: str,
+    gid_to_dept: dict,
+    gid_to_name: dict,
+    dep_scope_ids=None,
+    grp_scope_ids=None,
+) -> pd.DataFrame:
+    try:
+        kdf = get_group_kpis(tenant_id, revisao_id, ver, prefer_mv=True, _token=token)
+    except Exception:
+        return pd.DataFrame()
+    if kdf is None or kdf.empty:
+        return pd.DataFrame()
+    tmp = kdf.copy()
+    if grp_scope_ids not in (None, []):
+        grp_set = {str(x) for x in grp_scope_ids}
+        tmp = tmp[tmp["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(grp_set)]
+    tmp["departamento_id"] = tmp["grupo_id"].map(lambda v: gid_to_dept.get(str(v)) if pd.notna(v) else None)
+    if dep_scope_ids not in (None, []):
+        dep_set = {str(x) for x in dep_scope_ids}
+        tmp = tmp[tmp["departamento_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(dep_set)]
+    if tmp.empty:
+        return pd.DataFrame()
+    tmp["grupo"] = tmp["grupo_id"].map(lambda v: gid_to_name.get(str(v), str(v)))
+    tmp["pct_concluido"] = pd.to_numeric(tmp.get("pct", 0), errors="coerce").fillna(0).clip(0, 100)
+    for col in ("done_steps", "expected_steps"):
+        tmp[col] = pd.to_numeric(tmp.get(col, 0), errors="coerce").fillna(0).astype(int)
+    return tmp[["grupo", "grupo_id", "departamento_id", "pct_concluido", "done_steps", "expected_steps"]].copy()
+
+def _overall_from_group_kpis(gdf: pd.DataFrame) -> dict:
+    if gdf is None or gdf.empty:
+        return {"pct": 0.0, "total": 0, "concl": 0, "pend": 0, "andamento": 0, "trav": 0, "na": 0}
+    done = int(pd.to_numeric(gdf.get("done_steps", 0), errors="coerce").fillna(0).sum())
+    exp = int(pd.to_numeric(gdf.get("expected_steps", 0), errors="coerce").fillna(0).sum())
+    pct = round(done / max(exp, 1) * 100) if exp else 0
+    return {"pct": float(max(0, min(100, pct))), "total": int(len(gdf)), "concl": int((pd.to_numeric(gdf.get("pct_concluido", 0), errors="coerce").fillna(0) >= 100).sum()), "pend": int((pd.to_numeric(gdf.get("pct_concluido", 0), errors="coerce").fillna(0) < 100).sum()), "andamento": 0, "trav": 0, "na": 0}
+
+
 def render_dashboard() -> None:
     page_header("Dashboard")
 
@@ -985,8 +1026,23 @@ def render_dashboard() -> None:
                    for g in grupos if g.get("id")}
 
     base = normalize_matriz_base(raw, eq_meta)
+    base = apply_filters(base, dep_scope_ids, grp_scope_ids)
+    if base.empty and dep_scope_ids not in (None, []):
+        # fallback defensivo: quando o vínculo vier por departamento e a lista de grupos
+        # estiver desatualizada, mantém o filtro por departamento em vez de zerar o dashboard.
+        base = apply_filters(base=normalize_matriz_base(raw, eq_meta), departamento_ids=dep_scope_ids, grupo_ids=None)
 
-    if base.empty:
+    dashboard_groups = group_progress(base)
+    kpi_groups = _dashboard_groups_from_kpi(
+        tenant_id, revisao_id, ver, token, gid_to_dept, gid_to_name, dep_scope_ids, grp_scope_ids
+    )
+    use_kpi_fallback = (
+        (base.empty or int(pd.to_numeric(dashboard_groups.get("done_steps", 0), errors="coerce").fillna(0).sum()) == 0)
+        and kpi_groups is not None and not kpi_groups.empty
+        and int(pd.to_numeric(kpi_groups.get("done_steps", 0), errors="coerce").fillna(0).sum()) > 0
+    )
+
+    if base.empty and not use_kpi_fallback:
         notice_card(
             "Sem dados de execução",
             "A revisão foi encontrada, mas ainda não há tarefas suficientes para consolidar o dashboard desta revisão.",
@@ -994,15 +1050,8 @@ def render_dashboard() -> None:
         )
         return
 
-    base = apply_filters(base, dep_scope_ids, grp_scope_ids)
-    if base.empty and dep_scope_ids not in (None, []):
-        # fallback defensivo: quando o vínculo vier por departamento e a lista de grupos
-        # estiver desatualizada, mantém o filtro por departamento em vez de zerar o dashboard.
-        base = apply_filters(base=normalize_matriz_base(raw, eq_meta), departamento_ids=dep_scope_ids, grupo_ids=None)
-
-    # Usa sempre a mesma base consolidada do dashboard para grupos.
-    # Isso evita divergência com caches/materialized views fora de sincronia.
-    dashboard_groups = group_progress(base)
+    if use_kpi_fallback:
+        dashboard_groups = kpi_groups.copy()
 
     st.markdown("### Filtros")
     c1, c2, c3 = st.columns([1.1, 1.4, 0.6])
@@ -1076,7 +1125,7 @@ def render_dashboard() -> None:
             dashboard_groups_filtered["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(effective_group_set)
         ]
 
-    if base_filtered.empty:
+    if base_filtered.empty and dashboard_groups_filtered.empty:
         notice_card(
             "Nenhum resultado para os filtros",
             "A combinação de departamentos e grupos não retornou dados nesta revisão. Ajuste os filtros para continuar.",
@@ -1084,17 +1133,23 @@ def render_dashboard() -> None:
         )
         return
 
-    # overall_from_base usa base_filtered diretamente (fonte única de verdade).
-    # calc_global_kpis foi removido aqui pois espera colunas eq_count/svc_count
-    # do formato GroupKPI (kpi_engine), incompatíveis com group_progress().
-    overall = overall_from_base(base_filtered)
+    overall = _overall_from_group_kpis(dashboard_groups_filtered) if (base_filtered.empty and not dashboard_groups_filtered.empty) else overall_from_base(base_filtered)
 
     _fragment_kpis_globais(overall)
     st.divider()
 
     with st.spinner("", show_time=False):
-        risco, previsao, heat, crit, tl = build_inteligencia(base_filtered)
+        if base_filtered.empty:
+            risco, previsao, heat, crit, tl = ({"risco_score": 0}, {}, pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
+        else:
+            risco, previsao, heat, crit, tl = build_inteligencia(base_filtered)
     _fragment_previsao(previsao, risco)
+    if base_filtered.empty and not dashboard_groups_filtered.empty:
+        notice_card(
+            "Dashboard carregado por KPI consolidado",
+            "Os totais de grupos e departamentos foram carregados pela fonte consolidada da revisão. As abas de Equipamentos, Heatmap, Criticidade e Timeline dependem da base detalhada e podem ficar vazias para este perfil.",
+            tone="info",
+        )
     st.divider()
 
     tabs = [
