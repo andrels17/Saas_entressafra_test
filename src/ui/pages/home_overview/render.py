@@ -115,7 +115,7 @@ def _fragment_ranking(
     revisao_id: str,
     ver: str,
 ) -> None:
-    """Top 5 melhores / críticos com detalhe de setores."""
+    """Top 5 melhores / críticos com foco operacional por grupo."""
     if scope.empty:
         st.info("Sem grupos configurados (equipamentos + template) para ranquear.")
         return
@@ -126,21 +126,18 @@ def _fragment_ranking(
                               ascending=[True, True]).head(5)
 
     a, b = st.columns(2)
-    sector_map = load_group_sector_view(tenant_id, revisao_id, ver, token_hash=st.session_state.get("_tok_hash_cache", ""), _token=st.session_state.get("sb_access_token", "") or "")
 
     def _render_grupo_card(row: dict, mode: str) -> None:
         gid = row.get("grupo_id")
-        sec = sector_map.get(str(gid), {})
         pct = float(pd.to_numeric(row.get("pct", 0), errors="coerce") or 0)
-        total = int(sec.get("setores_total") or 0)
-        concl = int(sec.get("setores_concluidos") or 0)
-        # Recalcula pendentes a partir do total/concluídos para evitar 0/0 = concluído.
-        pend = max(total - concl, 0)
+        eq_count = int(pd.to_numeric(row.get("eq_count", 0), errors="coerce") or 0)
+        done_steps = int(pd.to_numeric(row.get("done_steps", 0), errors="coerce") or 0)
+        expected_steps = int(pd.to_numeric(row.get("expected_steps", 0), errors="coerce") or 0)
 
-        if total <= 0:
+        if expected_steps <= 0 and eq_count <= 0:
             badge_state = "neutro"
-            badge_label = "Sem setores"
-        elif concl >= total:
+            badge_label = "Sem base"
+        elif pct >= 100:
             badge_state = "concluido"
             badge_label = "Concluído"
         elif pct > 0:
@@ -162,15 +159,11 @@ def _fragment_ranking(
                 pct_label = f"{int(round(pct))}%"
                 st.metric("Execução", pct_label)
             with mc2:
-                pend_display = "—" if total <= 0 else pend
-                st.metric(
-                    "Setores pend.",
-                    pend_display,
-                    delta_color="inverse" if (total > 0 and pend > 0) else "off")
+                st.metric("Equipamentos", eq_count)
             with mc3:
-                concl_display = "—" if total <= 0 else f"{concl}/{total}"
-                st.metric("Setores conc.", concl_display)
-            st.caption("Setor fecha quando D+R+M ok em todos os equipamentos.")
+                etapas_display = f"{done_steps:,}/{expected_steps:,}" if expected_steps > 0 else "—"
+                st.metric("Etapas", etapas_display)
+            st.caption("Grupo fecha quando D+R+M concluído em todos os equipamentos.")
             if st.button("Abrir na Matriz", key=f"rank_open_{mode}_{gid}",
                          use_container_width=True, type="secondary"):
                 st.session_state.update({
