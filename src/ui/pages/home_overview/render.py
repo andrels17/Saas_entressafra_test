@@ -342,6 +342,9 @@ def render_home_overview() -> None:
 
     ver = str(st.session_state.get("data_version", "0"))
     _tok = st.session_state.get("sb_access_token", "") or ""
+    from src.ui.pages.home_overview.data import _token_hash
+    _tok_hash = _token_hash(_tok)
+    st.session_state["_tok_hash_cache"] = _tok_hash
     rev = load_revision(tenant_id, ver, get_current_revisao(), token_hash=_tok_hash, _token=_tok)
     if not rev:
         st.warning("Nenhuma revisão encontrada para este tenant.")
@@ -356,9 +359,6 @@ def render_home_overview() -> None:
         set_current_revisao(rev["id"])
         st.session_state["_sidebar_rev_titulo"] = rev.get("titulo")
         st.session_state["_sidebar_rev_semana"] = week
-    from src.ui.pages.home_overview.data import _token_hash
-    _tok_hash = _token_hash(_tok)
-    st.session_state["_tok_hash_cache"] = _tok_hash
     grupos = load_groups(tenant_id, ver, token_hash=_tok_hash, _token=_tok)
     deps = load_depts(tenant_id, ver, token_hash=_tok_hash, _token=_tok)
     gid_to_name = {g["id"]: (g.get("nome") or "—")
