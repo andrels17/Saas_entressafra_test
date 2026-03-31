@@ -377,12 +377,19 @@ def _calc_snapshot_from_kpi_engine(
 
 
 
+
 def _build_dashboard_base(
         sb, tenant_id: str, revisao_id: str, grupo_ids: list[str],
         tarefas: list[dict] | None = None) -> tuple[pd.DataFrame, list[dict]]:
     """Monta a mesma base lógica usada no dashboard para um conjunto de grupos.
 
-    Retorna (base_normalizada, rows_equipamentos).
+    Diferença importante:
+    - sempre materializa a grade equipamento × serviços do grupo
+    - depois faz o merge das tarefas reais da revisão
+
+    Isso evita que o PDF calcule o progresso por frota apenas em cima das
+    linhas existentes em tarefas_servico, cenário que fazia equipamentos com
+    progresso real aparecerem como 0%/inconsistentes na página de destaques.
     """
     from src.ui.pages.dashboard.transforms import normalize_matriz_base
 
@@ -399,7 +406,10 @@ def _build_dashboard_base(
             _page = _with_fallback(
                 lambda s=_start: (
                     sb.table("tarefas_servico")
-                    .select("equipamento_id,servico_id,status,etapa_d,etapa_r,etapa_m,updated_at")
+                    .select(
+                        "equipamento_id,servico_id,status,etapa_d,etapa_r,etapa_m,"
+                        "updated_at,dt_etapa_d,dt_etapa_r,dt_etapa_m"
+                    )
                     .eq("tenant_id", tenant_id)
                     .eq("revisao_id", revisao_id)
                     .range(s, s + _page_size - 1)
@@ -419,11 +429,13 @@ def _build_dashboard_base(
     eq_rows: list[dict] = []
     eq_map: dict[str, dict] = {}
     for gid, eqs in (eq_por_grupo or {}).items():
+        gid_s = str(gid)
         for eq in eqs or []:
             row = dict(eq)
-            row["grupo_id"] = gid
+            row["grupo_id"] = gid_s
             eq_rows.append(row)
-            eq_map[str(eq.get("id"))] = row
+            if eq.get("id") is not None:
+                eq_map[str(eq.get("id"))] = row
 
     # Grupos / serviços / grupo_servicos (sem filtrar ativo, como dashboard)
     grupo_rows = _with_fallback(
@@ -465,6 +477,18 @@ def _build_dashboard_base(
     grupo_map = {str(r.get("id")): r for r in grupo_rows if r.get("id") is not None}
     serv_map = {str(r.get("id")): r for r in serv_rows if r.get("id") is not None}
 
+    group_services: dict[str, list[str]] = {}
+    for row in grupo_servicos_rows or []:
+        gid = row.get("grupo_id")
+        sid = row.get("servico_id")
+        if gid is None or sid is None:
+            continue
+        gid_s = str(gid)
+        sid_s = str(sid)
+        group_services.setdefault(gid_s, [])
+        if sid_s not in group_services[gid_s]:
+            group_services[gid_s].append(sid_s)
+
     def _status_rank(status: str | None) -> int:
         s = str(status or "").strip().lower()
         order = {
@@ -483,33 +507,57 @@ def _build_dashboard_base(
 
     def _merge_task(prev: dict | None, cur: dict) -> dict:
         if not prev:
-            return dict(cur)
+            merged = dict(cur)
+            for etapa_col in ("etapa_d", "etapa_r", "etapa_m"):
+                merged[etapa_col] = _is_done(cur.get(etapa_col))
+            return merged
+
         merged = dict(prev)
         for etapa_col in ("etapa_d", "etapa_r", "etapa_m"):
-            merged[etapa_col] = bool(prev.get(etapa_col)) or bool(cur.get(etapa_col))
+            merged[etapa_col] = _is_done(prev.get(etapa_col)) or _is_done(cur.get(etapa_col))
+
         prev_status = prev.get("status")
         cur_status = cur.get("status")
         merged["status"] = cur_status if _status_rank(cur_status) >= _status_rank(prev_status) else prev_status
-        prev_upd = str(prev.get("updated_at") or "")
-        cur_upd = str(cur.get("updated_at") or "")
-        merged["updated_at"] = cur.get("updated_at") if cur_upd >= prev_upd else prev.get("updated_at")
+
+        merged["updated_at"] = _best_ts(
+            prev.get("updated_at"),
+            cur.get("updated_at"),
+            prev.get("dt_etapa_m"),
+            prev.get("dt_etapa_r"),
+            prev.get("dt_etapa_d"),
+            cur.get("dt_etapa_m"),
+            cur.get("dt_etapa_r"),
+            cur.get("dt_etapa_d"),
+        )
+        merged["dt_etapa_d"] = _best_ts(prev.get("dt_etapa_d"), cur.get("dt_etapa_d"))
+        merged["dt_etapa_r"] = _best_ts(prev.get("dt_etapa_r"), cur.get("dt_etapa_r"))
+        merged["dt_etapa_m"] = _best_ts(prev.get("dt_etapa_m"), cur.get("dt_etapa_m"))
         return merged
 
-    raw_tasks = []
+    # Tarefas agregadas por (equipamento, serviço)
     task_map: dict[tuple[str, str], dict] = {}
+    extra_services_by_group: dict[str, list[str]] = {}
+
     for t in tarefas or []:
         eid = str(t.get("equipamento_id")) if t.get("equipamento_id") is not None else None
         sid = str(t.get("servico_id")) if t.get("servico_id") is not None else None
-        eq = eq_map.get(eid, {})
-        gid = eq.get("grupo_id")
-        gid_s = str(gid) if gid is not None else None
+        if not eid or not sid:
+            continue
+
+        eq = eq_map.get(eid)
+        if not eq:
+            continue
+
+        gid_s = str(eq.get("grupo_id") or "")
         if not gid_s or gid_s not in grupo_map:
             continue
+
         grp = grupo_map.get(gid_s, {})
         svc = serv_map.get(sid, {})
         enriched = {
             "equipamento_id": t.get("equipamento_id"),
-            "grupo_id": gid,
+            "grupo_id": gid_s,
             "grupo_nome": grp.get("nome"),
             "departamento_id": grp.get("departamento_id"),
             "frota": eq.get("frota"),
@@ -517,66 +565,76 @@ def _build_dashboard_base(
             "servico_id": t.get("servico_id"),
             "setor_nome": svc.get("setor") or "—",
             "status": t.get("status"),
-            "etapa_d": t.get("etapa_d"),
-            "etapa_r": t.get("etapa_r"),
-            "etapa_m": t.get("etapa_m"),
+            "etapa_d": _is_done(t.get("etapa_d")),
+            "etapa_r": _is_done(t.get("etapa_r")),
+            "etapa_m": _is_done(t.get("etapa_m")),
             "updated_at": t.get("updated_at"),
+            "dt_etapa_d": t.get("dt_etapa_d"),
+            "dt_etapa_r": t.get("dt_etapa_r"),
+            "dt_etapa_m": t.get("dt_etapa_m"),
         }
-        raw_tasks.append(enriched)
-        if eid and sid:
-            task_map[(eid, sid)] = _merge_task(task_map.get((eid, sid)), enriched)
+        task_map[(eid, sid)] = _merge_task(task_map.get((eid, sid)), enriched)
 
-    group_services: dict[str, list[str]] = {}
-    for row in grupo_servicos_rows:
-        gid = row.get("grupo_id")
-        sid = row.get("servico_id")
-        if gid is None or sid is None:
-            continue
-        gid_s = str(gid)
-        sid_s = str(sid)
-        group_services.setdefault(gid_s, [])
-        if sid_s not in group_services[gid_s]:
-            group_services[gid_s].append(sid_s)
+        if sid not in group_services.get(gid_s, []):
+            extra_services_by_group.setdefault(gid_s, [])
+            if sid not in extra_services_by_group[gid_s]:
+                extra_services_by_group[gid_s].append(sid)
 
-    # Fonte principal: tarefas reais da revisão.
-    raw = list(task_map.values())
-    eids_with_task = {
-        str(r.get("equipamento_id"))
-        for r in raw
-        if r.get("equipamento_id") is not None
-    }
-
-    # Fallback estrutural apenas para equipamentos sem qualquer tarefa ainda.
-    for eid, eq in eq_map.items():
-        if eid in eids_with_task:
-            continue
+    # Materializa grade completa equipamento × serviços do grupo.
+    raw: list[dict] = []
+    for eq in eq_rows:
+        eid = str(eq.get("id") or "")
         gid_s = str(eq.get("grupo_id") or "")
-        if not gid_s or gid_s not in grupo_map:
+        if not eid or not gid_s or gid_s not in grupo_map:
             continue
+
         grp = grupo_map.get(gid_s, {})
-        service_ids = group_services.get(gid_s, [])
+        service_ids = list(group_services.get(gid_s, []))
+
+        # fallback: se o grupo não tem template configurado, pelo menos usa os
+        # serviços já vistos em tarefas desse grupo para não zerar o equipamento
+        # no PDF.
+        if not service_ids:
+            service_ids = list(extra_services_by_group.get(gid_s, []))
+
         if not service_ids:
             continue
-        for sid in service_ids:
-            svc = serv_map.get(str(sid), {})
-            raw.append({
-                "equipamento_id": eq.get("id"),
-                "grupo_id": eq.get("grupo_id"),
-                "grupo_nome": grp.get("nome"),
-                "departamento_id": grp.get("departamento_id"),
-                "frota": eq.get("frota"),
-                "modelo": eq.get("modelo"),
-                "servico_id": sid,
-                "setor_nome": svc.get("setor") or "—",
-                "status": "pendente",
-                "etapa_d": False,
-                "etapa_r": False,
-                "etapa_m": False,
-                "updated_at": None,
-            })
 
-    if not raw and raw_tasks:
-        raw = raw_tasks
+        for sid in service_ids:
+            task = task_map.get((eid, sid))
+            svc = serv_map.get(str(sid), {})
+            if task:
+                raw.append({
+                    "equipamento_id": eq.get("id"),
+                    "grupo_id": gid_s,
+                    "grupo_nome": grp.get("nome"),
+                    "departamento_id": grp.get("departamento_id"),
+                    "frota": eq.get("frota"),
+                    "modelo": eq.get("modelo"),
+                    "servico_id": sid,
+                    "setor_nome": task.get("setor_nome") or svc.get("setor") or "—",
+                    "status": task.get("status") or "pendente",
+                    "etapa_d": _is_done(task.get("etapa_d")),
+                    "etapa_r": _is_done(task.get("etapa_r")),
+                    "etapa_m": _is_done(task.get("etapa_m")),
+                    "updated_at": task.get("updated_at"),
+                })
+            else:
+                raw.append({
+                    "equipamento_id": eq.get("id"),
+                    "grupo_id": gid_s,
+                    "grupo_nome": grp.get("nome"),
+                    "departamento_id": grp.get("departamento_id"),
+                    "frota": eq.get("frota"),
+                    "modelo": eq.get("modelo"),
+                    "servico_id": sid,
+                    "setor_nome": svc.get("setor") or "—",
+                    "status": "pendente",
+                    "etapa_d": False,
+                    "etapa_r": False,
+                    "etapa_m": False,
+                    "updated_at": None,
+                })
 
     eq_meta = [
         {
@@ -592,7 +650,6 @@ def _build_dashboard_base(
     if not base.empty and "grupo_id" in base.columns:
         base = base[base["grupo_id"].isin(grupo_ids)].copy()
     return base, eq_rows
-
 
 
 # ── Construção do payload ───────────────────────────────────────────────
