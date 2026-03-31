@@ -332,7 +332,6 @@ def _load_departamentos(tenant_id: str, ver: str = "0", _token: str = "") -> lis
             sb.table("departamentos")
             .select("id,nome")
             .eq("tenant_id", tenant_id)
-            .eq("ativo", True)
             .order("nome")
             .execute()
             .data or []
@@ -352,7 +351,6 @@ def _load_grupos(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]
             sb.table("equip_grupos")
             .select("id,nome,departamento_id")
             .eq("tenant_id", tenant_id)
-            .eq("ativo", True)
             .order("nome")
             .execute()
             .data or []
@@ -458,57 +456,6 @@ def _fragment_kpis_globais(overall: dict) -> None:
                 delta_color=delta_color,
                 help=help_text)
 
-
-
-
-def _group_kpis_to_dashboard_df(kdf: pd.DataFrame, gid_to_name: dict, gid_to_dept: dict) -> pd.DataFrame:
-    """Converte GroupKPI (kpi_engine) para o formato usado pelo dashboard.
-
-    Usado como fallback quando a base detalhada do dashboard vier zerada por
-    RLS em tarefas_servico para perfis gestor/scope-restricted, mas a MV/RPC de
-    KPI já possuir os totais corretos por grupo.
-    """
-    if kdf is None or getattr(kdf, "empty", True):
-        return pd.DataFrame(columns=[
-            "grupo", "grupo_id", "departamento_id",
-            "pct_concluido", "done_steps", "expected_steps"
-        ])
-    out = kdf.copy()
-    out["grupo_id"] = out["grupo_id"].map(lambda v: str(v) if pd.notna(v) and v is not None else None)
-    out["grupo"] = out["grupo_id"].map(lambda v: gid_to_name.get(str(v)) if pd.notna(v) else None).fillna("—")
-    out["departamento_id"] = out["grupo_id"].map(lambda v: gid_to_dept.get(str(v)) if pd.notna(v) else None)
-    out["pct_concluido"] = pd.to_numeric(out.get("pct", 0), errors="coerce").fillna(0).clip(0, 100)
-    out["done_steps"] = pd.to_numeric(out.get("done_steps", 0), errors="coerce").fillna(0).astype(int)
-    out["expected_steps"] = pd.to_numeric(out.get("expected_steps", 0), errors="coerce").fillna(0).astype(int)
-    return out[["grupo", "grupo_id", "departamento_id", "pct_concluido", "done_steps", "expected_steps"]]
-
-
-def _prefer_group_kpi_source(base_groups: pd.DataFrame, kpi_groups: pd.DataFrame) -> pd.DataFrame:
-    """Escolhe a fonte de agregação mais confiável para deptos/grupos.
-
-    Regra prática:
-    - usa base detalhada quando ela possui done_steps > 0;
-    - cai para kpi_engine/MV quando a base detalhada vier zerada/suspeita,
-      mas os KPIs agregados tiverem progresso real.
-    """
-    if kpi_groups is None or getattr(kpi_groups, "empty", True):
-        return base_groups
-    if base_groups is None or getattr(base_groups, "empty", True):
-        return kpi_groups
-
-    base_done = int(pd.to_numeric(base_groups.get("done_steps", 0), errors="coerce").fillna(0).sum())
-    base_exp = int(pd.to_numeric(base_groups.get("expected_steps", 0), errors="coerce").fillna(0).sum())
-    kpi_done = int(pd.to_numeric(kpi_groups.get("done_steps", 0), errors="coerce").fillna(0).sum())
-    kpi_exp = int(pd.to_numeric(kpi_groups.get("expected_steps", 0), errors="coerce").fillna(0).sum())
-
-    base_pct = round(base_done / max(base_exp, 1) * 100) if base_exp > 0 else 0
-    kpi_pct = round(kpi_done / max(kpi_exp, 1) * 100) if kpi_exp > 0 else 0
-
-    if base_done <= 0 < kpi_done:
-        return kpi_groups
-    if base_pct == 0 and kpi_pct > 0:
-        return kpi_groups
-    return base_groups
 
 @st.fragment
 def _fragment_previsao(previsao: dict, risco: dict) -> None:
@@ -964,6 +911,8 @@ def render_dashboard() -> None:
 
     sb = sb_for_user()
     dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id, sb)
+    dep_scope_ids = None if dep_scope_ids is None else [str(x) for x in dep_scope_ids if x is not None]
+    grp_scope_ids = None if grp_scope_ids is None else [str(x) for x in grp_scope_ids if x is not None]
     role = st.session_state.get("current_role") or ""
     if can_view_all_data(role):
         if dep_scope_ids == []:
@@ -1012,7 +961,8 @@ def render_dashboard() -> None:
         grupos = _load_grupos(tenant_id, ver, token)
 
     if dep_scope_ids in (None, [] ) and grp_scope_ids not in (None, []):
-        dep_scope_ids = sorted({str(g.get("departamento_id")) for g in grupos if g.get("id") in set(grp_scope_ids) and g.get("departamento_id")})
+        grp_scope_set = {str(x) for x in grp_scope_ids}
+        dep_scope_ids = sorted({str(g.get("departamento_id")) for g in grupos if str(g.get("id")) in grp_scope_set and g.get("departamento_id")})
 
     if dep_scope_ids == [] and grp_scope_ids not in (None, []):
         grp_set = {str(x) for x in grp_scope_ids}
@@ -1027,7 +977,8 @@ def render_dashboard() -> None:
         if scoped_grupos or dep_scope_ids in (None, []):
             grupos = scoped_grupos
         else:
-            grupos = [g for g in grupos if g.get("departamento_id") in dep_scope_ids]
+            dep_scope_set = {str(x) for x in dep_scope_ids}
+            grupos = [g for g in grupos if str(g.get("departamento_id")) in dep_scope_set]
 
     dept_map = {str(d["id"]): d.get("nome", "—")
                 for d in departamentos if d.get("id")}
@@ -1051,26 +1002,9 @@ def render_dashboard() -> None:
         # estiver desatualizada, mantém o filtro por departamento em vez de zerar o dashboard.
         base = apply_filters(base=normalize_matriz_base(raw, eq_meta), departamento_ids=dep_scope_ids, grupo_ids=None)
 
-    # Base detalhada do dashboard (equipamento × serviço).
-    dashboard_groups_base = group_progress(base)
-
-    # Fallback agregado via kpi_engine/MV: necessário para perfis gestor quando
-    # o detalhamento é afetado por RLS em tarefas_servico, mas os totais por
-    # grupo já estão corretos na MV/RPC.
-    try:
-        group_kpis_raw = get_group_kpis(tenant_id, revisao_id, ver=ver, prefer_mv=True, _token=token)
-    except Exception:
-        group_kpis_raw = pd.DataFrame()
-    group_kpis_raw = group_kpis_raw.copy() if group_kpis_raw is not None else pd.DataFrame()
-    if group_kpis_raw is not None and not group_kpis_raw.empty:
-        if dep_scope_ids not in (None, []):
-            dep_scope_set = {str(x) for x in dep_scope_ids}
-            group_kpis_raw = group_kpis_raw[group_kpis_raw["grupo_id"].map(lambda v: str(gid_to_dept.get(str(v))) if pd.notna(v) else None).isin(dep_scope_set)]
-        if grp_scope_ids not in (None, []):
-            grp_scope_set = {str(x) for x in grp_scope_ids}
-            group_kpis_raw = group_kpis_raw[group_kpis_raw["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(grp_scope_set)]
-    dashboard_groups_kpi = _group_kpis_to_dashboard_df(group_kpis_raw, gid_to_name, gid_to_dept)
-    dashboard_groups = _prefer_group_kpi_source(dashboard_groups_base, dashboard_groups_kpi)
+    # Usa sempre a mesma base consolidada do dashboard para grupos.
+    # Isso evita divergência com caches/materialized views fora de sincronia.
+    dashboard_groups = group_progress(base)
 
     st.markdown("### Filtros")
     c1, c2, c3 = st.columns([1.1, 1.4, 0.6])
@@ -1152,19 +1086,10 @@ def render_dashboard() -> None:
         )
         return
 
-    # KPIs globais: preferimos a base detalhada, mas se ela vier zerada e os
-    # KPIs agregados tiverem progresso real, usamos o agregado para não exibir
-    # 0% indevido para gestores com escopo.
+    # overall_from_base usa base_filtered diretamente (fonte única de verdade).
+    # calc_global_kpis foi removido aqui pois espera colunas eq_count/svc_count
+    # do formato GroupKPI (kpi_engine), incompatíveis com group_progress().
     overall = overall_from_base(base_filtered)
-    agg_done = int(pd.to_numeric(dashboard_groups_filtered.get("done_steps", 0), errors="coerce").fillna(0).sum()) if dashboard_groups_filtered is not None and not dashboard_groups_filtered.empty else 0
-    agg_exp = int(pd.to_numeric(dashboard_groups_filtered.get("expected_steps", 0), errors="coerce").fillna(0).sum()) if dashboard_groups_filtered is not None and not dashboard_groups_filtered.empty else 0
-    if overall.get("pct", 0) <= 0 and agg_done > 0 and agg_exp > 0:
-        overall = {
-            **overall,
-            "pct": float(max(0, min(100, round(agg_done / max(agg_exp, 1) * 100)))),
-            "total": agg_exp // 3,
-            "concl": overall.get("concl", 0),
-        }
 
     _fragment_kpis_globais(overall)
     st.divider()
