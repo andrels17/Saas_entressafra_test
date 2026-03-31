@@ -5,28 +5,24 @@ from src.utils.kpi_engine import invalidate_kpi_cache
 
 
 def invalidate_matriz_cache() -> None:
-    """Invalida caches locais da Matriz e avança a versão global dos dados.
-
-    Ordem de operações:
-      1. invalidate_kpi_cache — limpa @st.cache_data de KPIs e incrementa
-         data_version + _kpi_ver em um único passo coordenado.
-      2. bump_data_version — garante um novo token de tempo para quaisquer
-         outros caches que dependam de data_version mas não de _kpi_ver.
-      3. Limpa chaves de session_state da Matriz.
-    """
-    # 1. Invalida KPIs (já incrementa data_version internamente)
+    """Invalida caches locais da Matriz e avança a versão global dos dados."""
+    current = st.session_state.get("data_version", "0")
     try:
-        invalidate_kpi_cache()
+        st.session_state["data_version"] = str(int(float(current)) + 1)
     except Exception:
-        pass
+        st.session_state["data_version"] = "1"
 
-    # 2. Gera um novo token de tempo (sem incrementar data_version de novo)
+    # também gera um novo token global para qualquer cache que dependa de data_version
     try:
         bump_data_version()
     except Exception:
         pass
 
-    # 3. Remove caches de session_state da Matriz
+    try:
+        invalidate_kpi_cache()
+    except Exception:
+        pass
+
     for key in (
         "_mtz_payload_cache",
         "_mtz_group_ctx_cache",
