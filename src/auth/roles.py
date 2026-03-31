@@ -17,8 +17,6 @@ class Role(str, Enum):
     ADMIN = "admin"
     SUPERVISOR = "supervisor"
     MANAGER = "manager"
-    GESTOR = "gestor"      # alias PT-BR de MANAGER usado no banco
-    EXECUTOR = "executor"  # alias PT-BR de USER usado no banco
     USER = "user"
     VIEWER = "viewer"
 
@@ -46,9 +44,9 @@ class Role(str, Enum):
 
 # Coleções legadas acessadas como Role.* e por import de módulo
 Role.ADMIN_ROLES = {Role.SUPERADMIN, Role.ADMIN}
-Role.MANAGER_ROLES = {Role.SUPERADMIN, Role.ADMIN, Role.SUPERVISOR, Role.MANAGER, Role.GESTOR}
-Role.USER_ROLES = {Role.SUPERADMIN, Role.ADMIN, Role.SUPERVISOR, Role.MANAGER, Role.GESTOR, Role.USER, Role.EXECUTOR}
-Role.ALL_ROLES = {Role.SUPERADMIN, Role.ADMIN, Role.SUPERVISOR, Role.MANAGER, Role.GESTOR, Role.USER, Role.EXECUTOR, Role.VIEWER}
+Role.MANAGER_ROLES = {Role.SUPERADMIN, Role.ADMIN, Role.SUPERVISOR, Role.MANAGER}
+Role.USER_ROLES = {Role.SUPERADMIN, Role.ADMIN, Role.SUPERVISOR, Role.MANAGER, Role.USER}
+Role.ALL_ROLES = {Role.SUPERADMIN, Role.ADMIN, Role.SUPERVISOR, Role.MANAGER, Role.USER, Role.VIEWER}
 
 ADMIN_ROLES = Role.ADMIN_ROLES
 MANAGER_ROLES = Role.MANAGER_ROLES
