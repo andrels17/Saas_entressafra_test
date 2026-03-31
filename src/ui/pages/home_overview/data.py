@@ -70,7 +70,6 @@ def load_groups(tenant_id: str, ver: str = "0", token_hash: str = "", _token: st
             .table("equip_grupos")
             .select("id,nome,departamento_id,ativo")
             .eq("tenant_id", tenant_id)
-            .eq("ativo", True)
             .execute()
             .data
         ) or []

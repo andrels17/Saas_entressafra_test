@@ -103,11 +103,15 @@ def enrich_kdf(
     """Enriquece o DataFrame de KPIs com nomes e filtra por escopo."""
     kdf = kdf.copy()
     kdf["grupo_id"] = kdf["grupo_id"].map(lambda v: str(v) if pd.notna(v) and v is not None else None)
+    gid_to_name = {str(k): v for k, v in (gid_to_name or {}).items() if k is not None}
+    gid_to_dept = {str(k): (str(v) if v is not None else None) for k, v in (gid_to_dept or {}).items() if k is not None}
+    dep_scope_ids = None if dep_scope_ids is None else [str(x) for x in dep_scope_ids if x is not None]
+    grp_scope_ids = None if grp_scope_ids is None else [str(x) for x in grp_scope_ids if x is not None]
     kdf["Grupo"] = kdf["grupo_id"].map(gid_to_name).fillna(kdf["grupo_id"].astype(str))
     kdf["departamento_id"] = kdf["grupo_id"].map(gid_to_dept)
     if dep_scope_ids not in (None, []):
         dep_scope_set = {str(x) for x in dep_scope_ids}
-        kdf = kdf[kdf["departamento_id"].map(lambda v: str(v) if pd.notna(v) and v is not None else None).isin(dep_scope_set)].copy()
+        kdf = kdf[kdf["departamento_id"].isin(dep_scope_set)].copy()
     if grp_scope_ids not in (None, []):
         grp_scope_set = {str(x) for x in grp_scope_ids}
         kdf = kdf[kdf["grupo_id"].isin(grp_scope_set)].copy()
