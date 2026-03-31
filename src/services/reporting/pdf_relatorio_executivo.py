@@ -206,8 +206,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     top_atrasados = sorted(deptos, key=lambda d: (
         real_pct_dept(d), -int(d.n_travados or 0), d.nome))[:5]
     top_evolucao = sorted(deptos, key=lambda d: (
-        real_delta_dept(d), real_pct_dept(d)
-    ), reverse=True)[:5]
+        real_delta_dept(d), real_pct_dept(d)), reverse=True)[:5]
 
     alertas_cfg = payload.alertas_parados or {}
     if alertas_cfg:
