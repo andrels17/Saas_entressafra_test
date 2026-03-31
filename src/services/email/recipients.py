@@ -192,7 +192,7 @@ def _fetch_active_departments(svc, tenant_id: str) -> list[dict[str, Any]]:
     return list(by_dep.values()) + sem_dep
 
 
-def _fetch_groups_by_department(svc, tenant_id: str, revisao_id: str) -> dict[str, list[str]]:
+def _fetch_groups_by_department(svc, tenant_id: str: str) -> dict[str, list[str]]:
     """
     Mapeia departamentos → grupos baseado em dados reais da revisão,
     não só no cadastro estrutural.
