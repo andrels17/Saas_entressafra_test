@@ -150,6 +150,37 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     def real_delta_dept(dept: DeptSnapshot) -> int:
         return int(real_pct_dept(dept)) - int(getattr(dept, "pct_anterior", 0) or 0)
 
+
+
+    def _trend_has_meaningful_history(rows: list[dict] | None) -> bool:
+        vals = [int((r or {}).get("pct", 0) or 0) for r in (rows or [])]
+        if len(vals) >= 2 and any(v > 0 for v in vals):
+            return True
+        return False
+
+    def _heatmap_has_meaningful_history(rows: list[dict] | None) -> bool:
+        vals = [int((r or {}).get("pct", 0) or 0) for r in (rows or [])]
+        if len(vals) >= 2 and any(v > 0 for v in vals):
+            return True
+        return False
+
+    def _build_snapshot_trend() -> list[dict]:
+        return [{
+            "semana": max(int(payload.semana_atual or 1), 1),
+            "pct": pct_global_real,
+        }]
+
+    def _build_snapshot_heatmap() -> list[dict]:
+        current_week = max(int(payload.semana_atual or 1), 1)
+        return [
+            {
+                "departamento": d.nome,
+                "semana": current_week,
+                "pct": real_pct_dept(d),
+            }
+            for d in deptos
+        ]
+
     def section_title(txt: str, y: float) -> float:
         c.setFillColor(accent)
         c.rect(16 * mm, y - 0.8 * mm, 3, 5 * mm, fill=1, stroke=0)
@@ -229,15 +260,37 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     )
 
     trend_display = list(payload.trend_semanal or [])
-    if not trend_display:
-        trend_display = [{"semana": max(int(payload.semana_atual or 1), 1), "pct": pct_global_real}]
+    if not _trend_has_meaningful_history(trend_display):
+        trend_display = _build_snapshot_trend()
 
     heatmap_display = list(payload.heatmap_semanal or [])
-    if not heatmap_display:
-        heatmap_display = [
-            {"departamento": d.nome, "semana": max(int(payload.semana_atual or 1), 1), "pct": real_pct_dept(d)}
-            for d in deptos
-        ]
+    if not _heatmap_has_meaningful_history(heatmap_display):
+        heatmap_display = _build_snapshot_heatmap()
+
+    # Quando houver histórico parcial, garante coerência mínima da semana atual:
+    # a última semana exibida nunca deve contradizer o snapshot consolidado atual.
+    try:
+        current_week = max(int(payload.semana_atual or 1), 1)
+        if trend_display:
+            last_idx = max(
+                range(len(trend_display)),
+                key=lambda i: int((trend_display[i] or {}).get("semana", 0) or 0),
+            )
+            trend_display[last_idx]["semana"] = current_week
+            trend_display[last_idx]["pct"] = pct_global_real
+
+        if heatmap_display:
+            by_dept = {(str(r.get("departamento") or ""), int(r.get("semana") or 0)): r for r in heatmap_display}
+            for d in deptos:
+                key = (d.nome, current_week)
+                if key in by_dept:
+                    by_dept[key]["pct"] = real_pct_dept(d)
+                else:
+                    heatmap_display.append(
+                        {"departamento": d.nome, "semana": current_week, "pct": real_pct_dept(d)}
+                    )
+    except Exception:
+        pass
 
     # Página 1
     c.setFillColor(DARK)
@@ -459,7 +512,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         c.setFillColor(MUTED)
         c.setFont('Helvetica', 8)
         c.drawCentredString(16 * mm + (w - 32 * mm) / 2, y - chart_h / 2,
-                            'Sem histórico suficiente de semanas fechadas. Exibindo o snapshot atual.')
+                            'Sem histórico semanal consolidado. Exibindo o snapshot atual.')
     y -= chart_h + 8 * mm
 
     footer()
