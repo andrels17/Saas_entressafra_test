@@ -4,17 +4,12 @@ from src.auth.roles import Role
 
 
 def _norm_role(role: str | Role | None) -> str:
-    if role is None:
-        return ""
-    value = getattr(role, "value", role)
-    value = str(value).strip().lower()
-    if value.startswith("role."):
-        value = value.split(".", 1)[1]
-    return Role.normalize(value)
+    return Role.normalize(role)
 
 
 def can_view_all_data(role: str | Role | None) -> bool:
     norm = _norm_role(role)
+    # Gestor NÃO é irrestrito; respeita vínculo por departamento/grupo.
     return norm in {
         Role.ADMIN.value,
         Role.SUPERVISOR.value,
