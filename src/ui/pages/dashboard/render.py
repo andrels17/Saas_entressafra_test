@@ -93,29 +93,16 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
             start += page_size
         return rows
 
-    # Tenta via RPC SECURITY DEFINER para contornar RLS que bloqueia gestor/supervisor
-    task_rows = []
     try:
-        rpc_tasks = sb.rpc(
-            "get_tarefas_dashboard",
-            {"p_tenant_id": tenant_id, "p_revisao_id": revisao_id}
-        ).execute()
-        task_rows = rpc_tasks.data or []
-    except Exception:
-        pass
-
-    # Fallback: query direta (funciona para admin via RLS)
-    if not task_rows:
-        try:
-            task_rows = _fetch_all(
-                sb.table("tarefas_servico")
-                .select("equipamento_id,servico_id,status,etapa_d,etapa_r,etapa_m,updated_at")
-                .eq("tenant_id", tenant_id)
-                .eq("revisao_id", revisao_id)
-            )
-        except Exception as exc:
-            log_error(exc, context="dashboard._load_base_cached", table="tarefas_servico")
-            task_rows = []
+        task_rows = _fetch_all(
+            sb.table("tarefas_servico")
+            .select("equipamento_id,servico_id,status,etapa_d,etapa_r,etapa_m,updated_at")
+            .eq("tenant_id", tenant_id)
+            .eq("revisao_id", revisao_id)
+        )
+    except Exception as exc:
+        log_error(exc, context="dashboard._load_base_cached", table="tarefas_servico")
+        task_rows = []
 
     # Busca equipamentos via RPC (SECURITY DEFINER) para contornar RLS restritivo.
     # Fallback progressivo: rpc -> table ativo=true -> table all -> IN por tarefa IDs.
