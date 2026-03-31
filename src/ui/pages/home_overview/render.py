@@ -162,12 +162,14 @@ def _fragment_ranking(
                 pct_label = f"{int(round(pct))}%"
                 st.metric("Execução", pct_label)
             with mc2:
+                pend_display = "—" if total <= 0 else pend
                 st.metric(
                     "Setores pend.",
-                    pend,
-                    delta_color="inverse" if pend > 0 else "off")
+                    pend_display,
+                    delta_color="inverse" if (total > 0 and pend > 0) else "off")
             with mc3:
-                st.metric("Setores conc.", f"{concl}/{total}")
+                concl_display = "—" if total <= 0 else f"{concl}/{total}"
+                st.metric("Setores conc.", concl_display)
             st.caption("Setor fecha quando D+R+M ok em todos os equipamentos.")
             if st.button("Abrir na Matriz", key=f"rank_open_{mode}_{gid}",
                          use_container_width=True, type="secondary"):
