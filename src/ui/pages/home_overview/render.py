@@ -42,6 +42,14 @@ from .transforms import (
 )
 
 
+
+def _fmt_int_br(value) -> str:
+    try:
+        return f"{int(pd.to_numeric(value, errors='coerce') or 0):,}".replace(",", ".")
+    except Exception:
+        return "0"
+
+
 # ── Fragment: KPIs principais ───────────────────────────────────────────
 
 @st.fragment
@@ -60,7 +68,7 @@ def _fragment_kpis(
         st.metric(
             "% concluído",
             f"{gk['pct']}%",
-            delta=f"Etapas: {gk['done_steps']:,}/{gk['expected_steps']:,}",
+            delta=f"Etapas: {_fmt_int_br(gk['done_steps'])}/{_fmt_int_br(gk['expected_steps'])}",
             delta_color="off",
             help="Percentual global ponderado por expected_steps de cada grupo.",
         )
@@ -68,7 +76,7 @@ def _fragment_kpis(
         st.metric(
             "Departamentos concluídos",
             f"{dep_done}/{dep_total}",
-            delta=f"Frotas: {cov['eq_done']}/{cov['eq_total']}",
+            delta=f"Frotas: {_fmt_int_br(cov['eq_done'])}/{_fmt_int_br(cov['eq_total'])}",
             delta_color="off",
         )
 
@@ -172,9 +180,9 @@ def _fragment_ranking(
                 pct_label = f"{int(round(pct))}%"
                 st.metric("Execução", pct_label)
             with mc2:
-                st.metric("Equipamentos", eq_count)
+                st.metric("Equipamentos", _fmt_int_br(eq_count))
             with mc3:
-                etapas_display = f"{done_steps:,}/{expected_steps:,}" if expected_steps > 0 else "—"
+                etapas_display = f"{_fmt_int_br(done_steps)}/{_fmt_int_br(expected_steps)}" if expected_steps > 0 else "—"
                 st.metric("Etapas", etapas_display)
             st.caption("Grupo fecha quando D+R+M concluído em todos os equipamentos.")
             if st.button("Abrir na Matriz", key=f"rank_open_{mode}_{gid}",
