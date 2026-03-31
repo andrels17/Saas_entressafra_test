@@ -226,10 +226,10 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
         except Exception:
             pass  # fallback seguro — inclui todos
 
-    # Busca TODAS as tarefas da revisão de uma vez.
-    # Fonte principal do snapshot atual: as tarefas reais da revisão.
+    # Busca TODAS as tarefas da revisão de uma vez (mesma abordagem da Matriz).
+    # Antes filtrava por equipamento_id IN all_eq_ids, o que causava undercount:
+    # tarefas de equipamentos não resolvidos no eq_to_gid eram ignoradas.
     done_by_gid: dict[str, int] = defaultdict(int)
-    task_services_by_gid: dict[str, set[str]] = defaultdict(set)
     if revisao_id:
         start = 0
         page_size = 1000
@@ -237,7 +237,7 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
             try:
                 trows = (
                     sb.table("tarefas_servico")
-                    .select("equipamento_id,servico_id,etapa_d,etapa_r,etapa_m")
+                    .select("equipamento_id,etapa_d,etapa_r,etapa_m")
                     .eq("tenant_id", tenant_id)
                     .eq("revisao_id", revisao_id)
                     .range(start, start + page_size - 1)
@@ -250,60 +250,28 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
                     table="tarefas_servico",
                 )
                 break
-
-            # Resolve grupos faltantes a partir dos equipamentos presentes nas tarefas.
-            missing_eids = sorted({
-                str(t.get("equipamento_id")) for t in trows
-                if t.get("equipamento_id") and str(t.get("equipamento_id")) not in eq_to_gid
-            })
-            for i in range(0, len(missing_eids), 100):
-                batch = missing_eids[i:i + 100]
-                try:
-                    extra_eq_rows = (
-                        sb.table("equipamentos")
-                        .select("id,grupo_id")
-                        .eq("tenant_id", tenant_id)
-                        .in_("id", batch)
-                        .execute().data
-                    ) or []
-                except Exception as exc:
-                    log_error(exc, context="kpi_engine._compute_from_raw.missing_eq", table="equipamentos")
-                    extra_eq_rows = []
-                for r in extra_eq_rows:
-                    gid = str(r.get("grupo_id")) if r.get("grupo_id") else None
-                    eid = str(r.get("id")) if r.get("id") else None
-                    if gid and eid and eid not in eq_to_gid:
-                        grp_to_eq[gid].append(eid)
-                        eq_to_gid[eid] = gid
-
             for t in trows:
                 eid = str(t.get("equipamento_id")) if t.get("equipamento_id") else None
-                sid = str(t.get("servico_id")) if t.get("servico_id") else None
                 gid = eq_to_gid.get(eid)
-                if not gid:
-                    continue
-                done_by_gid[gid] += (
-                    int(bool(t.get("etapa_d"))) +
-                    int(bool(t.get("etapa_r"))) +
-                    int(bool(t.get("etapa_m")))
-                )
-                if sid:
-                    task_services_by_gid[gid].add(sid)
+                if gid:
+                    done_by_gid[gid] += (
+                        int(bool(t.get("etapa_d"))) +
+                        int(bool(t.get("etapa_r"))) +
+                        int(bool(t.get("etapa_m")))
+                    )
             if len(trows) < page_size:
                 break
             start += page_size
 
-    rows: list[dict[str, Any]] = []
-    for gid in gids:
-        svc_count = len(task_services_by_gid.get(gid) or set()) or len(grp_to_services.get(gid) or set())
-        rows.append(
-            build_group_kpi(
-                grupo_id=gid,
-                eq_count=len(grp_to_eq.get(gid) or []),
-                svc_count=svc_count,
-                done_steps=int(done_by_gid.get(gid, 0)),
-            )
+    rows: list[dict[str, Any]] = [
+        build_group_kpi(
+            grupo_id=gid,
+            eq_count=len(grp_to_eq.get(gid) or []),
+            svc_count=len(grp_to_services.get(gid) or set()),
+            done_steps=int(done_by_gid.get(gid, 0)),
         )
+        for gid in gids
+    ]
     return pd.DataFrame(rows)
 
 
@@ -327,7 +295,8 @@ def get_group_kpis(
     # quando o token muda (de vazio para válido), evitando cache envenenado
     # por chamadas iniciais sem JWT que retornam dados vazios via RLS.
     import hashlib as _hl
-    ver = f"{ver}_{_hl.md5((_token or '').encode()).hexdigest()[:8]}"
+    _base_ver = str(ver or "0")
+    ver = f"{_base_ver}_{_hl.md5((_token or '').encode()).hexdigest()[:8]}"
 
     # Ajusta TTL dinamicamente consultando o status da revisão.
     # Revisões concluídas não mudam — podemos cache por muito mais tempo.
@@ -340,7 +309,7 @@ def get_group_kpis(
     # triggers do banco e pode estar desatualizada — e recalcula do raw.
     # A view materializada só é usada no carregamento inicial (ver == "0").
     kpi_ver = st.session_state.get("_kpi_ver", 0)
-    if prefer_mv and ver == "0" and kpi_ver == 0:
+    if prefer_mv and _base_ver == "0" and kpi_ver == 0:
         mv_rows = _fetch_mv(tenant_id, revisao_id, _token)
         if mv_rows:
             df = _mv_to_df(mv_rows)

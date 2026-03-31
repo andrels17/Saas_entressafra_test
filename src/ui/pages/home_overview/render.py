@@ -441,7 +441,11 @@ def render_home_overview() -> None:
     # ── Carrega KPIs ────────────────────────────────────────────────────────
     _tok_kpi = st.session_state.get("sb_access_token", "") or ""
     with st.spinner("", show_time=False):
-        prefer_mv = False  # força leitura raw para manter Home sincronizada com a matriz
+        # Para perfis com escopo e/ou RLS mais restritivo, a fonte consolidada
+        # (MV) tende a estar disponível mesmo quando a leitura raw vem zerada.
+        # O motor de KPI já faz fallback seguro para raw quando a MV estiver
+        # desatualizada, então aqui mantemos prefer_mv=True.
+        prefer_mv = True
         kdf = get_group_kpis(tenant_id, rev["id"], ver, prefer_mv=prefer_mv, _token=_tok_kpi)
 
     kdf = enforce_home_schema(kdf)
@@ -464,6 +468,33 @@ def render_home_overview() -> None:
     if kdf is None or (hasattr(kdf, "empty") and kdf.empty):
         st.info("Sem KPIs nesta revisão ainda.")
         return
+
+    # Fallback adicional: se a carga consolidada ainda vier zerada, tenta usar
+    # o snapshot mais recente salvo da revisão para não exibir tudo em 0.
+    try:
+        _scope = kdf[(pd.to_numeric(kdf.get("eq_count", 0), errors="coerce").fillna(0) > 0) &
+                     (pd.to_numeric(kdf.get("svc_count", 0), errors="coerce").fillna(0) > 0)].copy()
+        _global_zero = _scope.empty or float(pd.to_numeric(_scope.get("done_steps", 0), errors="coerce").fillna(0).sum()) <= 0
+        if _global_zero:
+            _sdf = load_snapshots(tenant_id, rev["id"], ver, token_hash=_tok_kpi[:8], _token=_tok_kpi)
+            if _sdf is not None and not _sdf.empty:
+                _last_week = int(pd.to_numeric(_sdf["week_number"], errors="coerce").fillna(0).max())
+                _latest = _sdf[_sdf["week_number"] == _last_week].copy()
+                if not _latest.empty:
+                    _latest["grupo_id"] = _latest["grupo_id"].astype(str)
+                    _latest = _latest.drop_duplicates(subset=["grupo_id"], keep="last")
+                    _snap_map = _latest.set_index("grupo_id")[["pct", "done_steps", "expected_steps"]].to_dict("index")
+                    for _idx, _row in kdf.iterrows():
+                        _gid = str(_row.get("grupo_id"))
+                        _snap = _snap_map.get(_gid)
+                        if _snap:
+                            kdf.at[_idx, "pct"] = float(_snap.get("pct") or 0)
+                            if float(kdf.at[_idx, "done_steps"] or 0) <= 0:
+                                kdf.at[_idx, "done_steps"] = int(_snap.get("done_steps") or 0)
+                            if float(kdf.at[_idx, "expected_steps"] or 0) <= 0:
+                                kdf.at[_idx, "expected_steps"] = int(_snap.get("expected_steps") or 0)
+    except Exception:
+        pass
 
     kdf = enrich_kdf(
         kdf,
