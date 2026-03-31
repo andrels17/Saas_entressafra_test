@@ -135,8 +135,12 @@ def _load_tarefas(
         return []
 
     if _tarefas_index is not None:
-        # _tarefas_index is now keyed by equipamento_id (not grupo_id)
-        # Return ALL tasks - caller filters by eid via eid_to_info
+        # _tarefas_index é indexado por equipamento_id.
+        # Retorna todas as tarefas — o filtro real por grupo_id acontece
+        # dentro de _build_dashboard_base via eq_map (que é restrito aos
+        # grupo_ids do departamento). Retornar tudo é seguro porque
+        # _build_dashboard_base ignora tarefas cujo equipamento_id não
+        # está em eq_map, que só contém equipamentos dos grupos alvo.
         out: list[dict] = []
         for tasks in _tarefas_index.values():
             out.extend(tasks)
@@ -564,10 +568,25 @@ def _build_payload(
         cumulative_done += semana_done_steps.get(sem, 0)
         cumulative_expected += expected_por_semana
         cumulative_expected = min(cumulative_expected, total_expected)
-        pct_sem = max(0, min(100, round(cumulative_done / max(cumulative_expected, 1) * 100)))
+        # Quando total_expected=0 (base vazia / sem template configurado),
+        # usa overall.pct como fallback para não zerar o progresso real.
+        if total_expected > 0:
+            pct_sem = max(0, min(100, round(cumulative_done / max(cumulative_expected, 1) * 100)))
+        else:
+            pct_sem = int(round(overall.get("pct", 0)))
         evolucao.append(SemanaSnapshot(semana=sem, concluidos=cumulative_done, total=cumulative_expected, pct=pct_sem))
 
+    # Se a evolução calculou tudo 0 mas overall tem progresso real, usa overall como âncora
     pct_semana_atual = evolucao[-1].pct if evolucao else int(round(overall.get("pct", 0)))
+    if pct_semana_atual == 0 and overall.get("pct", 0) > 0:
+        pct_semana_atual = int(round(overall.get("pct", 0)))
+        if evolucao:
+            evolucao[-1] = SemanaSnapshot(
+                semana=evolucao[-1].semana,
+                concluidos=evolucao[-1].concluidos,
+                total=evolucao[-1].total,
+                pct=pct_semana_atual,
+            )
     pct_semana_anterior = evolucao[-2].pct if len(evolucao) >= 2 else 0
 
     all_equipamentos: list[dict] = []
@@ -678,7 +697,11 @@ def _build_payload(
         semana_atual=semana_atual,
         semanas_total=semanas_total,
         data_inicio=data_inicio,
-        pct_geral=int(round(overall.get("pct", 0))),
+        # Usa pct_semana_atual (calculado por etapas done/expected) para
+        # manter consistência com o comparativo na capa do relatório semanal.
+        # overall.pct retorna 0% quando a base está vazia (nenhum apontamento),
+        # gerando a divergência "Progresso geral 0% / Semana atual 55%".
+        pct_geral=pct_semana_atual,
         n_equipamentos=int(len(eq_prog)) if not eq_prog.empty else 0,
         n_concluidos=n_concluidos,
         n_alertas_total=n_alertas_total,
@@ -966,7 +989,10 @@ def dispatch_relatorio_semanal(
 
                     dept_snapshots.append(DeptSnapshot(
                         nome=grp.departamento_nome,
-                        pct_geral=p.pct_geral,
+                        # pct_semana_atual usa cálculo por etapas (done/expected),
+                        # alinhado com o heatmap e a tendência semanal.
+                        # pct_geral ficaria 0% quando a base está vazia (sem apontamentos).
+                        pct_geral=p.pct_semana_atual,
                         pct_anterior=p.pct_semana_anterior,
                         n_equipamentos=p.n_equipamentos,
                         n_concluidos=p.n_concluidos,
@@ -982,19 +1008,32 @@ def dispatch_relatorio_semanal(
                         _expected_steps=p.expected_steps,
                     ))
 
-                    for wk in (p.evolucao or []):
+                    # Acumula trend e monta heatmap usando pct INCREMENTAL por semana.
+                    # wk.pct é cumulativo (semanas 1..N); para o heatmap queremos
+                    # o progresso *daquela* semana isolada, calculado pelo delta
+                    # done/total entre semanas consecutivas.
+                    evolucao_sorted = sorted(p.evolucao or [], key=lambda w: getattr(w, "semana", 0))
+                    prev_done = 0
+                    for wk in evolucao_sorted:
                         sem = int(getattr(wk, "semana", 0) or 0)
                         if sem <= 0:
                             continue
-                        acc = trend_acc.setdefault(
-                            sem, {"done": 0, "total": 0})
-                        acc["done"] += int(getattr(wk, "concluidos", 0) or 0)
-                        acc["total"] += int(getattr(wk, "total", 0) or 0)
+                        wk_done = int(getattr(wk, "concluidos", 0) or 0)
+                        wk_total = int(getattr(wk, "total", 0) or 0)
+                        acc = trend_acc.setdefault(sem, {"done": 0, "total": 0})
+                        acc["done"] += wk_done
+                        acc["total"] += wk_total
+                        # pct incremental: etapas feitas *nessa semana* / total esperado
+                        delta_done = wk_done - prev_done
+                        pct_incremental = max(0, min(100, round(
+                            delta_done / max(wk_total, 1) * 100
+                        ))) if wk_total > 0 else int(getattr(wk, "pct", 0) or 0)
                         heatmap_semanal.append({
                             "departamento": grp.departamento_nome,
                             "semana": sem,
-                            "pct": int(getattr(wk, "pct", 0) or 0),
+                            "pct": pct_incremental,
                         })
+                        prev_done = wk_done
 
                     for par in (p.parados_detalhe or []):
                         dias = int(par.get("dias_parado") or 0)
