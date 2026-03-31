@@ -95,25 +95,41 @@ def _load_tarefas_all(
     Não usa JOIN com equipamentos para evitar bloqueio de RLS scope-restritivo.
     A resolução grupo_id é feita em build_dept_payload via eid_to_info (RPC).
     Retorna: {equipamento_id: [tarefa, ...]}
+
+    Usa paginação para contornar o limite padrão de 1000 linhas do Supabase.
+    Sem isso, revisões com muitos equipamentos × serviços retornam tarefas
+    incompletas, fazendo com que equipamentos com etapa_d/r/m = True apareçam
+    como 0% no PDF (mesmo que o kpi_engine — que também pagina — mostre o
+    percentual correto no cabeçalho do grupo).
     """
-    rows = _with_fallback(
-        lambda: (
-            sb.table("tarefas_servico")
-            .select(
-                "id,equipamento_id,servico_id,status,semana,"
-                "etapa_d,etapa_r,etapa_m,observacao,updated_at,"
-                "dt_etapa_d,dt_etapa_r,dt_etapa_m"
-            )
-            .eq("tenant_id", tenant_id)
-            .eq("revisao_id", revisao_id)
-            .execute()
-            .data
-        ) or [],
-        [],
-        context=f"Erro ao pré-carregar tarefas da revisão {revisao_id}",
-    )
+    all_rows: list[dict] = []
+    page_size = 1000
+    start = 0
+    while True:
+        rows = _with_fallback(
+            lambda s=start: (
+                sb.table("tarefas_servico")
+                .select(
+                    "id,equipamento_id,servico_id,status,semana,"
+                    "etapa_d,etapa_r,etapa_m,observacao,updated_at,"
+                    "dt_etapa_d,dt_etapa_r,dt_etapa_m"
+                )
+                .eq("tenant_id", tenant_id)
+                .eq("revisao_id", revisao_id)
+                .range(s, s + page_size - 1)
+                .execute()
+                .data
+            ) or [],
+            [],
+            context=f"Erro ao pré-carregar tarefas da revisão {revisao_id} (pág {start // page_size})",
+        )
+        all_rows.extend(rows)
+        if len(rows) < page_size:
+            break
+        start += page_size
+
     index: dict[str, list[dict]] = {}
-    for t in rows:
+    for t in all_rows:
         eid = t.get("equipamento_id")
         if eid:
             index.setdefault(str(eid), []).append(t)
@@ -146,23 +162,32 @@ def _load_tarefas(
             out.extend(tasks)
         return out
 
-    # Fallback: query direta sem JOIN (evita RLS em equipamentos)
-    rows = _with_fallback(
-        lambda: (
-            sb.table("tarefas_servico")
-            .select(
-                "id,equipamento_id,servico_id,status,semana,"
-                "etapa_d,etapa_r,etapa_m,observacao,updated_at,"
-                "dt_etapa_d,dt_etapa_r,dt_etapa_m"
-            )
-            .eq("tenant_id", tenant_id)
-            .eq("revisao_id", revisao_id)
-            .execute()
-            .data
-        ) or [],
-        [],
-        context=f"Erro ao carregar tarefas da revisão {revisao_id}",
-    )
+    # Fallback: query direta sem JOIN (evita RLS em equipamentos) — paginada
+    rows: list[dict] = []
+    _page_size = 1000
+    _start = 0
+    while True:
+        _page = _with_fallback(
+            lambda s=_start: (
+                sb.table("tarefas_servico")
+                .select(
+                    "id,equipamento_id,servico_id,status,semana,"
+                    "etapa_d,etapa_r,etapa_m,observacao,updated_at,"
+                    "dt_etapa_d,dt_etapa_r,dt_etapa_m"
+                )
+                .eq("tenant_id", tenant_id)
+                .eq("revisao_id", revisao_id)
+                .range(s, s + _page_size - 1)
+                .execute()
+                .data
+            ) or [],
+            [],
+            context=f"Erro ao carregar tarefas da revisão {revisao_id} (pág {_start // _page_size})",
+        )
+        rows.extend(_page)
+        if len(_page) < _page_size:
+            break
+        _start += _page_size
     return rows
 
 
@@ -365,20 +390,29 @@ def _build_dashboard_base(
     if not grupo_ids:
         return pd.DataFrame(), []
 
-    # Tarefas flat da revisão
+    # Tarefas flat da revisão — paginadas para não truncar em 1000 linhas
     if tarefas is None:
-        tarefas = _with_fallback(
-            lambda: (
-                sb.table("tarefas_servico")
-                .select("equipamento_id,servico_id,status,etapa_d,etapa_r,etapa_m,updated_at")
-                .eq("tenant_id", tenant_id)
-                .eq("revisao_id", revisao_id)
-                .execute()
-                .data
-            ) or [],
-            [],
-            context=f"Erro ao carregar tarefas base da revisão {revisao_id}",
-        )
+        tarefas = []
+        _page_size = 1000
+        _start = 0
+        while True:
+            _page = _with_fallback(
+                lambda s=_start: (
+                    sb.table("tarefas_servico")
+                    .select("equipamento_id,servico_id,status,etapa_d,etapa_r,etapa_m,updated_at")
+                    .eq("tenant_id", tenant_id)
+                    .eq("revisao_id", revisao_id)
+                    .range(s, s + _page_size - 1)
+                    .execute()
+                    .data
+                ) or [],
+                [],
+                context=f"Erro ao carregar tarefas base da revisão {revisao_id} (pág {_start // _page_size})",
+            )
+            tarefas.extend(_page)
+            if len(_page) < _page_size:
+                break
+            _start += _page_size
 
     # Equipamentos dos grupos alvo
     eq_por_grupo = _load_equipamentos_ativos(sb, tenant_id, grupo_ids)
