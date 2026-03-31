@@ -101,6 +101,14 @@ def _hex(h: str) -> colors.Color:
 
 
 
+def _real_pct_dept_snapshot(dept: DeptSnapshot) -> int:
+    expected = int(getattr(dept, "_expected_steps", 0) or 0)
+    done = int(getattr(dept, "_done_steps", 0) or 0)
+    if expected > 0:
+        return max(0, min(100, int(round(done / expected * 100))))
+    return max(0, min(100, int(getattr(dept, "pct_geral", 0) or 0)))
+
+
 def _normalize_exec_history(payload: RelatorioExecutivoPayload, deptos: list[DeptSnapshot], pct_global_real: int) -> tuple[list[dict], list[dict]]:
     """Garante que a semana atual da tendência e do heatmap reflita o snapshot real."""
     sem_atual = max(int(payload.semana_atual or 1), 1)
@@ -121,9 +129,9 @@ def _normalize_exec_history(payload: RelatorioExecutivoPayload, deptos: list[Dep
     for d in deptos:
         key = (d.nome, sem_atual)
         if key in current:
-            current[key]['pct'] = real_pct_dept(d)
+            current[key]['pct'] = _real_pct_dept_snapshot(d)
         else:
-            heatmap_display.append({'departamento': d.nome, 'semana': sem_atual, 'pct': real_pct_dept(d)})
+            heatmap_display.append({'departamento': d.nome, 'semana': sem_atual, 'pct': _real_pct_dept_snapshot(d)})
     return trend_display, heatmap_display
 
 def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
@@ -215,11 +223,11 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         return y_top - card_h - 6 * mm
 
     deptos = sorted(payload.departamentos,
-                    key=lambda d: (-real_pct_dept(d), d.nome))
+                    key=lambda d: (-_real_pct_dept_snapshot(d), d.nome))
     n_deptos = len(deptos)
-    n_verde = sum(1 for d in deptos if real_pct_dept(d) >= 80)
-    n_amarelo = sum(1 for d in deptos if 50 <= real_pct_dept(d) < 80)
-    n_vermelho = sum(1 for d in deptos if real_pct_dept(d) < 50)
+    n_verde = sum(1 for d in deptos if _real_pct_dept_snapshot(d) >= 80)
+    n_amarelo = sum(1 for d in deptos if 50 <= _real_pct_dept_snapshot(d) < 80)
+    n_vermelho = sum(1 for d in deptos if _real_pct_dept_snapshot(d) < 50)
     total_parados = sum(int(getattr(d, 'n_parados', 0) or 0) for d in deptos)
     deptos_com_parados = [
         d for d in deptos if int(
@@ -230,9 +238,9 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     maior_dias = max([int(getattr(d, 'max_dias_parado', 0) or 0)
                      for d in deptos] or [0])
     top_atrasados = sorted(deptos, key=lambda d: (
-        real_pct_dept(d), -int(d.n_travados or 0), d.nome))[:5]
+        _real_pct_dept_snapshot(d), -int(d.n_travados or 0), d.nome))[:5]
     top_evolucao = sorted(deptos, key=lambda d: (
-        real_delta_dept(d), real_pct_dept(d)), reverse=True)[:5]
+        real_delta_dept(d), _real_pct_dept_snapshot(d)), reverse=True)[:5]
 
     alertas_cfg = payload.alertas_parados or {}
     if alertas_cfg:
@@ -385,7 +393,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         c.drawString(x + 4, y_top - 5.4 * mm, title)
         ry = y_top - 13 * mm
         for idx, d in enumerate(items[:5], start=1):
-            pct = real_pct_dept(d)
+            pct = _real_pct_dept_snapshot(d)
             delta = pct - int(d.pct_anterior or 0)
             c.setFillColor(MUTED)
             c.setFont('Helvetica', 7)
