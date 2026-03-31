@@ -126,7 +126,7 @@ def _fragment_ranking(
                               ascending=[True, True]).head(5)
 
     a, b = st.columns(2)
-    sector_map = load_group_sector_view(tenant_id, revisao_id, ver, _token=st.session_state.get("sb_access_token", "") or "")
+    sector_map = load_group_sector_view(tenant_id, revisao_id, ver, token_hash=st.session_state.get("_tok_hash_cache", ""), _token=st.session_state.get("sb_access_token", "") or "")
 
     def _render_grupo_card(row: dict, mode: str) -> None:
         gid = row.get("grupo_id")
@@ -243,7 +243,9 @@ def _fragment_tendencia(
     scope: pd.DataFrame,
 ) -> None:
     _tok = st.session_state.get("sb_access_token", "") or ""
-    if not snapshots_supported(tenant_id, ver, _token=_tok):
+    import hashlib as _hl2
+    _tok_hash = _hl2.md5(_tok.encode()).hexdigest()[:8]
+    if not snapshots_supported(tenant_id, ver, token_hash=_tok_hash, _token=_tok):
         empty_message(
             "Tabela **kpi_snapshots** não encontrada.",
             "Rode o SQL de próximos passos para habilitar tendência semanal.",
@@ -260,7 +262,7 @@ def _fragment_tendencia(
         else:
             st.error(f"Falha: {msg}")
 
-    sdf = load_snapshots(tenant_id, revisao_id, ver, _token=_tok)
+    sdf = load_snapshots(tenant_id, revisao_id, ver, token_hash=_tok_hash, _token=_tok)
     if sdf.empty:
         empty_message("Ainda não há snapshots salvos para esta revisão.")
         return
@@ -340,7 +342,7 @@ def render_home_overview() -> None:
 
     ver = str(st.session_state.get("data_version", "0"))
     _tok = st.session_state.get("sb_access_token", "") or ""
-    rev = load_revision(tenant_id, ver, get_current_revisao(), _token=_tok)
+    rev = load_revision(tenant_id, ver, get_current_revisao(), token_hash=_tok_hash, _token=_tok)
     if not rev:
         st.warning("Nenhuma revisão encontrada para este tenant.")
         return
@@ -356,6 +358,7 @@ def render_home_overview() -> None:
         st.session_state["_sidebar_rev_semana"] = week
     from src.ui.pages.home_overview.data import _token_hash
     _tok_hash = _token_hash(_tok)
+    st.session_state["_tok_hash_cache"] = _tok_hash
     grupos = load_groups(tenant_id, ver, token_hash=_tok_hash, _token=_tok)
     deps = load_depts(tenant_id, ver, token_hash=_tok_hash, _token=_tok)
     gid_to_name = {g["id"]: (g.get("nome") or "—")
