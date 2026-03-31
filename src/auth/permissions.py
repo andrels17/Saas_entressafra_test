@@ -6,13 +6,11 @@ from src.auth.roles import Role
 def _norm_role(role: str | Role | None) -> str:
     if role is None:
         return ""
-    # Suporta Enum Role, strings simples ("admin") e representações acidentais
-    # como "Role.ADMIN".
     value = getattr(role, "value", role)
     value = str(value).strip().lower()
     if value.startswith("role."):
         value = value.split(".", 1)[1]
-    return value
+    return Role.normalize(value)
 
 
 def can_view_all_data(role: str | Role | None) -> bool:
@@ -21,7 +19,6 @@ def can_view_all_data(role: str | Role | None) -> bool:
         Role.ADMIN.value,
         Role.SUPERVISOR.value,
         Role.SUPERADMIN.value,
-        Role.MANAGER.value,  # gestor também tem visão irrestrita por departamento
     }
 
 
