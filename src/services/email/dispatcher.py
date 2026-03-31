@@ -498,64 +498,6 @@ def _build_dashboard_base(
 
 
 
-def _calc_snapshot_from_kpi_engine(
-    sb,
-    tenant_id: str,
-    revisao_id: str,
-    grupo_ids: list[str],
-) -> dict[str, int]:
-    """Calcula o snapshot do departamento pela mesma base consolidada da Home.
-
-    Isso evita divergência entre e-mail e dashboard quando a leitura detalhada
-    por tarefas/base estrutural sofre variações de escopo ou timing.
-    """
-    try:
-        from src.utils.kpi_engine import get_group_kpis
-        from src.ui.pages.home_overview.transforms import enforce_home_schema
-    except Exception as exc:
-        log.warning("KPI engine indisponível para snapshot consolidado: %s", exc)
-        return {"pct": 0, "done_steps": 0, "expected_steps": 0, "eq_count": 0}
-
-    try:
-        kdf = get_group_kpis(tenant_id, revisao_id, "0", prefer_mv=True, _token="")
-        kdf = enforce_home_schema(kdf)
-    except Exception as exc:
-        log.warning("Falha ao carregar KPIs consolidados para e-mail: %s", exc)
-        return {"pct": 0, "done_steps": 0, "expected_steps": 0, "eq_count": 0}
-
-    if kdf is None or getattr(kdf, "empty", True):
-        return {"pct": 0, "done_steps": 0, "expected_steps": 0, "eq_count": 0}
-
-    gids = {str(g) for g in (grupo_ids or []) if g}
-    if not gids:
-        return {"pct": 0, "done_steps": 0, "expected_steps": 0, "eq_count": 0}
-
-    kdf = kdf.copy()
-    if "grupo_id" not in kdf.columns:
-        return {"pct": 0, "done_steps": 0, "expected_steps": 0, "eq_count": 0}
-
-    kdf["grupo_id"] = kdf["grupo_id"].astype(str)
-    scope = kdf[kdf["grupo_id"].isin(gids)].copy()
-    if scope.empty:
-        return {"pct": 0, "done_steps": 0, "expected_steps": 0, "eq_count": 0}
-
-    done_steps = int(pd.to_numeric(scope.get("done_steps", 0), errors="coerce").fillna(0).sum())
-    expected_steps = int(pd.to_numeric(scope.get("expected_steps", 0), errors="coerce").fillna(0).sum())
-    eq_count = int(pd.to_numeric(scope.get("eq_count", 0), errors="coerce").fillna(0).sum())
-
-    if expected_steps > 0:
-        pct = max(0, min(100, round(done_steps / expected_steps * 100)))
-    else:
-        pct = int(round(pd.to_numeric(scope.get("pct", 0), errors="coerce").fillna(0).mean())) if not scope.empty else 0
-
-    return {
-        "pct": pct,
-        "done_steps": done_steps,
-        "expected_steps": expected_steps,
-        "eq_count": eq_count,
-    }
-
-
 # ── Construção do payload ───────────────────────────────────────────────
 
 def _build_payload(
@@ -570,7 +512,6 @@ def _build_payload(
     grupo_ids: list[str],
     dias_travado: int = 2,
     dias_sem_update: int = 5,
-    snapshot_kpi: dict | None = None,
 ):
     from src.services.reporting.pdf_relatorio_semanal import (
         RelatorioDeptPayload, SemanaSnapshot, EquipamentoCritico,
@@ -605,13 +546,6 @@ def _build_payload(
         "pct": 0.0, "total": 0, "concl": 0, "pend": 0, "andamento": 0, "trav": 0, "na": 0
     }
 
-    # Snapshot consolidado: prioriza a mesma fonte da Home/Dashboard.
-    snapshot_kpi = snapshot_kpi or {}
-    snap_pct = int(snapshot_kpi.get("pct") or 0)
-    snap_done_steps = int(snapshot_kpi.get("done_steps") or 0)
-    snap_expected_steps = int(snapshot_kpi.get("expected_steps") or 0)
-    snap_eq_count = int(snapshot_kpi.get("eq_count") or 0)
-
     # Mapa de tarefas por equipamento para evolução/alertas detalhados
     eq_tasks: dict[str, list[dict]] = {}
     for t in tarefas or []:
@@ -628,8 +562,7 @@ def _build_payload(
             continue
         semana_done_steps[sem] = semana_done_steps.get(sem, 0) + _sum_done_steps(t)
 
-    total_expected_raw = int(eq_prog.get("expected_steps", pd.Series(dtype=float)).sum()) if not eq_prog.empty else 0
-    total_expected = snap_expected_steps if snap_expected_steps > 0 else total_expected_raw
+    total_expected = int(eq_prog.get("expected_steps", pd.Series(dtype=float)).sum()) if not eq_prog.empty else 0
     expected_por_semana = round(total_expected / max(semanas_total, 1)) if total_expected > 0 else 0
     cumulative_done = 0
     cumulative_expected = 0
@@ -645,7 +578,7 @@ def _build_payload(
             pct_sem = int(round(overall.get("pct", 0)))
         evolucao.append(SemanaSnapshot(semana=sem, concluidos=cumulative_done, total=cumulative_expected, pct=pct_sem))
 
-    pct_geral_snapshot = snap_pct if snap_pct > 0 else int(round(overall.get("pct", 0)))
+    pct_geral_snapshot = int(round(overall.get("pct", 0)))
     # A evolução semanal é apenas complementar. Quando a revisão ainda está no
     # início e a coluna semana está vazia, o snapshot atual precisa continuar
     # vindo do cálculo real por etapas da base consolidada.
@@ -772,10 +705,10 @@ def _build_payload(
         # Snapshot atual do departamento: sempre usa a base consolidada real
         # da revisão, independentemente de haver semana preenchida.
         pct_geral=pct_geral_snapshot,
-        n_equipamentos=snap_eq_count if snap_eq_count > 0 else (int(len(eq_prog)) if not eq_prog.empty else 0),
+        n_equipamentos=int(len(eq_prog)) if not eq_prog.empty else 0,
         n_concluidos=n_concluidos,
         n_alertas_total=n_alertas_total,
-        done_steps=snap_done_steps if snap_done_steps > 0 else (int(eq_prog.get("done_steps", pd.Series(dtype=float)).sum()) if not eq_prog.empty else 0),
+        done_steps=int(eq_prog.get("done_steps", pd.Series(dtype=float)).sum()) if not eq_prog.empty else 0,
         expected_steps=total_expected,
         evolucao=evolucao,
         pct_semana_anterior=pct_semana_anterior,
@@ -892,9 +825,6 @@ def dispatch_relatorio_semanal(
             # Não pula departamentos sem tarefas — podem ter equipamentos com
             # 0% ainda sem início
 
-            snapshot_kpi = _calc_snapshot_from_kpi_engine(
-                sb, tenant_id, revisao_id, grp.grupo_ids
-            )
             payload, eq_list = _build_payload(
                 tarefas=tarefas,
                 revisao=revisao,
@@ -906,7 +836,6 @@ def dispatch_relatorio_semanal(
                 grupo_ids=grp.grupo_ids,
                 dias_travado=dias_travado,
                 dias_sem_update=dias_sem_update,
-                snapshot_kpi=snapshot_kpi,
             )
             pdf_bytes = build_weekly_pdf(payload)
             pdf_name = (
@@ -1024,9 +953,6 @@ def dispatch_relatorio_semanal(
 
             for grp in all_dept_groups:  # TODOS os deptos, não só os com gestores
                 try:
-                    snapshot_kpi = _calc_snapshot_from_kpi_engine(
-                        sb, tenant_id, revisao_id, grp.grupo_ids
-                    )
                     p, eq_list_g = _build_payload(
                         tarefas=tarefas_all,
                         revisao=revisao,
@@ -1038,7 +964,6 @@ def dispatch_relatorio_semanal(
                         grupo_ids=grp.grupo_ids,
                         dias_travado=dias_travado,
                         dias_sem_update=dias_sem_update,
-                        snapshot_kpi=snapshot_kpi,
                     )
 
                     # Só entra no executivo se o departamento realmente tiver
@@ -1052,17 +977,43 @@ def dispatch_relatorio_semanal(
                     if not any(int(e.get("total_steps", 0) or 0) > 0 for e in todos):
                         continue
 
+                    candidatos_validos = [
+                        e for e in todos
+                        if int(e.get("total_steps", 0) or 0) > 0
+                    ]
+
                     top_criticos = sorted(
-                        [e for e in todos if e.get("pct", 0) < 100],
-                        key=lambda e: e.get("pct", 0)
+                        [
+                            e for e in candidatos_validos
+                            if int(e.get("pct", 0) or 0) < 100
+                        ],
+                        key=lambda e: (
+                            int(e.get("pct", 0) or 0),
+                            str(e.get("frota") or "")
+                        )
                     )[:3]
+
                     top_melhores = sorted(
-                        [e for e in todos if e.get("pct", 0) < 100],
-                        key=lambda e: -e.get("pct", 0)
+                        [
+                            e for e in candidatos_validos
+                            if 0 < int(e.get("pct", 0) or 0) < 100
+                        ],
+                        key=lambda e: (
+                            -int(e.get("pct", 0) or 0),
+                            str(e.get("frota") or "")
+                        )
                     )[:3]
+
                     maiores_evolucoes = sorted(
-                        [e for e in todos if e.get("pct", 0) - int(e.get("pct_anterior", 0)) > 0],
-                        key=lambda e: -(e.get("pct", 0) - int(e.get("pct_anterior", 0)))
+                        [
+                            e for e in candidatos_validos
+                            if (int(e.get("pct", 0) or 0) - int(e.get("pct_anterior", 0) or 0)) > 0
+                        ],
+                        key=lambda e: (
+                            -(int(e.get("pct", 0) or 0) - int(e.get("pct_anterior", 0) or 0)),
+                            -int(e.get("pct", 0) or 0),
+                            str(e.get("frota") or "")
+                        )
                     )[:3]
 
                     dept_snapshots.append(DeptSnapshot(
