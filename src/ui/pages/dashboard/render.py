@@ -116,6 +116,8 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
     except Exception:
         pass
 
+    # Fallbacks sem departamento_id (coluna não existe em equipamentos;
+    # vem do equip_grupos via JOIN na função RPC acima).
     if not eq_rows:
         try:
             eq_rows = _fetch_all(
@@ -137,27 +139,26 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
         except Exception as exc:
             log_error(exc, context="dashboard._load_base_cached.no_ativo", table="equipamentos")
 
-    # Garante resolução dos equipamentos que já possuem tarefas na revisão,
-    # mesmo quando a RPC/fallback principal não retornar todos eles.
-    task_eq_ids = [str(t.get("equipamento_id")) for t in task_rows if t.get("equipamento_id")]
-    missing_eq_ids = [eid for eid in sorted(set(task_eq_ids)) if eid not in {str(r.get("id")) for r in eq_rows if r.get("id")}]
-    for i in range(0, len(missing_eq_ids), 100):
-        batch = missing_eq_ids[i:i + 100]
-        try:
-            chunk = (
-                sb.table("equipamentos")
-                .select("id,frota,modelo,grupo_id")
-                .eq("tenant_id", tenant_id)
-                .in_("id", batch)
-                .execute()
-                .data or []
-            )
-            eq_rows.extend(chunk)
-        except Exception as exc:
-            log_error(exc, context="dashboard._load_base_cached.fallback_in", table="equipamentos")
+    if not eq_rows and task_rows:
+        eq_ids = list({str(t["equipamento_id"]) for t in task_rows if t.get("equipamento_id")})
+        for i in range(0, len(eq_ids), 100):
+            batch = eq_ids[i:i + 100]
+            try:
+                chunk = (
+                    sb.table("equipamentos")
+                    .select("id,frota,modelo,grupo_id")
+                    .in_("id", batch)
+                    .execute()
+                    .data or []
+                )
+                eq_rows.extend(chunk)
+            except Exception as exc:
+                log_error(exc, context="dashboard._load_base_cached.fallback_in",
+                          table="equipamentos")
 
     # Busca TODOS os grupos (sem filtro ativo) para garantir resolução de
     # grupo_nome e departamento_id de equipamentos vinculados a grupos inativos.
+    # 95 equipamentos apontam para grupos com ativo=False neste tenant.
     try:
         grupo_rows = _fetch_all(
             sb.table("equip_grupos")
@@ -222,20 +223,17 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
         merged["updated_at"] = cur.get("updated_at") if cur_upd >= prev_upd else prev.get("updated_at")
         return merged
 
-    # Fonte principal: tarefas reais da revisão, já enriquecidas com grupo/departamento.
+    raw_tasks = []
     task_map: dict[tuple[str, str], dict] = {}
-    eqs_with_task: set[str] = set()
     for t in task_rows:
         eid = str(t.get("equipamento_id")) if t.get("equipamento_id") is not None else None
         sid = str(t.get("servico_id")) if t.get("servico_id") is not None else None
-        if not eid or not sid:
-            continue
         eq = eq_map.get(eid, {})
         gid = eq.get("grupo_id")
         gid_s = str(gid) if gid is not None else None
         grp = grupo_map.get(gid_s, {})
         svc = serv_map.get(sid, {})
-        enriched = {
+        raw_tasks.append({
             "equipamento_id": t.get("equipamento_id"),
             "grupo_id": gid,
             "grupo_nome": grp.get("nome"),
@@ -244,14 +242,14 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
             "modelo": eq.get("modelo"),
             "servico_id": t.get("servico_id"),
             "setor_nome": svc.get("setor") or "—",
-            "status": t.get("status") or "pendente",
+            "status": t.get("status"),
             "etapa_d": t.get("etapa_d"),
             "etapa_r": t.get("etapa_r"),
             "etapa_m": t.get("etapa_m"),
             "updated_at": t.get("updated_at"),
-        }
-        task_map[(eid, sid)] = _merge_task(task_map.get((eid, sid)), enriched)
-        eqs_with_task.add(eid)
+        })
+        if eid and sid and eid in eq_map:
+            task_map[(eid, sid)] = _merge_task(task_map.get((eid, sid)), t)
 
     group_services: dict[str, list[str]] = {}
     for row in grupo_servicos_rows:
@@ -265,21 +263,25 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
         if sid_s not in group_services[gid_s]:
             group_services[gid_s].append(sid_s)
 
-    raw = list(task_map.values())
+    # IDs de equipamentos que já possuem vínculo via grupo_servicos
+    eids_covered: set[str] = set()
 
-    # Fallback estrutural: só monta linhas de template para equipamentos que
-    # ainda não possuem nenhuma tarefa na revisão.
+    raw = []
     for eid, eq in eq_map.items():
-        if eid in eqs_with_task:
-            continue
         gid = eq.get("grupo_id")
         gid_s = str(gid) if gid is not None else None
         if not gid_s:
             continue
         grp = grupo_map.get(gid_s, {})
         service_ids = group_services.get(gid_s, [])
+        if not service_ids:
+            # Sem vínculo em grupo_servicos: equipamento será coberto pelo
+            # fallback por tarefa direta abaixo, se houver tarefas.
+            continue
+        eids_covered.add(eid)
         for sid in service_ids:
             svc = serv_map.get(str(sid), {})
+            t = task_map.get((eid, str(sid)), {})
             raw.append({
                 "equipamento_id": eq.get("id"),
                 "grupo_id": gid,
@@ -289,24 +291,34 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
                 "modelo": eq.get("modelo"),
                 "servico_id": sid,
                 "setor_nome": svc.get("setor") or "—",
-                "status": "pendente",
-                "etapa_d": False,
-                "etapa_r": False,
-                "etapa_m": False,
-                "updated_at": None,
+                "status": t.get("status") or "pendente",
+                "etapa_d": t.get("etapa_d"),
+                "etapa_r": t.get("etapa_r"),
+                "etapa_m": t.get("etapa_m"),
+                "updated_at": t.get("updated_at"),
             })
 
-    eq_meta = []
-    for r in eq_rows:
-        gid = r.get("grupo_id")
-        gid_s = str(gid) if gid is not None else None
-        grp = grupo_map.get(gid_s, {})
-        eq_meta.append({
+    # Fallback granular: para equipamentos sem cobertura via grupo_servicos
+    # (grupo sem serviços vinculados), usa as tarefas diretas da revisão.
+    # Isso evita que equipamentos com movimentações desapareçam do dashboard
+    # quando a tabela grupo_servicos estiver desatualizada ou incompleta.
+    fallback_tasks = [t for t in raw_tasks if str(t.get("equipamento_id") or "") not in eids_covered]
+    if fallback_tasks:
+        raw.extend(fallback_tasks)
+
+    # Fallback total: se nenhuma grade pôde ser montada, usa todas as tarefas.
+    if not raw and raw_tasks:
+        raw = raw_tasks
+
+    eq_meta = [
+        {
             "equipamento_id": r.get("id"),
             "frota": r.get("frota"),
             "modelo": r.get("modelo"),
-            "departamento_id": r.get("departamento_id") or grp.get("departamento_id"),
-        })
+            "departamento_id": r.get("departamento_id"),
+        }
+        for r in eq_rows
+    ]
     return raw, eq_meta
 
 
@@ -446,6 +458,57 @@ def _fragment_kpis_globais(overall: dict) -> None:
                 delta_color=delta_color,
                 help=help_text)
 
+
+
+
+def _group_kpis_to_dashboard_df(kdf: pd.DataFrame, gid_to_name: dict, gid_to_dept: dict) -> pd.DataFrame:
+    """Converte GroupKPI (kpi_engine) para o formato usado pelo dashboard.
+
+    Usado como fallback quando a base detalhada do dashboard vier zerada por
+    RLS em tarefas_servico para perfis gestor/scope-restricted, mas a MV/RPC de
+    KPI já possuir os totais corretos por grupo.
+    """
+    if kdf is None or getattr(kdf, "empty", True):
+        return pd.DataFrame(columns=[
+            "grupo", "grupo_id", "departamento_id",
+            "pct_concluido", "done_steps", "expected_steps"
+        ])
+    out = kdf.copy()
+    out["grupo_id"] = out["grupo_id"].map(lambda v: str(v) if pd.notna(v) and v is not None else None)
+    out["grupo"] = out["grupo_id"].map(lambda v: gid_to_name.get(str(v)) if pd.notna(v) else None).fillna("—")
+    out["departamento_id"] = out["grupo_id"].map(lambda v: gid_to_dept.get(str(v)) if pd.notna(v) else None)
+    out["pct_concluido"] = pd.to_numeric(out.get("pct", 0), errors="coerce").fillna(0).clip(0, 100)
+    out["done_steps"] = pd.to_numeric(out.get("done_steps", 0), errors="coerce").fillna(0).astype(int)
+    out["expected_steps"] = pd.to_numeric(out.get("expected_steps", 0), errors="coerce").fillna(0).astype(int)
+    return out[["grupo", "grupo_id", "departamento_id", "pct_concluido", "done_steps", "expected_steps"]]
+
+
+def _prefer_group_kpi_source(base_groups: pd.DataFrame, kpi_groups: pd.DataFrame) -> pd.DataFrame:
+    """Escolhe a fonte de agregação mais confiável para deptos/grupos.
+
+    Regra prática:
+    - usa base detalhada quando ela possui done_steps > 0;
+    - cai para kpi_engine/MV quando a base detalhada vier zerada/suspeita,
+      mas os KPIs agregados tiverem progresso real.
+    """
+    if kpi_groups is None or getattr(kpi_groups, "empty", True):
+        return base_groups
+    if base_groups is None or getattr(base_groups, "empty", True):
+        return kpi_groups
+
+    base_done = int(pd.to_numeric(base_groups.get("done_steps", 0), errors="coerce").fillna(0).sum())
+    base_exp = int(pd.to_numeric(base_groups.get("expected_steps", 0), errors="coerce").fillna(0).sum())
+    kpi_done = int(pd.to_numeric(kpi_groups.get("done_steps", 0), errors="coerce").fillna(0).sum())
+    kpi_exp = int(pd.to_numeric(kpi_groups.get("expected_steps", 0), errors="coerce").fillna(0).sum())
+
+    base_pct = round(base_done / max(base_exp, 1) * 100) if base_exp > 0 else 0
+    kpi_pct = round(kpi_done / max(kpi_exp, 1) * 100) if kpi_exp > 0 else 0
+
+    if base_done <= 0 < kpi_done:
+        return kpi_groups
+    if base_pct == 0 and kpi_pct > 0:
+        return kpi_groups
+    return base_groups
 
 @st.fragment
 def _fragment_previsao(previsao: dict, risco: dict) -> None:
@@ -988,9 +1051,26 @@ def render_dashboard() -> None:
         # estiver desatualizada, mantém o filtro por departamento em vez de zerar o dashboard.
         base = apply_filters(base=normalize_matriz_base(raw, eq_meta), departamento_ids=dep_scope_ids, grupo_ids=None)
 
-    # Usa sempre a mesma base consolidada do dashboard para grupos.
-    # Isso evita divergência com caches/materialized views fora de sincronia.
-    dashboard_groups = group_progress(base)
+    # Base detalhada do dashboard (equipamento × serviço).
+    dashboard_groups_base = group_progress(base)
+
+    # Fallback agregado via kpi_engine/MV: necessário para perfis gestor quando
+    # o detalhamento é afetado por RLS em tarefas_servico, mas os totais por
+    # grupo já estão corretos na MV/RPC.
+    try:
+        group_kpis_raw = get_group_kpis(tenant_id, revisao_id, ver=ver, prefer_mv=True, _token=token)
+    except Exception:
+        group_kpis_raw = pd.DataFrame()
+    group_kpis_raw = group_kpis_raw.copy() if group_kpis_raw is not None else pd.DataFrame()
+    if group_kpis_raw is not None and not group_kpis_raw.empty:
+        if dep_scope_ids not in (None, []):
+            dep_scope_set = {str(x) for x in dep_scope_ids}
+            group_kpis_raw = group_kpis_raw[group_kpis_raw["grupo_id"].map(lambda v: str(gid_to_dept.get(str(v))) if pd.notna(v) else None).isin(dep_scope_set)]
+        if grp_scope_ids not in (None, []):
+            grp_scope_set = {str(x) for x in grp_scope_ids}
+            group_kpis_raw = group_kpis_raw[group_kpis_raw["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(grp_scope_set)]
+    dashboard_groups_kpi = _group_kpis_to_dashboard_df(group_kpis_raw, gid_to_name, gid_to_dept)
+    dashboard_groups = _prefer_group_kpi_source(dashboard_groups_base, dashboard_groups_kpi)
 
     st.markdown("### Filtros")
     c1, c2, c3 = st.columns([1.1, 1.4, 0.6])
@@ -1072,10 +1152,19 @@ def render_dashboard() -> None:
         )
         return
 
-    # overall_from_base usa base_filtered diretamente (fonte única de verdade).
-    # calc_global_kpis foi removido aqui pois espera colunas eq_count/svc_count
-    # do formato GroupKPI (kpi_engine), incompatíveis com group_progress().
+    # KPIs globais: preferimos a base detalhada, mas se ela vier zerada e os
+    # KPIs agregados tiverem progresso real, usamos o agregado para não exibir
+    # 0% indevido para gestores com escopo.
     overall = overall_from_base(base_filtered)
+    agg_done = int(pd.to_numeric(dashboard_groups_filtered.get("done_steps", 0), errors="coerce").fillna(0).sum()) if dashboard_groups_filtered is not None and not dashboard_groups_filtered.empty else 0
+    agg_exp = int(pd.to_numeric(dashboard_groups_filtered.get("expected_steps", 0), errors="coerce").fillna(0).sum()) if dashboard_groups_filtered is not None and not dashboard_groups_filtered.empty else 0
+    if overall.get("pct", 0) <= 0 and agg_done > 0 and agg_exp > 0:
+        overall = {
+            **overall,
+            "pct": float(max(0, min(100, round(agg_done / max(agg_exp, 1) * 100)))),
+            "total": agg_exp // 3,
+            "concl": overall.get("concl", 0),
+        }
 
     _fragment_kpis_globais(overall)
     st.divider()
