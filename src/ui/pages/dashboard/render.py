@@ -999,6 +999,19 @@ def render_dashboard() -> None:
 
     base = normalize_matriz_base(raw, eq_meta)
 
+    # Auto-healing: se raw tem equipamentos mas tarefas zeradas,
+    # é cache antigo (antes da RPC get_tarefas_dashboard existir). Limpa e recarrega.
+    if (
+        not base.empty
+        and eq_meta
+        and "ok_count" in base.columns
+        and base["ok_count"].sum() == 0
+        and not st.session_state.get("_dash_cache_cleared")
+    ):
+        st.cache_data.clear()
+        st.session_state["_dash_cache_cleared"] = True
+        st.rerun()
+
     if base.empty:
         notice_card(
             "Sem dados de execução",
