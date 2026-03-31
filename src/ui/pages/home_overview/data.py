@@ -21,12 +21,7 @@ def _sb_from_token(token: str = ""):
 
 
 def _token_hash(token: str) -> str:
-    """Retorna hash curto do token para usar como chave de cache segura.
-
-    Incluir o hash (não o token bruto) na chave garante que sessões de
-    usuários diferentes nunca compartilhem o mesmo resultado cacheado,
-    sem expor o JWT nos logs do Streamlit.
-    """
+    """Retorna hash curto do token para usar como chave de cache segura."""
     return hashlib.md5((token or "").encode()).hexdigest()[:8]
 
 
@@ -35,8 +30,8 @@ def load_revision(
         tenant_id: str,
         ver: str = "0",
         rev_id: str | None = None,
+        token_hash: str = "",
         _token: str = "") -> dict | None:
-    # load_revision não filtra por RLS de usuário — token só garante autenticação
     sb = _sb_from_token(_token)
     try:
         revs = (
@@ -68,13 +63,7 @@ def load_revision(
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_groups(tenant_id: str, ver: str = "0", token_hash: str = "", _token: str = "") -> list[dict]:
-    """Carrega grupos do tenant.
-
-    `token_hash` é o md5[:8] do JWT e faz parte da chave de cache,
-    garantindo que sessões de usuários diferentes não compartilhem dados.
-    `_token` (underscore) é excluído do cache key pelo Streamlit e serve
-    apenas para autenticar o cliente Supabase.
-    """
+    """Carrega grupos do tenant. `token_hash` isola cache por usuário."""
     try:
         return (
             _sb_from_token(_token)
@@ -92,11 +81,7 @@ def load_groups(tenant_id: str, ver: str = "0", token_hash: str = "", _token: st
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_depts(tenant_id: str, ver: str = "0", token_hash: str = "", _token: str = "") -> list[dict]:
-    """Carrega departamentos do tenant.
-
-    `token_hash` é o md5[:8] do JWT e faz parte da chave de cache,
-    garantindo que sessões de usuários diferentes não compartilhem dados.
-    """
+    """Carrega departamentos do tenant. `token_hash` isola cache por usuário."""
     try:
         return (
             _sb_from_token(_token)
@@ -116,7 +101,9 @@ def load_snapshots(
         tenant_id: str,
         revisao_id: str,
         ver: str = "0",
+        token_hash: str = "",
         _token: str = "") -> pd.DataFrame:
+    """Carrega snapshots de KPI. `token_hash` isola cache por usuário."""
     sb = _sb_from_token(_token)
     try:
         rows = (
@@ -125,7 +112,7 @@ def load_snapshots(
             .eq("tenant_id", tenant_id)
             .eq("revisao_id", revisao_id)
             .order("week_number")
-            .limit(20_000)  # usar fetch_all() se exceder este limite
+            .limit(20_000)
             .execute()
             .data
         ) or []
@@ -145,7 +132,9 @@ def load_group_sector_view(
         tenant_id: str,
         revisao_id: str,
         ver: str = "0",
+        token_hash: str = "",
         _token: str = "") -> dict:
+    """Carrega setores por grupo. `token_hash` isola cache por usuário."""
     sb = _sb_from_token(_token)
     try:
         rows = (
@@ -171,7 +160,7 @@ def load_group_sector_view(
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def snapshots_supported(tenant_id: str = "", ver: str = "0", _token: str = "") -> bool:
+def snapshots_supported(tenant_id: str = "", ver: str = "0", token_hash: str = "", _token: str = "") -> bool:
     """Verifica se a tabela kpi_snapshots existe — cacheado por 5 minutos."""
     try:
         _sb_from_token(_token).table("kpi_snapshots").select("id").limit(1).execute()
@@ -182,7 +171,6 @@ def snapshots_supported(tenant_id: str = "", ver: str = "0", _token: str = "") -
 
 def insert_snapshot(tenant_id: str, revisao_id: str,
                     week_number: int, df: pd.DataFrame) -> tuple[bool, str]:
-    # insert_snapshot não é cacheada — pode acessar session_state diretamente
     from src.utils.supabase_helpers import sb_for_user
     if df is None or df.empty:
         return False, "Sem dados"
