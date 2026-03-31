@@ -42,6 +42,47 @@ from .transforms import (
 )
 
 
+def _kdf_from_latest_snapshot(sdf: pd.DataFrame) -> pd.DataFrame:
+    """Reconstrói GroupKPI a partir do snapshot mais recente disponível."""
+    if sdf is None or getattr(sdf, "empty", True):
+        return pd.DataFrame()
+    tmp = sdf.copy()
+    tmp["week_number"] = pd.to_numeric(tmp.get("week_number", 0), errors="coerce").fillna(0).astype(int)
+    latest = int(tmp["week_number"].max()) if not tmp.empty else 0
+    if latest <= 0:
+        return pd.DataFrame()
+    tmp = tmp[tmp["week_number"] == latest].copy()
+    if tmp.empty:
+        return pd.DataFrame()
+    tmp["grupo_id"] = tmp["grupo_id"].map(lambda v: str(v) if pd.notna(v) and v is not None else None)
+    tmp["done_steps"] = pd.to_numeric(tmp.get("done_steps", 0), errors="coerce").fillna(0).astype(int)
+    tmp["expected_steps"] = pd.to_numeric(tmp.get("expected_steps", 0), errors="coerce").fillna(0).astype(int)
+    tmp["backlog_steps"] = pd.to_numeric(tmp.get("backlog_steps", 0), errors="coerce").fillna(0).astype(int)
+    tmp["pct"] = pd.to_numeric(tmp.get("pct", 0), errors="coerce").fillna(0).clip(0, 100)
+    tmp["eq_count"] = 0
+    tmp["svc_count"] = 0
+    mask = tmp["expected_steps"] > 0
+    tmp.loc[mask, "svc_count"] = 1
+    tmp.loc[mask, "eq_count"] = (tmp.loc[mask, "expected_steps"] // 3).clip(lower=1).astype(int)
+    return tmp[["grupo_id", "eq_count", "svc_count", "done_steps", "expected_steps", "backlog_steps", "pct"]]
+
+
+def _prefer_home_kdf(primary: pd.DataFrame, fallback: pd.DataFrame) -> pd.DataFrame:
+    if fallback is None or getattr(fallback, "empty", True):
+        return primary
+    if primary is None or getattr(primary, "empty", True):
+        return fallback
+    p_done = int(pd.to_numeric(primary.get("done_steps", 0), errors="coerce").fillna(0).sum())
+    f_done = int(pd.to_numeric(fallback.get("done_steps", 0), errors="coerce").fillna(0).sum())
+    p_pct = round((pd.to_numeric(primary.get("done_steps", 0), errors="coerce").fillna(0).sum() / max(pd.to_numeric(primary.get("expected_steps", 0), errors="coerce").fillna(0).sum(), 1)) * 100) if not getattr(primary, "empty", True) else 0
+    f_pct = round((pd.to_numeric(fallback.get("done_steps", 0), errors="coerce").fillna(0).sum() / max(pd.to_numeric(fallback.get("expected_steps", 0), errors="coerce").fillna(0).sum(), 1)) * 100) if not getattr(fallback, "empty", True) else 0
+    if p_done <= 0 < f_done:
+        return fallback
+    if p_pct == 0 and f_pct > 0:
+        return fallback
+    return primary
+
+
 # ── Fragment: KPIs principais ───────────────────────────────────────────
 
 @st.fragment
@@ -361,11 +402,11 @@ def render_home_overview() -> None:
         st.session_state["_sidebar_rev_semana"] = week
     grupos = load_groups(tenant_id, ver, token_hash=_tok_hash, _token=_tok)
     deps = load_depts(tenant_id, ver, token_hash=_tok_hash, _token=_tok)
-    gid_to_name = {str(g["id"]): (g.get("nome") or "—")
+    gid_to_name = {g["id"]: (g.get("nome") or "—")
                    for g in grupos if g.get("id")}
-    gid_to_dept = {str(g["id"]): (str(g.get("departamento_id")) if g.get("departamento_id") else None)
+    gid_to_dept = {g["id"]: g.get("departamento_id")
                    for g in grupos if g.get("id")}
-    dept_to_name = {str(d["id"]): (d.get("nome") or "—")
+    dept_to_name = {d["id"]: (d.get("nome") or "—")
                     for d in deps if d.get("id")}
 
     dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id)
@@ -380,11 +421,9 @@ def render_home_overview() -> None:
         return
 
     if dep_scope_ids is not None:
-        dep_scope_set = {str(x) for x in dep_scope_ids}
-        deps = [d for d in deps if str(d.get("id")) in dep_scope_set]
+        deps = [d for d in deps if d.get("id") in dep_scope_ids]
     if grp_scope_ids is not None:
-        grp_scope_set = {str(x) for x in grp_scope_ids}
-        grupos = [g for g in grupos if str(g.get("id")) in grp_scope_set]
+        grupos = [g for g in grupos if g.get("id") in grp_scope_ids]
 
     # ── Header da revisão ───────────────────────────────────────────────────
     h1_col, h2_col = st.columns([0.82, 0.18])
@@ -443,9 +482,16 @@ def render_home_overview() -> None:
     # ── Carrega KPIs ────────────────────────────────────────────────────────
     _tok_kpi = st.session_state.get("sb_access_token", "") or ""
     with st.spinner("", show_time=False):
-        prefer_mv = False  # força leitura raw para manter Home sincronizada com a matriz
+        prefer_mv = True  # perfis gestor podem depender da MV/snapshot por causa de RLS no raw
         kdf = get_group_kpis(tenant_id, rev["id"], ver, prefer_mv=prefer_mv, _token=_tok_kpi)
 
+    kdf = enforce_home_schema(kdf)
+
+    # Fallback por snapshot mais recente: útil quando o raw vier zerado para
+    # gestores, mas o consolidado semanal já estiver correto.
+    with st.spinner("", show_time=False):
+        sdf = load_snapshots(tenant_id, rev["id"], ver, token_hash=_tok_hash, _token=_tok)
+    kdf = _prefer_home_kdf(kdf, _kdf_from_latest_snapshot(sdf))
     kdf = enforce_home_schema(kdf)
 
     # Auto-healing: se todos os grupos têm eq_count=0 mas há um token válido,
