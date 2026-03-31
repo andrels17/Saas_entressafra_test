@@ -1077,14 +1077,21 @@ def dispatch_relatorio_semanal(
 
     sb = get_supabase_service()
 
-    # Dados base
+    # FAIL FAST — evita gastar tempo com queries pesadas quando a revisão
+    # não foi informada ou não existe.
+    if not revisao_id:
+        result.errors.append("Revisão não informada.")
+        return result
+
     revisao = _load_revisao(sb, revisao_id)
+    if not revisao:
+        result.errors.append(f"Revisão não encontrada: {revisao_id}")
+        return result
+
+    # Só carrega o restante depois de validar a revisão.
+    _log(f"Revisão validada: id={revisao.get('id')} titulo={revisao.get('titulo') or '—'}")
     tenant_nome = _load_tenant_nome(sb, tenant_id)
     branding = _load_branding(sb, tenant_id)
-
-    if not revisao:
-        result.errors.append("Revisão não encontrada.")
-        return result
 
     # Grupos de destinatários (gestores — para envio de PDF por departamento)
     groups = get_recipient_groups(tenant_id)
