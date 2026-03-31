@@ -228,6 +228,17 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         if total_expected_exec > 0 else int(payload.pct_global or 0)
     )
 
+    trend_display = list(payload.trend_semanal or [])
+    if not trend_display:
+        trend_display = [{"semana": max(int(payload.semana_atual or 1), 1), "pct": pct_global_real}]
+
+    heatmap_display = list(payload.heatmap_semanal or [])
+    if not heatmap_display:
+        heatmap_display = [
+            {"departamento": d.nome, "semana": max(int(payload.semana_atual or 1), 1), "pct": real_pct_dept(d)}
+            for d in deptos
+        ]
+
     # Página 1
     c.setFillColor(DARK)
     c.rect(0, h - 38 * mm, w, 38 * mm, fill=1, stroke=0)
@@ -418,8 +429,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         c.setFont('Helvetica', 6.5)
         c.drawRightString(cx0 - 2, yy - 2, f"{int(frac * 100)}%")
 
-    trend = payload.trend_semanal or []
-    trend = sorted(trend, key=lambda r: int(r.get('semana', 0)))[-4:]
+    trend = sorted(trend_display, key=lambda r: int(r.get('semana', 0)))[-4:]
     if trend:
         n = len(trend)
         pts = []
@@ -449,7 +459,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         c.setFillColor(MUTED)
         c.setFont('Helvetica', 8)
         c.drawCentredString(16 * mm + (w - 32 * mm) / 2, y - chart_h / 2,
-                            'Adicione payload.trend_semanal para mostrar as últimas 4 semanas.')
+                            'Sem histórico suficiente de semanas fechadas. Exibindo o snapshot atual.')
     y -= chart_h + 8 * mm
 
     footer()
@@ -539,7 +549,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     c.showPage()
 
     # Página 4 - heatmap opcional
-    heatmap = payload.heatmap_semanal or []
+    heatmap = heatmap_display
     if heatmap:
         page_header('Heatmap de manutenção por departamento')
         y = h - 20 * mm

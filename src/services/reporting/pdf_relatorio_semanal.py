@@ -117,6 +117,24 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
     PRIMARY = _hex(payload.primary_color)
     page_no = [0]   # mutável dentro das closures
 
+    effective_pct = int(payload.pct_geral or 0)
+    if int(payload.expected_steps or 0) > 0:
+        effective_pct = max(0, min(100, int(round((int(payload.done_steps or 0) / int(payload.expected_steps or 1)) * 100))))
+
+    evolucao_display = list(payload.evolucao or [])
+    if not evolucao_display and (effective_pct > 0 or int(payload.expected_steps or 0) > 0):
+        evolucao_display = [SemanaSnapshot(
+            semana=max(int(payload.semana_atual or 1), 1),
+            concluidos=int(payload.done_steps or 0),
+            total=int(payload.expected_steps or 0),
+            pct=effective_pct,
+        )]
+
+    comparativo_label_atual = "Semana atual" if payload.evolucao else "Snapshot atual"
+    comparativo_pct_atual = int(payload.pct_semana_atual or 0)
+    if not payload.evolucao:
+        comparativo_pct_atual = effective_pct
+
     # ── helpers comuns ──────────────────────────────────────────────────────
     def new_page(title: str):
         page_no[0] += 1
@@ -358,9 +376,9 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
     y = h - 52 * mm
 
     # KPIs linha 1
-    pct_color = _risk_color(payload.pct_geral)
+    pct_color = _risk_color(effective_pct)
     y = kpi_row([
-        ("Progresso geral", f"{payload.pct_geral}%", pct_color),
+        ("Progresso geral", f"{effective_pct}%", pct_color),
         ("Equipamentos", str(payload.n_equipamentos), FG),
         ("Concluídos (100%)", str(payload.n_concluidos), GREEN),
         ("Alertas ativos", str(payload.n_alertas_total),
@@ -370,10 +388,10 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
     # Barra de progresso geral
     y -= 2 * mm
     bar_w = w - 32 * mm
-    progress_bar(16 * mm, y, bar_w, 7 * mm, payload.pct_geral)
-    c.setFillColor(_risk_color(payload.pct_geral))
+    progress_bar(16 * mm, y, bar_w, 7 * mm, effective_pct)
+    c.setFillColor(_risk_color(effective_pct))
     c.setFont("Helvetica-Bold", 8.5)
-    c.drawRightString(w - 16 * mm, y + 8 * mm, f"{payload.pct_geral}%")
+    c.drawRightString(w - 16 * mm, y + 8 * mm, f"{effective_pct}%")
     y -= 12 * mm
 
     # KPIs alertas
@@ -387,7 +405,7 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
     # Comparativo S-1 vs S atual — inline na capa
     y -= 2 * mm
     y = section_title("Comparativo — semana anterior vs. atual", y)
-    delta = payload.pct_semana_atual - payload.pct_semana_anterior
+    delta = comparativo_pct_atual - payload.pct_semana_anterior
     delta_str = f"+{delta}p.p." if delta >= 0 else f"{delta}p.p."
     delta_color = GREEN if delta >= 0 else RED
 
@@ -395,7 +413,7 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
     bx = 16 * mm
     for label, val, col in [
         ("Semana anterior", f"{payload.pct_semana_anterior}%", _risk_color(payload.pct_semana_anterior)),
-        ("Semana atual", f"{payload.pct_semana_atual}%", _risk_color(payload.pct_semana_atual)),
+        (comparativo_label_atual, f"{comparativo_pct_atual}%", _risk_color(comparativo_pct_atual)),
         ("Variação", delta_str, delta_color),
     ]:
         c.setFillColor(SURFACE)
@@ -473,14 +491,14 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
     c.drawString(left_x, y_left, "Progresso acumulado por semana")
     y_left -= 7 * mm
 
-    if payload.evolucao:
+    if evolucao_display:
         sem_atual = payload.semana_atual
         bar_label_w = 16 * mm
         bar_pct_w = 10 * mm
         bar_avail = left_w - bar_label_w - bar_pct_w - 4 * mm
         row_h = 6 * mm
 
-        for snap in payload.evolucao:
+        for snap in evolucao_display:
             if y_left - row_h < 24 * mm:
                 break
             is_current = snap.semana == sem_atual
@@ -506,7 +524,7 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
     else:
         c.setFillColor(MUTED)
         c.setFont("Helvetica", 9)
-        c.drawString(left_x, y_left - 8 * mm, "Sem dados de evolução.")
+        c.drawString(left_x, y_left - 8 * mm, "Sem histórico fechado de semanas ainda.")
         y_left -= 14 * mm
 
     # Coluna direita: top piores + top melhores
