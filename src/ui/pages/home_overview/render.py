@@ -447,15 +447,23 @@ def render_home_overview() -> None:
     kdf = enforce_home_schema(kdf)
 
     # Auto-healing: se todos os grupos têm eq_count=0 mas há um token válido,
-    # o cache foi envenenado por uma chamada inicial sem JWT. Limpa e recarrega.
-    if (
-        _tok_kpi
-        and kdf is not None
+    # Auto-healing: limpa cache se os dados parecem corrompidos/zerados.
+    # Caso 1: eq_count=0 (cache envenenado por chamada sem JWT)
+    # Caso 2: eq_count>0 mas done_steps=0 (RPC de tarefas falhou na sessão anterior)
+    _cache_parece_zerado = (
+        kdf is not None
         and not (hasattr(kdf, "empty") and kdf.empty)
         and "eq_count" in kdf.columns
-        and pd.to_numeric(kdf["eq_count"], errors="coerce").fillna(0).sum() == 0
-        and not st.session_state.get("_home_cache_cleared")
-    ):
+        and (
+            pd.to_numeric(kdf["eq_count"], errors="coerce").fillna(0).sum() == 0
+            or (
+                "done_steps" in kdf.columns
+                and pd.to_numeric(kdf["eq_count"], errors="coerce").fillna(0).sum() > 0
+                and pd.to_numeric(kdf["done_steps"], errors="coerce").fillna(0).sum() == 0
+            )
+        )
+    )
+    if _tok_kpi and _cache_parece_zerado and not st.session_state.get("_home_cache_cleared"):
         st.cache_data.clear()
         st.session_state["_home_cache_cleared"] = True
         st.rerun()
