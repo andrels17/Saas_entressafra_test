@@ -315,7 +315,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
             "equipamento_id": r.get("id"),
             "frota": r.get("frota"),
             "modelo": r.get("modelo"),
-            "departamento_id": r.get("departamento_id"),
+            "departamento_id": (r.get("departamento_id") if r.get("departamento_id") is not None else (grupo_map.get(str(r.get("grupo_id")), {}) or {}).get("departamento_id")),
         }
         for r in eq_rows
     ]
@@ -328,7 +328,7 @@ def _load_departamentos(tenant_id: str, ver: str = "0", _token: str = "") -> lis
     ver = f"{ver}_{_hl.md5((_token or '').encode()).hexdigest()[:8]}"
     sb = _sb_from_token(_token)
     try:
-        return (
+        rows = (
             sb.table("departamentos")
             .select("id,nome")
             .eq("tenant_id", tenant_id)
@@ -336,6 +336,7 @@ def _load_departamentos(tenant_id: str, ver: str = "0", _token: str = "") -> lis
             .execute()
             .data or []
         )
+        return [{**r, "id": str(r.get("id")) if r.get("id") is not None else None} for r in rows]
     except Exception as exc:
         log_error(exc, context="dashboard._load_departamentos", table="departamentos")
         return []
@@ -347,7 +348,7 @@ def _load_grupos(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]
     ver = f"{ver}_{_hl.md5((_token or '').encode()).hexdigest()[:8]}"
     sb = _sb_from_token(_token)
     try:
-        return (
+        rows = (
             sb.table("equip_grupos")
             .select("id,nome,departamento_id")
             .eq("tenant_id", tenant_id)
@@ -355,6 +356,7 @@ def _load_grupos(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]
             .execute()
             .data or []
         )
+        return [{**r, "id": str(r.get("id")) if r.get("id") is not None else None, "departamento_id": str(r.get("departamento_id")) if r.get("departamento_id") is not None else None} for r in rows]
     except Exception as exc:
         log_error(exc, context="dashboard._load_grupos", table="equip_grupos")
         return []
@@ -911,8 +913,6 @@ def render_dashboard() -> None:
 
     sb = sb_for_user()
     dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id, sb)
-    dep_scope_ids = None if dep_scope_ids is None else [str(x) for x in dep_scope_ids if x is not None]
-    grp_scope_ids = None if grp_scope_ids is None else [str(x) for x in grp_scope_ids if x is not None]
     role = st.session_state.get("current_role") or ""
     if can_view_all_data(role):
         if dep_scope_ids == []:
@@ -961,8 +961,7 @@ def render_dashboard() -> None:
         grupos = _load_grupos(tenant_id, ver, token)
 
     if dep_scope_ids in (None, [] ) and grp_scope_ids not in (None, []):
-        grp_scope_set = {str(x) for x in grp_scope_ids}
-        dep_scope_ids = sorted({str(g.get("departamento_id")) for g in grupos if str(g.get("id")) in grp_scope_set and g.get("departamento_id")})
+        dep_scope_ids = sorted({str(g.get("departamento_id")) for g in grupos if g.get("id") in set(grp_scope_ids) and g.get("departamento_id")})
 
     if dep_scope_ids == [] and grp_scope_ids not in (None, []):
         grp_set = {str(x) for x in grp_scope_ids}
@@ -977,8 +976,7 @@ def render_dashboard() -> None:
         if scoped_grupos or dep_scope_ids in (None, []):
             grupos = scoped_grupos
         else:
-            dep_scope_set = {str(x) for x in dep_scope_ids}
-            grupos = [g for g in grupos if str(g.get("departamento_id")) in dep_scope_set]
+            grupos = [g for g in grupos if g.get("departamento_id") in dep_scope_ids]
 
     dept_map = {str(d["id"]): d.get("nome", "—")
                 for d in departamentos if d.get("id")}
