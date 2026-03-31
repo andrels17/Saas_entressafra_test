@@ -132,26 +132,30 @@ def _fragment_ranking(
         gid = row.get("grupo_id")
         sec = sector_map.get(str(gid), {})
         pct = float(pd.to_numeric(row.get("pct", 0), errors="coerce") or 0)
-        total = max(int(sec.get("setores_total") or 0), 0)
-        concl = max(int(sec.get("setores_concluidos") or 0), 0)
-        # Recalcula pendentes a partir de total e concluidos para evitar 0/0 -> "Concluído"
-        pend = max(total - min(concl, total), 0)
+        total = int(sec.get("setores_total") or 0)
+        concl = int(sec.get("setores_concluidos") or 0)
+        # Recalcula pendentes a partir do total/concluídos para evitar 0/0 = concluído.
+        pend = max(total - concl, 0)
 
         if total <= 0:
-            badge_status = "Sem setores"
+            badge_state = "neutro"
+            badge_label = "Sem setores"
         elif concl >= total:
-            badge_status = "concluido"
+            badge_state = "concluido"
+            badge_label = "Concluído"
         elif pct > 0:
-            badge_status = "em_andamento"
+            badge_state = "andamento"
+            badge_label = "Em andamento"
         else:
-            badge_status = "pendente"
+            badge_state = "travado"
+            badge_label = "Pendente"
 
         with st.container(border=True):
             col_l, col_r = st.columns([0.75, 0.25])
             with col_l:
                 st.markdown(f"**{row.get('Grupo', 'Grupo')}**")
             with col_r:
-                status_badge(badge_status)
+                status_badge(badge_state, badge_label)
 
             mc1, mc2, mc3 = st.columns(3)
             with mc1:
@@ -163,7 +167,7 @@ def _fragment_ranking(
                     pend,
                     delta_color="inverse" if pend > 0 else "off")
             with mc3:
-                st.metric("Setores conc.", f"{min(concl, total)}/{total}")
+                st.metric("Setores conc.", f"{concl}/{total}")
             st.caption("Setor fecha quando D+R+M ok em todos os equipamentos.")
             if st.button("Abrir na Matriz", key=f"rank_open_{mode}_{gid}",
                          use_container_width=True, type="secondary"):
@@ -451,7 +455,11 @@ def render_home_overview() -> None:
     # ── Carrega KPIs ────────────────────────────────────────────────────────
     _tok_kpi = st.session_state.get("sb_access_token", "") or ""
     with st.spinner("", show_time=False):
-        prefer_mv = False  # força leitura raw para manter Home sincronizada com a matriz
+        # Para perfis com escopo e/ou RLS mais restritivo, a fonte consolidada
+        # (MV) tende a estar disponível mesmo quando a leitura raw vem zerada.
+        # O motor de KPI já faz fallback seguro para raw quando a MV estiver
+        # desatualizada, então aqui mantemos prefer_mv=True.
+        prefer_mv = True
         kdf = get_group_kpis(tenant_id, rev["id"], ver, prefer_mv=prefer_mv, _token=_tok_kpi)
 
     kdf = enforce_home_schema(kdf)
@@ -474,6 +482,33 @@ def render_home_overview() -> None:
     if kdf is None or (hasattr(kdf, "empty") and kdf.empty):
         st.info("Sem KPIs nesta revisão ainda.")
         return
+
+    # Fallback adicional: se a carga consolidada ainda vier zerada, tenta usar
+    # o snapshot mais recente salvo da revisão para não exibir tudo em 0.
+    try:
+        _scope = kdf[(pd.to_numeric(kdf.get("eq_count", 0), errors="coerce").fillna(0) > 0) &
+                     (pd.to_numeric(kdf.get("svc_count", 0), errors="coerce").fillna(0) > 0)].copy()
+        _global_zero = _scope.empty or float(pd.to_numeric(_scope.get("done_steps", 0), errors="coerce").fillna(0).sum()) <= 0
+        if _global_zero:
+            _sdf = load_snapshots(tenant_id, rev["id"], ver, token_hash=_tok_kpi[:8], _token=_tok_kpi)
+            if _sdf is not None and not _sdf.empty:
+                _last_week = int(pd.to_numeric(_sdf["week_number"], errors="coerce").fillna(0).max())
+                _latest = _sdf[_sdf["week_number"] == _last_week].copy()
+                if not _latest.empty:
+                    _latest["grupo_id"] = _latest["grupo_id"].astype(str)
+                    _latest = _latest.drop_duplicates(subset=["grupo_id"], keep="last")
+                    _snap_map = _latest.set_index("grupo_id")[["pct", "done_steps", "expected_steps"]].to_dict("index")
+                    for _idx, _row in kdf.iterrows():
+                        _gid = str(_row.get("grupo_id"))
+                        _snap = _snap_map.get(_gid)
+                        if _snap:
+                            kdf.at[_idx, "pct"] = float(_snap.get("pct") or 0)
+                            if float(kdf.at[_idx, "done_steps"] or 0) <= 0:
+                                kdf.at[_idx, "done_steps"] = int(_snap.get("done_steps") or 0)
+                            if float(kdf.at[_idx, "expected_steps"] or 0) <= 0:
+                                kdf.at[_idx, "expected_steps"] = int(_snap.get("expected_steps") or 0)
+    except Exception:
+        pass
 
     kdf = enrich_kdf(
         kdf,
