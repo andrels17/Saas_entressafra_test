@@ -290,6 +290,63 @@ def _load_branding(sb, tenant_id: str) -> dict:
     return rows[0] if rows else {}
 
 
+def _calc_snapshot_from_kpi_engine(
+    *,
+    tenant_id: str,
+    revisao_id: str,
+    grupo_ids: list[str],
+) -> dict:
+    """Snapshot consolidado por grupo usando o kpi_engine.
+
+    Usa o motor consolidado para alinhar os números do topo do PDF
+    com Home/Dashboard. O detalhamento por frota continua vindo do
+    mesmo pipeline do dashboard de equipamentos.
+    """
+    try:
+        from src.utils.kpi_engine import get_group_kpis
+        kdf = get_group_kpis(tenant_id, revisao_id, "0", prefer_mv=True)
+        if kdf is None or getattr(kdf, "empty", True):
+            return {}
+
+        gids = {str(g) for g in (grupo_ids or []) if g}
+        if not gids:
+            return {}
+
+        gid_col = "grupo_id" if "grupo_id" in kdf.columns else None
+        if gid_col is None:
+            return {}
+
+        kdf = kdf.copy()
+        kdf[gid_col] = kdf[gid_col].astype(str)
+        kdf = kdf[kdf[gid_col].isin(gids)].copy()
+        if kdf.empty:
+            return {}
+
+        for col in ("pct", "done_steps", "expected_steps", "eq_count"):
+            if col in kdf.columns:
+                kdf[col] = pd.to_numeric(kdf[col], errors="coerce").fillna(0)
+            else:
+                kdf[col] = 0
+
+        done = int(kdf["done_steps"].sum())
+        expected = int(kdf["expected_steps"].sum())
+        pct = max(0, min(100, round(done / max(expected, 1) * 100))) if expected > 0 else 0
+        n_equip = int(kdf["eq_count"].sum()) if "eq_count" in kdf.columns else 0
+        group_pct_map = {
+            str(row[gid_col]): int(round(float(row.get("pct", 0) or 0)))
+            for _, row in kdf.iterrows()
+        }
+        return {
+            "pct_geral": pct,
+            "done_steps_total": done,
+            "expected_steps_total": expected,
+            "n_equipamentos": n_equip,
+            "group_pct_map": group_pct_map,
+        }
+    except Exception:
+        return {}
+
+
 
 
 
@@ -507,6 +564,7 @@ def _build_dashboard_base(
 # ── Construção do payload ───────────────────────────────────────────────
 
 
+
 def _build_payload(
     *,
     tarefas: list[dict],
@@ -529,6 +587,7 @@ def _build_payload(
     data_inicio = revisao.get("data_inicio")
     semana_atual = _semana_atual(data_inicio, semanas_total)
 
+    # Mesmo caminho do dashboard de equipamentos para o detalhamento por frota.
     base, _eq_rows = _build_dashboard_base(
         sb, tenant_id, revisao.get("id", ""), grupo_ids, tarefas
     )
@@ -537,6 +596,14 @@ def _build_payload(
     overall = overall_from_base(base) if base is not None and not base.empty else {
         "pct": 0.0, "total": 0, "concl": 0, "pend": 0, "andamento": 0, "trav": 0, "na": 0
     }
+
+    # Snapshot consolidado do kpi_engine para o topo do PDF.
+    snapshot_kpi = _calc_snapshot_from_kpi_engine(
+        tenant_id=tenant_id,
+        revisao_id=revisao.get("id", ""),
+        grupo_ids=grupo_ids,
+    )
+    group_pct_map = snapshot_kpi.get("group_pct_map") or {}
 
     grupo_nomes: dict[str, str] = {}
     gnrows = _with_fallback(
@@ -560,15 +627,15 @@ def _build_payload(
 
     all_equipamentos: list[dict] = []
     criticos: list[EquipamentoCritico] = []
-    n_concluidos = 0
-    n_travados = 0
-    n_sem_inicio = 0
+    n_concluidos_local = 0
+    n_travados_local = 0
+    n_sem_inicio_local = 0
     n_parados = 0
     n_risco_prazo = 0
     parados_detalhe: list[dict] = []
 
-    done_steps_total = 0
-    expected_steps_total = 0
+    done_steps_total_dash = 0
+    expected_steps_total_dash = 0
 
     semana_done_steps: dict[int, int] = {}
     for t in tarefas or []:
@@ -588,8 +655,8 @@ def _build_payload(
             expected_steps = int(row.get("expected_steps") or 0)
             done_steps = int(row.get("done_steps") or 0)
 
-            done_steps_total += done_steps
-            expected_steps_total += expected_steps
+            done_steps_total_dash += done_steps
+            expected_steps_total_dash += expected_steps
 
             tasks = eq_tasks.get(eid, [])
             done_ant = sum(
@@ -599,7 +666,7 @@ def _build_payload(
             pct_anterior = max(0, min(100, round(done_ant / max(expected_steps, 1) * 100))) if expected_steps > 0 else 0
 
             if pct >= 100 and expected_steps > 0:
-                n_concluidos += 1
+                n_concluidos_local += 1
 
             any_travado = int(row.get("Travados") or 0) > 0 or any(
                 str(t.get("status") or "").strip().lower() == "travado"
@@ -649,9 +716,9 @@ def _build_payload(
                 ))
 
             if any_travado:
-                n_travados += 1
+                n_travados_local += 1
             if done_steps == 0 and expected_steps > 0:
-                n_sem_inicio += 1
+                n_sem_inicio_local += 1
 
             parado_eq = (
                 expected_steps > 0 and pct < 100 and not any_travado and
@@ -688,14 +755,20 @@ def _build_payload(
                 "ultima_mov": ultima_mov,
                 "ultima_semana": ultima_semana,
                 "dias_sem_manut": dias_sem_manut_efetivo,
-                "grupo_pct": pct,
+                "grupo_pct": int(group_pct_map.get(grupo_id, pct)),
             })
 
-    pct_geral_snapshot = int(round(float(overall.get("pct") or 0)))
-    n_equipamentos = int(overall.get("total") or len(all_equipamentos))
-    n_concluidos = max(n_concluidos, int(overall.get("concl") or 0))
-    n_travados = max(n_travados, int(overall.get("trav") or 0))
-    n_sem_inicio = max(n_sem_inicio, int(overall.get("pend") or 0))
+    # Topo: usa kpi_engine quando disponível; senão cai no overall do dashboard.
+    pct_geral_snapshot = int(snapshot_kpi.get("pct_geral") or round(float(overall.get("pct") or 0)))
+    n_equipamentos = int(snapshot_kpi.get("n_equipamentos") or overall.get("total") or len(all_equipamentos))
+    done_steps_total = int(snapshot_kpi.get("done_steps_total") or done_steps_total_dash)
+    expected_steps_total = int(snapshot_kpi.get("expected_steps_total") or expected_steps_total_dash)
+
+    n_concluidos = max(n_concluidos_local, int(overall.get("concl") or 0))
+    n_travados = max(n_travados_local, int(overall.get("trav") or 0))
+    # No dashboard, "pend" é por linha/serviço, não por frota. Para não inflar e nem zerar,
+    # preserva a contagem local por frota sem início.
+    n_sem_inicio = n_sem_inicio_local
 
     evolucao: list[SemanaSnapshot] = []
     pct_semana_anterior = 0
