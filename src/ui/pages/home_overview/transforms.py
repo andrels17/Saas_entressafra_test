@@ -102,13 +102,15 @@ def enrich_kdf(
 ) -> pd.DataFrame:
     """Enriquece o DataFrame de KPIs com nomes e filtra por escopo."""
     kdf = kdf.copy()
-    kdf["Grupo"] = kdf["grupo_id"].map(
-        gid_to_name).fillna(kdf["grupo_id"].astype(str))
+    kdf["grupo_id"] = kdf["grupo_id"].map(lambda v: str(v) if pd.notna(v) and v is not None else None)
+    kdf["Grupo"] = kdf["grupo_id"].map(gid_to_name).fillna(kdf["grupo_id"].astype(str))
     kdf["departamento_id"] = kdf["grupo_id"].map(gid_to_dept)
     if dep_scope_ids not in (None, []):
-        kdf = kdf[kdf["departamento_id"].isin(dep_scope_ids)].copy()
+        dep_scope_set = {str(x) for x in dep_scope_ids}
+        kdf = kdf[kdf["departamento_id"].map(lambda v: str(v) if pd.notna(v) and v is not None else None).isin(dep_scope_set)].copy()
     if grp_scope_ids not in (None, []):
-        kdf = kdf[kdf["grupo_id"].isin(grp_scope_ids)].copy()
+        grp_scope_set = {str(x) for x in grp_scope_ids}
+        kdf = kdf[kdf["grupo_id"].isin(grp_scope_set)].copy()
     return kdf
 
 

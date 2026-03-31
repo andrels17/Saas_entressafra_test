@@ -116,8 +116,6 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
     except Exception:
         pass
 
-    # Fallbacks sem departamento_id (coluna não existe em equipamentos;
-    # vem do equip_grupos via JOIN na função RPC acima).
     if not eq_rows:
         try:
             eq_rows = _fetch_all(
@@ -139,26 +137,27 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
         except Exception as exc:
             log_error(exc, context="dashboard._load_base_cached.no_ativo", table="equipamentos")
 
-    if not eq_rows and task_rows:
-        eq_ids = list({str(t["equipamento_id"]) for t in task_rows if t.get("equipamento_id")})
-        for i in range(0, len(eq_ids), 100):
-            batch = eq_ids[i:i + 100]
-            try:
-                chunk = (
-                    sb.table("equipamentos")
-                    .select("id,frota,modelo,grupo_id")
-                    .in_("id", batch)
-                    .execute()
-                    .data or []
-                )
-                eq_rows.extend(chunk)
-            except Exception as exc:
-                log_error(exc, context="dashboard._load_base_cached.fallback_in",
-                          table="equipamentos")
+    # Garante resolução dos equipamentos que já possuem tarefas na revisão,
+    # mesmo quando a RPC/fallback principal não retornar todos eles.
+    task_eq_ids = [str(t.get("equipamento_id")) for t in task_rows if t.get("equipamento_id")]
+    missing_eq_ids = [eid for eid in sorted(set(task_eq_ids)) if eid not in {str(r.get("id")) for r in eq_rows if r.get("id")}]
+    for i in range(0, len(missing_eq_ids), 100):
+        batch = missing_eq_ids[i:i + 100]
+        try:
+            chunk = (
+                sb.table("equipamentos")
+                .select("id,frota,modelo,grupo_id")
+                .eq("tenant_id", tenant_id)
+                .in_("id", batch)
+                .execute()
+                .data or []
+            )
+            eq_rows.extend(chunk)
+        except Exception as exc:
+            log_error(exc, context="dashboard._load_base_cached.fallback_in", table="equipamentos")
 
     # Busca TODOS os grupos (sem filtro ativo) para garantir resolução de
     # grupo_nome e departamento_id de equipamentos vinculados a grupos inativos.
-    # 95 equipamentos apontam para grupos com ativo=False neste tenant.
     try:
         grupo_rows = _fetch_all(
             sb.table("equip_grupos")
@@ -223,11 +222,14 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
         merged["updated_at"] = cur.get("updated_at") if cur_upd >= prev_upd else prev.get("updated_at")
         return merged
 
-    raw_tasks = []
+    # Fonte principal: tarefas reais da revisão, já enriquecidas com grupo/departamento.
     task_map: dict[tuple[str, str], dict] = {}
+    eqs_with_task: set[str] = set()
     for t in task_rows:
         eid = str(t.get("equipamento_id")) if t.get("equipamento_id") is not None else None
         sid = str(t.get("servico_id")) if t.get("servico_id") is not None else None
+        if not eid or not sid:
+            continue
         eq = eq_map.get(eid, {})
         gid = eq.get("grupo_id")
         gid_s = str(gid) if gid is not None else None
@@ -242,15 +244,14 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
             "modelo": eq.get("modelo"),
             "servico_id": t.get("servico_id"),
             "setor_nome": svc.get("setor") or "—",
-            "status": t.get("status"),
+            "status": t.get("status") or "pendente",
             "etapa_d": t.get("etapa_d"),
             "etapa_r": t.get("etapa_r"),
             "etapa_m": t.get("etapa_m"),
             "updated_at": t.get("updated_at"),
         }
-        raw_tasks.append(enriched)
-        if eid and sid:
-            task_map[(eid, sid)] = _merge_task(task_map.get((eid, sid)), enriched)
+        task_map[(eid, sid)] = _merge_task(task_map.get((eid, sid)), enriched)
+        eqs_with_task.add(eid)
 
     group_services: dict[str, list[str]] = {}
     for row in grupo_servicos_rows:
@@ -264,20 +265,12 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
         if sid_s not in group_services[gid_s]:
             group_services[gid_s].append(sid_s)
 
-    # Fonte principal: as tarefas reais da revisão já enriquecidas.
-    # Isso evita zerar progresso quando grupo_servicos/template mudou depois
-    # da criação da revisão.
     raw = list(task_map.values())
-    eids_with_task = {
-        str(r.get("equipamento_id"))
-        for r in raw
-        if r.get("equipamento_id") is not None
-    }
 
-    # Completa apenas equipamentos sem nenhuma tarefa na revisão usando a
-    # malha atual de grupo_servicos como fallback estrutural.
+    # Fallback estrutural: só monta linhas de template para equipamentos que
+    # ainda não possuem nenhuma tarefa na revisão.
     for eid, eq in eq_map.items():
-        if eid in eids_with_task:
+        if eid in eqs_with_task:
             continue
         gid = eq.get("grupo_id")
         gid_s = str(gid) if gid is not None else None
@@ -285,8 +278,6 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
             continue
         grp = grupo_map.get(gid_s, {})
         service_ids = group_services.get(gid_s, [])
-        if not service_ids:
-            continue
         for sid in service_ids:
             svc = serv_map.get(str(sid), {})
             raw.append({
@@ -305,18 +296,17 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
                 "updated_at": None,
             })
 
-    if not raw and raw_tasks:
-        raw = raw_tasks
-
-    eq_meta = [
-        {
+    eq_meta = []
+    for r in eq_rows:
+        gid = r.get("grupo_id")
+        gid_s = str(gid) if gid is not None else None
+        grp = grupo_map.get(gid_s, {})
+        eq_meta.append({
             "equipamento_id": r.get("id"),
             "frota": r.get("frota"),
             "modelo": r.get("modelo"),
-            "departamento_id": r.get("departamento_id"),
-        }
-        for r in eq_rows
-    ]
+            "departamento_id": r.get("departamento_id") or grp.get("departamento_id"),
+        })
     return raw, eq_meta
 
 

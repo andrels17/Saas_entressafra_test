@@ -361,11 +361,11 @@ def render_home_overview() -> None:
         st.session_state["_sidebar_rev_semana"] = week
     grupos = load_groups(tenant_id, ver, token_hash=_tok_hash, _token=_tok)
     deps = load_depts(tenant_id, ver, token_hash=_tok_hash, _token=_tok)
-    gid_to_name = {g["id"]: (g.get("nome") or "—")
+    gid_to_name = {str(g["id"]): (g.get("nome") or "—")
                    for g in grupos if g.get("id")}
-    gid_to_dept = {g["id"]: g.get("departamento_id")
+    gid_to_dept = {str(g["id"]): (str(g.get("departamento_id")) if g.get("departamento_id") else None)
                    for g in grupos if g.get("id")}
-    dept_to_name = {d["id"]: (d.get("nome") or "—")
+    dept_to_name = {str(d["id"]): (d.get("nome") or "—")
                     for d in deps if d.get("id")}
 
     dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id)
@@ -380,9 +380,11 @@ def render_home_overview() -> None:
         return
 
     if dep_scope_ids is not None:
-        deps = [d for d in deps if d.get("id") in dep_scope_ids]
+        dep_scope_set = {str(x) for x in dep_scope_ids}
+        deps = [d for d in deps if str(d.get("id")) in dep_scope_set]
     if grp_scope_ids is not None:
-        grupos = [g for g in grupos if g.get("id") in grp_scope_ids]
+        grp_scope_set = {str(x) for x in grp_scope_ids}
+        grupos = [g for g in grupos if str(g.get("id")) in grp_scope_set]
 
     # ── Header da revisão ───────────────────────────────────────────────────
     h1_col, h2_col = st.columns([0.82, 0.18])
