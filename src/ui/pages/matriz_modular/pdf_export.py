@@ -344,6 +344,17 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
         textColor=palette["soft"],
     )
 
+    summary_head = ParagraphStyle(
+        "summary_head",
+        parent=small_style,
+        fontSize=8,
+        leading=9,
+        alignment=TA_LEFT,
+        textColor=colors.white,
+        fontName="Helvetica-Bold",
+    )
+
+
     def _base_left_table_style(*, header_rows=0, zebra_from=1):
         cmds = [
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -398,10 +409,10 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
         view = view.sort_values(["%", "Concluidos", "Equipamento"], ascending=[False, False, True]).reset_index(drop=True)
 
         rows = [[
-            Paragraph("<b>Equipamento</b>", cell_left),
-            Paragraph("<b>Concluídos</b>", cell_left),
-            Paragraph("<b>Total</b>", cell_left),
-            Paragraph("<b>%</b>", cell_left),
+            Paragraph("Equipamento", summary_head),
+            Paragraph("Concluídos", summary_head),
+            Paragraph("Total", summary_head),
+            Paragraph("%", summary_head),
         ]]
         for _, row in view.iterrows():
             pct = _int_pct(row["%"])
