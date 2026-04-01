@@ -935,8 +935,9 @@ def _overall_from_group_kpis(kdf: pd.DataFrame) -> dict:
         "na": 0,
     }
 
-_DASH_AUTO_REFRESH_EVERY = "15s"
 
+
+_DASH_AUTO_REFRESH_EVERY = "15s"
 
 @st.fragment(run_every=_DASH_AUTO_REFRESH_EVERY)
 def _fragment_dashboard_live() -> None:
