@@ -109,10 +109,6 @@ def _purge_login_screen_state() -> None:
         "_sidebar_rev_semana",
         "tenant_logo_url",
         "_token_last_remote_verify",
-        "_scope_signature",
-        "_scope_cached",
-        "scope_departamento_ids",
-        "scope_grupo_ids",
     ):
         st.session_state.pop(key, None)
     # Invalida cache de badges para este usuário
@@ -133,12 +129,9 @@ def _handle_identity_guard(current_uid: str) -> None:
             "_sidebar_rev_semana",
             "tenant_logo_url",
             "_token_last_remote_verify",
-            "_scope_signature",
-            "_scope_cached",
-            "scope_departamento_ids",
-            "scope_grupo_ids",
         ):
             st.session_state.pop(key, None)
+        _safe_clear_streamlit_caches()
     st.session_state["_identity_user_id"] = current_uid
 
 
@@ -174,23 +167,20 @@ def _ensure_authenticated_session() -> bool:
 
 
 def _resolve_scope(tenant_id: str, user_id: str, role: str) -> None:
-    """Resolve e reaproveita escopo no nível da sessão para evitar roundtrips a cada menu."""
     signature = f"{user_id}:{tenant_id}:{role}"
+    prev_signature = st.session_state.get("_scope_signature")
 
-    cached_signature = st.session_state.get("_scope_signature")
-    cached_scope = st.session_state.get("_scope_cached")
-
-    if cached_signature == signature and isinstance(cached_scope, tuple) and len(cached_scope) == 2:
-        st.session_state["scope_departamento_ids"] = cached_scope[0]
-        st.session_state["scope_grupo_ids"] = cached_scope[1]
+    if prev_signature == signature:
         return
 
-    prev_signature = cached_signature
     if prev_signature and prev_signature != signature:
         for key in ("__current_page", "__nav_to", "__menu", "menu"):
             st.session_state.pop(key, None)
 
+    st.session_state["_scope_signature"] = signature
+
     try:
+        sb = sb_for_user()
         _tok = st.session_state.get("sb_access_token", "") or ""
         import hashlib as _hl
         _tok_hash = _hl.md5(_tok.encode()).hexdigest()[:8]
@@ -198,11 +188,8 @@ def _resolve_scope(tenant_id: str, user_id: str, role: str) -> None:
     except Exception:
         dept_ids, grp_ids = (None, None) if can_view_all_data(role) else ([], [])
 
-    st.session_state["_scope_signature"] = signature
-    st.session_state["_scope_cached"] = (dept_ids, grp_ids)
     st.session_state["scope_departamento_ids"] = dept_ids
     st.session_state["scope_grupo_ids"] = grp_ids
-
 
 
 def _load_navigation_context() -> tuple[str, str, str]:
@@ -218,8 +205,10 @@ def _load_navigation_context() -> tuple[str, str, str]:
     prev_identity_signature = st.session_state.get("_role_identity_signature")
     current_role = _normalize_role(st.session_state.get("current_role", ""))
 
-    # Evita revalidar role em toda troca de menu; refresca apenas quando ausente.
-    must_refresh_role = not current_role
+    must_refresh_role = (
+        not current_role
+        or prev_identity_signature != identity_signature
+    )
 
     if must_refresh_role:
         refreshed_role = _normalize_role(refresh_current_role())
@@ -238,13 +227,9 @@ def _load_navigation_context() -> tuple[str, str, str]:
     return current_role, user_id, tenant_id
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def _pages_cache_by_role(role: str) -> tuple[list[str], list[str]]:
-    return get_pages_for_role(role), get_menu_pages(role)
-
-
 def _store_available_pages(role: str) -> tuple[list[str], list[str]]:
-    pages, menu_pages = _pages_cache_by_role(role)
+    pages = get_pages_for_role(role)
+    menu_pages = get_menu_pages(role)
     st.session_state["pages"] = pages
     st.session_state["menu_pages"] = menu_pages
     return pages, menu_pages
