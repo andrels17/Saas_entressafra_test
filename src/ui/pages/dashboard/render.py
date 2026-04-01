@@ -428,7 +428,7 @@ def _fragment_kpis_globais(overall: dict) -> None:
                None,
                "off",
                "Percentual global alinhado à mesma regra da Matriz/Home."),
-              ("Equipamentos concluídos",
+              ("Concluídos",
                overall["concl"],
                None,
                "off",
@@ -438,13 +438,13 @@ def _fragment_kpis_globais(overall: dict) -> None:
                None,
                "off",
                None),
-              ("Sem início",
-               overall["sem_inicio"],
+              ("Pendentes",
+               overall["pend"],
                None,
                "off",
                None),
-              ("Em atraso",
-               overall["atrasados"],
+              ("Travados",
+               overall["trav"],
                None,
                "off",
                None),
@@ -487,7 +487,7 @@ def _fragment_previsao(previsao: dict, risco: dict) -> None:
         st.metric(
             f"{icon} Risco operacional",
             f"{risco.get('risco_score', 0):.1f}",
-            help="Score consolidado de risco operacional da revisão.",
+            help="Score: travados × 3 + pendentes × 1.5 + em_andamento × 1.",
         )
         st.caption(
             f"Ritmo: **{previsao.get('ritmo_medio_dia', 0):.2f}%/dia** | "
@@ -750,7 +750,7 @@ def _fragment_equipamentos(
     )
 
     rank_df = edf.sort_values(
-        ["% Concluído", "Concluído", "Equipamento"],
+        ["% Concluído", "Concluídos", "Equipamento"],
         ascending=[False, False, True],
     ).head(top_n)
     _render_pct_rank_chart(
@@ -766,10 +766,13 @@ def _fragment_equipamentos(
         "Frota",
         "Modelo",
         "Departamento",
-        "Serviços previstos",
+        "Total",
         "% Concluído",
-        "Status Geral",
-        "Em atraso",
+        "Pendentes",
+        "Em andamento",
+        "Travados",
+        "Não aplica",
+        "Concluídos",
     ]
     data_table(
         rank_df[cols],
@@ -1014,6 +1017,17 @@ def render_dashboard() -> None:
                    for g in grupos if g.get("id")}
 
     base = normalize_matriz_base(raw, eq_meta)
+    if not base.empty:
+        rev_inicio = pd.to_datetime(rev.get("data_inicio"), errors="coerce") if rev else pd.NaT
+        rev_fim = pd.to_datetime(rev.get("data_fim"), errors="coerce") if rev else pd.NaT
+        if "data_inicio" not in base.columns or base["data_inicio"].isna().all():
+            base["data_inicio"] = rev_inicio
+        else:
+            base["data_inicio"] = pd.to_datetime(base["data_inicio"], errors="coerce").fillna(rev_inicio)
+        if "data_fim" not in base.columns or base["data_fim"].isna().all():
+            base["data_fim"] = rev_fim
+        else:
+            base["data_fim"] = pd.to_datetime(base["data_fim"], errors="coerce").fillna(rev_fim)
     raw_base = base.copy()
 
     # KPI consolidado para fallback de perfis com escopo/RLS mais restritivo.
@@ -1148,7 +1162,7 @@ def render_dashboard() -> None:
         with st.spinner("", show_time=False):
             risco, previsao, heat, crit, tl = build_inteligencia(base_filtered)
     else:
-        risco, previsao = {"status_risco": "baixo", "risco_score": 0}, {"status_previsao": "sem_base"}
+        risco, previsao = {"status_risco": "baixo", "risco_score": 0}, {"status_previsao": "sem_prazo"}
         heat = crit = tl = pd.DataFrame()
     _fragment_previsao(previsao, risco)
     st.divider()
