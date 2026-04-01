@@ -808,24 +808,27 @@ def _build_payload(
     pct_semana_anterior = 0
     pct_semana_atual = pct_geral_snapshot
 
-    if semana_done_steps and expected_steps_total > 0:
+    if expected_steps_total > 0:
         cumulative_done = 0
-        expected_por_semana = round(expected_steps_total / max(semanas_total, 1)) if expected_steps_total > 0 else 0
-        cumulative_expected = 0
+
+        # A tendência semanal deve ser CUMULATIVA e baseada na coluna
+        # "semana" de tarefas_servico, mas usando como denominador o total
+        # esperado da revisão inteira. Assim:
+        #   - Sem.1 não dispara para 100% por causa da "cota" parcial da semana
+        #   - o último ponto da curva bate com o pct_geral do topo
         for sem in range(1, semana_atual + 1):
-            cumulative_done += semana_done_steps.get(sem, 0)
-            cumulative_expected = min(expected_steps_total, cumulative_expected + expected_por_semana)
-            pct_sem = max(0, min(100, round(cumulative_done / max(cumulative_expected, 1) * 100))) if cumulative_expected > 0 else pct_geral_snapshot
+            cumulative_done += int(semana_done_steps.get(sem, 0) or 0)
+            pct_sem = max(0, min(100, round(cumulative_done / max(expected_steps_total, 1) * 100)))
             evolucao.append(SemanaSnapshot(
                 semana=sem,
                 concluidos=cumulative_done,
-                total=cumulative_expected,
+                total=expected_steps_total,
                 pct=pct_sem,
             ))
-        pct_semana_atual = evolucao[-1].pct if evolucao else pct_geral_snapshot
 
-        # Sincroniza SEMPRE o último ponto da tendência com o KPI atual do relatório.
-        # Assim, a curva acumulada termina exatamente no mesmo percentual exibido no topo.
+        pct_semana_atual = evolucao[-1].pct if evolucao else int(pct_geral_snapshot or 0)
+
+        # Garante consistência visual com o KPI do topo.
         if evolucao and int(pct_semana_atual or 0) != int(pct_geral_snapshot or 0):
             pct_semana_atual = int(pct_geral_snapshot or 0)
             evolucao[-1] = SemanaSnapshot(
@@ -834,8 +837,6 @@ def _build_payload(
                 total=evolucao[-1].total,
                 pct=pct_semana_atual,
             )
-        elif not evolucao:
-            pct_semana_atual = int(pct_geral_snapshot or 0)
 
         pct_semana_anterior = evolucao[-2].pct if len(evolucao) >= 2 else 0
     elif expected_steps_total > 0 or pct_geral_snapshot > 0:
@@ -1204,26 +1205,29 @@ def dispatch_relatorio_semanal(
                         _expected_steps=p.expected_steps,
                     ))
 
-                    # Acumula trend e monta heatmap usando pct INCREMENTAL por semana.
-                    # wk.pct é cumulativo (semanas 1..N); para o heatmap queremos
-                    # o progresso *daquela* semana isolada, calculado pelo delta
-                    # done/total entre semanas consecutivas.
+                    # Tendência global: agrega o CUMULADO por semana.
+                    # Heatmap: usa o avanço DAQUELA semana, também contra o
+                    # total esperado do departamento (não contra uma cota semanal).
                     evolucao_sorted = sorted(p.evolucao or [], key=lambda w: getattr(w, "semana", 0))
                     prev_done = 0
+                    dept_expected_total = int(getattr(p, "expected_steps", 0) or 0)
+
                     for wk in evolucao_sorted:
                         sem = int(getattr(wk, "semana", 0) or 0)
                         if sem <= 0:
                             continue
+
                         wk_done = int(getattr(wk, "concluidos", 0) or 0)
-                        wk_total = int(getattr(wk, "total", 0) or 0)
                         acc = trend_acc.setdefault(sem, {"done": 0, "total": 0})
                         acc["done"] += wk_done
-                        acc["total"] += wk_total
-                        # pct incremental: etapas feitas *nessa semana* / total esperado
-                        delta_done = wk_done - prev_done
-                        pct_incremental = max(0, min(100, round(
-                            delta_done / max(wk_total, 1) * 100
-                        ))) if wk_total > 0 else int(getattr(wk, "pct", 0) or 0)
+                        acc["total"] += dept_expected_total
+
+                        delta_done = max(0, wk_done - prev_done)
+                        pct_incremental = (
+                            max(0, min(100, round(delta_done / max(dept_expected_total, 1) * 100)))
+                            if dept_expected_total > 0 else 0
+                        )
+
                         heatmap_semanal.append({
                             "departamento": grp.departamento_nome,
                             "semana": sem,
