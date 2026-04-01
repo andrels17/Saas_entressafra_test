@@ -167,6 +167,8 @@ def _load_tarefas_cached(
     if _token:
         sb.postgrest.auth(_token)
 
+    # Ordena primeiro pelos registros mais recentes e mantém o limite já
+    # após o recorte por revisão/escopo para reduzir payload em perfis com RLS.
     q = (
         sb.table("tarefas_servico")
         .select(
@@ -409,7 +411,8 @@ def _fragment_painel(
         df_filtered = df_filtered[df_filtered["Setor"] == setor_sel]
     if busca.strip():
         bl = busca.strip().lower()
-        df_filtered = df_filtered[df_filtered["Equipamento"].str.lower().str.contains(bl, na=False)]
+        equip_search = df_filtered["Equipamento"].astype(str).str.lower()
+        df_filtered = df_filtered[equip_search.str.contains(bl, na=False)]
 
     # ── Métricas resumidas ─────────────────────────────────────────────────
     n_trav = int((df_filtered["_status"] == "travado").sum())
