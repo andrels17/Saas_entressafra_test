@@ -453,7 +453,7 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
             return [Paragraph("Sem dados desta matriz.", small_style)]
 
         equip_w = 5.0 * cm
-        stage_w = 0.72 * cm
+        stage_w = 0.82 * cm
         max_matrix_cols = max(3, int((pw - equip_w) // stage_w))
         if max_matrix_cols < 3:
             max_matrix_cols = 3
@@ -547,30 +547,49 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
                 ("ALIGN", (0, 3), (0, -1), "LEFT"),
                 ("ALIGN", (1, 3), (-1, -1), "CENTER"),
                 ("SPAN", (0, 0), (0, 2)),
-                ("LEFTPADDING", (1, 3), (-1, -1), 0),
-                ("RIGHTPADDING", (1, 3), (-1, -1), 0),
-                ("TOPPADDING", (1, 3), (-1, -1), 1),
-                ("BOTTOMPADDING", (1, 3), (-1, -1), 1),
+
+                # células das etapas mais quadradas e legíveis
+                ("LEFTPADDING", (1, 3), (-1, -1), 3),
+                ("RIGHTPADDING", (1, 3), (-1, -1), 3),
+                ("TOPPADDING", (1, 3), (-1, -1), 4),
+                ("BOTTOMPADDING", (1, 3), (-1, -1), 4),
+
+                # reforço geral de grade para impressão
+                ("GRID", (1, 2), (-1, -1), 0.55, colors.HexColor("#7C8A9A")),
+                ("BOX", (0, 0), (-1, -1), 0.9, colors.HexColor("#475569")),
             ]
             for c1, r1, c2, r2 in spans[1:]:
                 style_cmds.append(("SPAN", (c1, r1), (c2, r2)))
-            for col in separators[:-1]:
-                style_cmds.append(("LINEAFTER", (col, 0), (col, -1), 0.8, colors.HexColor("#94A3B8")))
+
+            # separador forte a cada serviço (bloco D/R/M)
+            for col in separators:
+                style_cmds.append(("LINEAFTER", (col, 0), (col, -1), 1.25, colors.HexColor("#334155")))
 
             for row_i in range(3, len(data)):
                 for col_i in range(1, len(cols_meta)):
                     bg, fg, text = _cell_heat_style(view.iloc[row_i - 3, col_i])
-                    style_cmds.extend(
-                        [
-                            ("BACKGROUND", (col_i, row_i), (col_i, row_i), bg),
-                            ("TEXTCOLOR", (col_i, row_i), (col_i, row_i), fg),
-                        ]
-                    )
-                    if text:
+
+                    # modo checklist impresso:
+                    # - células vazias ficam bem destacadas para marcação manual
+                    # - células OK já concluídas permanecem visíveis
+                    is_done = bool(text)
+
+                    if is_done:
                         style_cmds.extend(
                             [
+                                ("BACKGROUND", (col_i, row_i), (col_i, row_i), colors.HexColor("#DCFCE7")),
+                                ("TEXTCOLOR", (col_i, row_i), (col_i, row_i), colors.HexColor("#166534")),
                                 ("FONTNAME", (col_i, row_i), (col_i, row_i), "Helvetica-Bold"),
-                                ("BOX", (col_i, row_i), (col_i, row_i), 0.35, fg),
+                                ("BOX", (col_i, row_i), (col_i, row_i), 1.0, colors.HexColor("#166534")),
+                            ]
+                        )
+                    else:
+                        style_cmds.extend(
+                            [
+                                ("BACKGROUND", (col_i, row_i), (col_i, row_i), colors.white),
+                                ("TEXTCOLOR", (col_i, row_i), (col_i, row_i), colors.white),
+                                # quadrado mais forte para o gestor marcar à caneta
+                                ("BOX", (col_i, row_i), (col_i, row_i), 1.0, colors.HexColor("#475569")),
                             ]
                         )
 
