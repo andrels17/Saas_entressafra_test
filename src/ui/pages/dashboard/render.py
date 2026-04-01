@@ -573,7 +573,6 @@ def _build_department_rank_df(
 
 def _build_equipment_rank_df(
         equipment_base: pd.DataFrame,
-        dept_map: dict,
         top_n: int = 10) -> pd.DataFrame:
     if equipment_base is None or equipment_base.empty:
         return pd.DataFrame(columns=["Categoria", "Valor", "label"])
@@ -583,25 +582,18 @@ def _build_equipment_rank_df(
     edf = edf.copy()
     if "Frota" not in edf.columns or "Modelo" not in edf.columns:
         return pd.DataFrame(columns=["Categoria", "Valor", "label"])
-    edf["Frota"] = edf["Frota"].fillna("—").astype(str).str.strip()
-    edf["Modelo"] = edf["Modelo"].fillna("—").astype(str).str.strip()
-    if "departamento_id" in edf.columns:
-        edf["Departamento"] = edf["departamento_id"].map(
-            lambda v: dept_map.get(str(v)) if pd.notna(v) else None
-        ).fillna("—")
-    edf["Categoria"] = edf.apply(
-        lambda r: (
-            f"{r['Frota']} — {r['Modelo']}"
-            if str(r["Frota"]).strip() not in {"", "—"} and str(r["Modelo"]).strip() not in {"", "—"}
-            else str(r["Frota"]) if str(r["Frota"]).strip() not in {"", "—"}
-            else str(r["Modelo"]) if str(r["Modelo"]).strip() not in {"", "—"}
-            else "—"
-        ),
-        axis=1,
-    )
+
+    def _equip_name(row) -> str:
+        frota = str(row.get("Frota") or "").strip()
+        modelo = str(row.get("Modelo") or "").strip()
+        if frota and modelo:
+            return f"{frota} — {modelo}"
+        return frota or modelo or "—"
+
     value_col = "% Concluído" if "% Concluído" in edf.columns else "pct_concluido"
     if value_col not in edf.columns:
         return pd.DataFrame(columns=["Categoria", "Valor", "label"])
+    edf["Categoria"] = edf.apply(_equip_name, axis=1)
     edf["Valor"] = pd.to_numeric(edf[value_col], errors="coerce").fillna(0).clip(0, 100)
     edf["label"] = edf["Valor"].map(lambda v: f"{int(round(v))}%")
     return edf[["Categoria", "Valor", "label"]].sort_values(["Valor", "Categoria"], ascending=[False, True]).head(top_n)
@@ -612,79 +604,68 @@ def _build_operational_overview_figure_cached(
         payload_key: str,
         groups_records: list[dict],
         dept_records: list[dict],
-        equip_records: list[dict]) -> object | None:
+        equip_records: list[dict]):
     _ = payload_key
     datasets = [
         ("Grupos", groups_records),
         ("Departamentos", dept_records),
         ("Equipamentos", equip_records),
     ]
+
     fig = go.Figure()
-    visible_first = None
+    first_visible = 0
     for idx, (name, records) in enumerate(datasets):
-        rdf = pd.DataFrame(records or [])
-        if rdf.empty:
-            x, y, txt = [], [], []
+        df = pd.DataFrame(records or [])
+        if df.empty:
+            x, y, text_vals = [], [], []
         else:
-            rdf = rdf.copy()
-            if "Categoria" not in rdf.columns or "Valor" not in rdf.columns:
-                x, y, txt = [], [], []
-            else:
-                rdf = rdf.sort_values("Valor", ascending=True)
-                x = rdf["Valor"].tolist()
-                y = rdf["Categoria"].tolist()
-                txt = rdf.get("label", pd.Series([""] * len(rdf))).tolist()
-                if visible_first is None and len(x) > 0:
-                    visible_first = idx
+            df = df.sort_values("Valor", ascending=True)
+            x = df["Valor"].tolist()
+            y = df["Categoria"].tolist()
+            text_vals = df["label"].tolist()
         fig.add_trace(
             go.Bar(
                 x=x,
                 y=y,
                 orientation="h",
-                text=txt,
+                text=text_vals,
                 textposition="outside",
                 name=name,
-                visible=False,
+                visible=(idx == first_visible),
                 hovertemplate="%{y}<br>% Concluído: %{x:.0f}%<extra></extra>",
             )
         )
-    if not fig.data:
-        return None
-    if visible_first is None:
-        visible_first = 0
-    for i in range(len(fig.data)):
-        fig.data[i].visible = (i == visible_first)
 
     buttons = []
-    for i, (name, _) in enumerate(datasets):
+    for idx, (name, _) in enumerate(datasets):
         visible = [False] * len(datasets)
-        visible[i] = True
+        visible[idx] = True
         buttons.append(
             dict(
                 label=name,
                 method="update",
-                args=[
-                    {"visible": visible},
-                    {"title": f"Visão operacional — {name}"}
-                ],
+                args=[{"visible": visible}, {"title": f"Visão operacional — {name}"}],
             )
         )
 
-    max_len = max((len(trace.y) for trace in fig.data), default=1)
+    max_items = 1
+    for _, records in datasets:
+        max_items = max(max_items, len(records or []))
+
     fig.update_layout(
-        title=f"Visão operacional — {datasets[visible_first][0]}",
+        title="Visão operacional — Grupos",
         updatemenus=[
             dict(
                 type="buttons",
                 direction="right",
                 x=0.0,
-                y=1.16,
+                y=1.18,
                 showactive=True,
                 buttons=buttons,
             )
         ],
-        height=max(420, 42 * max_len + 120),
-        margin=dict(l=10, r=90, t=80, b=10),
+        height=max(420, 42 * max_items + 120),
+        margin=dict(l=10, r=90, t=90, b=10),
         xaxis=dict(range=[0, 110], title="% Concluído"),
         yaxis=dict(title="", type="category"),
         paper_bgcolor="#06080B",
@@ -696,46 +677,41 @@ def _build_operational_overview_figure_cached(
 
 
 def _render_operational_overview_chart(
-        group_kpis_df: pd.DataFrame,
+        dashboard_groups_filtered: pd.DataFrame,
         gid_to_dept: dict,
         dept_map: dict,
-        equipment_base: pd.DataFrame,
+        equipment_source_for_chart: pd.DataFrame,
         top_n: int = 10) -> None:
     groups_df = pd.DataFrame(columns=["Categoria", "Valor", "label"])
-    if group_kpis_df is not None and not group_kpis_df.empty:
-        src = group_kpis_df.copy()
+    if dashboard_groups_filtered is not None and not dashboard_groups_filtered.empty:
+        src = dashboard_groups_filtered.copy()
         value_col = "pct_concluido" if "pct_concluido" in src.columns else "pct"
         name_col = "grupo" if "grupo" in src.columns else "Grupo"
         if value_col in src.columns and name_col in src.columns:
             groups_df = (
                 src[[name_col, value_col]]
                 .rename(columns={name_col: "Categoria", value_col: "Valor"})
-                .assign(label=lambda d: d["Valor"].map(lambda v: f"{int(round(float(v)))}%"))
-                .sort_values(["Valor", "Categoria"], ascending=[False, True])
-                .head(top_n)
+                .assign(
+                    Valor=lambda d: pd.to_numeric(d["Valor"], errors="coerce").fillna(0).clip(0, 100),
+                )
             )
-    dept_df = _build_department_rank_df(group_kpis_df, gid_to_dept, dept_map, top_n=top_n)
-    equip_df = _build_equipment_rank_df(equipment_base, dept_map, top_n=top_n)
+            groups_df["label"] = groups_df["Valor"].map(lambda v: f"{int(round(v))}%")
+            groups_df = groups_df.sort_values(["Valor", "Categoria"], ascending=[False, True]).head(top_n)
+
+    dept_df = _build_department_rank_df(dashboard_groups_filtered, gid_to_dept, dept_map, top_n=top_n)
+    equip_df = _build_equipment_rank_df(equipment_source_for_chart, top_n=top_n)
 
     if groups_df.empty and dept_df.empty and equip_df.empty:
         st.info("Sem dados para a visão operacional.")
         return
 
-    payload_key = _json_cache_key({
-        "groups": groups_df.to_dict("records"),
-        "depts": dept_df.to_dict("records"),
-        "equip": equip_df.to_dict("records"),
-        "top_n": top_n,
-    })
+    payload_key = str(hash(str(groups_df.to_dict("records")[:50]) + str(dept_df.to_dict("records")[:50]) + str(equip_df.to_dict("records")[:50]) + str(top_n)))
     fig = _build_operational_overview_figure_cached(
         payload_key,
         groups_df.to_dict("records"),
         dept_df.to_dict("records"),
         equip_df.to_dict("records"),
     )
-    if fig is None:
-        st.info("Sem dados para a visão operacional.")
-        return
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     st.caption("Use os botões no próprio gráfico para alternar entre grupos, departamentos e equipamentos sem rerun.")
 
@@ -1628,35 +1604,26 @@ def render_dashboard() -> None:
         equipment_source_for_chart,
         top_n=top_n,
     )
-    st.divider()
 
+    st.divider()
     st.markdown("### Progresso por grupo")
     _fragment_grupos(
         base_filtered,
         dept_map,
         dashboard_groups_filtered,
-        top_n=top_n,
-    )
-    st.divider()
+        top_n=top_n)
 
+    st.divider()
     st.markdown("### Progresso por departamento")
     _fragment_departamentos(dashboard_groups_filtered, gid_to_dept, dept_map)
-    st.divider()
 
+    st.divider()
     st.markdown("### Progresso por equipamento")
     if equipment_detailed_available:
         _fragment_equipamentos(equipment_base_filtered, dept_map, top_n=top_n)
     elif detailed_available and task_rows_current > 0:
         st.caption("Usando base detalhada da revisão atual para montar o ranking de equipamentos.")
         _fragment_equipamentos(base_filtered, dept_map, top_n=top_n)
-        with st.expander("Diagnóstico do detalhamento", expanded=False):
-            st.caption(f"tarefas visíveis na revisão atual: {task_rows_current}")
-            st.caption(f"tarefas visíveis em qualquer revisão: {int((debug_meta or {}).get('task_rows_any_revision_visible') or 0)}")
-            st.caption(f"fonte das tarefas: {(debug_meta or {}).get('task_source') or 'table'}")
-            rpc_used = (debug_meta or {}).get("task_rpc_used")
-            if rpc_used:
-                st.caption(f"rpc testada/usada: {rpc_used}")
-            st.caption("observação: a leitura RPC já trouxe tarefas da revisão atual; por isso o ranking foi montado mesmo sem a base task-only isolada.")
     elif detailed_available:
         empty_message(equipment_detail_reason or "Não há tarefas de equipamento visíveis neste perfil para a revisão atual.")
     else:
