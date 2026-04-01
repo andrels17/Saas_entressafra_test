@@ -1193,11 +1193,11 @@ def render_dashboard() -> None:
                    for g in grupos if g.get("id")}
 
     base = normalize_matriz_base(raw, eq_meta)
+    # Para equipamentos, preserva a base completa. A combinação híbrida entre
+    # linhas sintéticas e linhas reais de tarefa acontece dentro de
+    # _fragment_equipamentos(). Filtrar aqui apenas row_source="task" fazia
+    # equipamentos com cobertura parcial via grupo_servicos desaparecerem da aba.
     equipment_base = base.copy()
-    if not equipment_base.empty and "row_source" in equipment_base.columns:
-        equipment_base = equipment_base[
-            equipment_base["row_source"].fillna("").astype(str).str.lower().eq("task")
-        ].copy()
     if not base.empty:
         if "data_inicio" not in base.columns:
             base["data_inicio"] = pd.NaT
