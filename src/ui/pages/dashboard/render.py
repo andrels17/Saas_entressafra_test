@@ -54,6 +54,49 @@ def _token_cache_key(token: str = "") -> str:
     return hashlib.md5((token or "").encode()).hexdigest()[:8]
 
 
+@st.cache_data(ttl=45, show_spinner=False)
+def _load_scope_cached(
+    tenant_id: str,
+    role: str,
+    token_key: str = "",
+    _token: str = "",
+) -> tuple[list | None, list | None]:
+    _ = token_key
+    sb = _sb_from_token(_token)
+    dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id, sb)
+    if can_view_all_data(role):
+        if dep_scope_ids == []:
+            dep_scope_ids = None
+        if grp_scope_ids == []:
+            grp_scope_ids = None
+    return dep_scope_ids, grp_scope_ids
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def _load_revisao_cached(
+    tenant_id: str,
+    revisao_id: str | None,
+    token_key: str = "",
+    _token: str = "",
+) -> dict | None:
+    _ = token_key
+    sb = _sb_from_token(_token)
+    return _load_revisao(sb, tenant_id, revisao_id)
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _build_inteligencia_cached(
+    base: pd.DataFrame,
+    token_key: str = "",
+    ver: str = "0",
+) -> tuple[dict, dict, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    _ = token_key, ver
+    if base is None or base.empty:
+        return {"status_risco": "baixo", "risco_score": 0}, {"status_previsao": "sem_base"}, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    risco, previsao, heat, crit, trend = build_inteligencia(base.copy())
+    return risco, previsao, heat, crit, trend
+
+
 def _load_revisao(sb, tenant_id: str, revisao_id: str | None = None) -> dict | None:
     rows = (
         sb.table("revisoes")
@@ -1143,20 +1186,27 @@ def render_dashboard() -> None:
         st.info("Selecione um tenant para ver o dashboard.")
         return
 
-    sb = sb_for_user()
-    dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id, sb)
     role = st.session_state.get("current_role") or ""
-    if can_view_all_data(role):
-        if dep_scope_ids == []:
-            dep_scope_ids = None
-        if grp_scope_ids == []:
-            grp_scope_ids = None
+    token = st.session_state.get("sb_access_token", "") or ""
+    token_key = _token_cache_key(token)
+
+    dep_scope_ids, grp_scope_ids = _load_scope_cached(
+        tenant_id=tenant_id,
+        role=role,
+        token_key=token_key,
+        _token=token,
+    )
     if not can_view_all_data(role) and dep_scope_ids == [] and grp_scope_ids == []:
         st.warning("Você não possui departamentos ou grupos vinculados para visualizar o dashboard.")
         return
 
     with st.spinner("", show_time=False):
-        rev = _load_revisao(sb, tenant_id, get_current_revisao())
+        rev = _load_revisao_cached(
+            tenant_id=tenant_id,
+            revisao_id=get_current_revisao(),
+            token_key=token_key,
+            _token=token,
+        )
     if not rev:
         st.warning("Nenhuma revisão ativa encontrada para este tenant.")
         return
@@ -1186,18 +1236,26 @@ def render_dashboard() -> None:
     )
 
     ver = str(st.session_state.get("data_version", "0"))
-    token = st.session_state.get("sb_access_token", "") or ""
-    token_key = _token_cache_key(token)
     with st.spinner("", show_time=False):
         raw, raw_equipment, eq_meta, debug_meta = _load_base_cached(
-            tenant_id,
-            revisao_id,
-            token_key,
-            ver,
+            tenant_id=tenant_id,
+            revisao_id=revisao_id,
+            token_key=token_key,
+            ver=ver,
             _token=token,
         )
-        departamentos = _load_departamentos(tenant_id, token_key, ver, _token=token)
-        grupos = _load_grupos(tenant_id, token_key, ver, _token=token)
+        departamentos = _load_departamentos(
+            tenant_id=tenant_id,
+            token_key=token_key,
+            ver=ver,
+            _token=token,
+        )
+        grupos = _load_grupos(
+            tenant_id=tenant_id,
+            token_key=token_key,
+            ver=ver,
+            _token=token,
+        )
 
     if dep_scope_ids in (None, [] ) and grp_scope_ids not in (None, []):
         dep_scope_ids = sorted({str(g.get("departamento_id")) for g in grupos if g.get("id") in set(grp_scope_ids) and g.get("departamento_id")})
@@ -1412,7 +1470,11 @@ def render_dashboard() -> None:
 
     if detailed_available:
         with st.spinner("", show_time=False):
-            risco, previsao, heat, crit, trend = build_inteligencia(base_filtered)
+            risco, previsao, heat, crit, trend = _build_inteligencia_cached(
+                base=base_filtered,
+                token_key=token_key,
+                ver=ver,
+            )
     else:
         risco, previsao = {"status_risco": "baixo", "risco_score": 0}, {"status_previsao": "sem_base"}
         heat = crit = trend = pd.DataFrame()
