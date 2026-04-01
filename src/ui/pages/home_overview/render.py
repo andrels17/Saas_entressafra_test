@@ -42,6 +42,48 @@ from .transforms import (
 )
 
 
+@st.cache_data(ttl=45, show_spinner=False)
+def _load_home_scope_cached(
+    tenant_id: str,
+    role: str,
+    token_hash: str = "",
+) -> tuple[list | None, list | None]:
+    _ = token_hash
+    dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id)
+    if can_view_all_data(role):
+        if dep_scope_ids == []:
+            dep_scope_ids = None
+        if grp_scope_ids == []:
+            grp_scope_ids = None
+    return dep_scope_ids, grp_scope_ids
+
+
+@st.cache_data(ttl=45, show_spinner=False)
+def _load_home_catalog_context(
+    tenant_id: str,
+    ver: str,
+    role: str,
+    token_hash: str = "",
+    _token: str = "",
+) -> dict:
+    grupos = load_groups(tenant_id, ver, token_hash=token_hash, _token=_token)
+    deps = load_depts(tenant_id, ver, token_hash=token_hash, _token=_token)
+    dep_scope_ids, grp_scope_ids = _load_home_scope_cached(tenant_id, role, token_hash=token_hash)
+
+    if dep_scope_ids not in (None, []):
+        dep_scope_set = {str(x) for x in dep_scope_ids}
+        deps = [d for d in deps if str(d.get("id")) in dep_scope_set]
+    if grp_scope_ids not in (None, []):
+        grp_scope_set = {str(x) for x in grp_scope_ids}
+        grupos = [g for g in grupos if str(g.get("id")) in grp_scope_set]
+
+    return {
+        "grupos": grupos,
+        "deps": deps,
+        "dep_scope_ids": dep_scope_ids,
+        "grp_scope_ids": grp_scope_ids,
+    }
+
 
 def _fmt_int_br(value) -> str:
     try:
@@ -365,7 +407,7 @@ def _fragment_risco(
 
 
 
-_HOME_AUTO_REFRESH_EVERY = "30s"
+_HOME_AUTO_REFRESH_EVERY = "15s"
 
 @st.fragment(run_every=_HOME_AUTO_REFRESH_EVERY)
 def _fragment_home_live() -> None:
@@ -393,30 +435,29 @@ def _fragment_home_live() -> None:
         set_current_revisao(rev["id"])
         st.session_state["_sidebar_rev_titulo"] = rev.get("titulo")
         st.session_state["_sidebar_rev_semana"] = week
-    grupos = load_groups(tenant_id, ver, token_hash=_tok_hash, _token=_tok)
-    deps = load_depts(tenant_id, ver, token_hash=_tok_hash, _token=_tok)
+    role = st.session_state.get("current_role") or ""
+    ctx = _load_home_catalog_context(
+        tenant_id=tenant_id,
+        ver=ver,
+        role=role,
+        token_hash=_tok_hash,
+        _token=_tok,
+    )
+    grupos = ctx.get("grupos") or []
+    deps = ctx.get("deps") or []
+    dep_scope_ids = ctx.get("dep_scope_ids")
+    grp_scope_ids = ctx.get("grp_scope_ids")
+
+    if not can_view_all_data(role) and dep_scope_ids == [] and grp_scope_ids == []:
+        st.warning("Você não possui departamentos ou grupos vinculados para visualizar esta revisão.")
+        return
+
     gid_to_name = {g["id"]: (g.get("nome") or "—")
                    for g in grupos if g.get("id")}
     gid_to_dept = {g["id"]: g.get("departamento_id")
                    for g in grupos if g.get("id")}
     dept_to_name = {d["id"]: (d.get("nome") or "—")
                     for d in deps if d.get("id")}
-
-    dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id)
-    role = st.session_state.get("current_role") or ""
-    if can_view_all_data(role):
-        if dep_scope_ids == []:
-            dep_scope_ids = None
-        if grp_scope_ids == []:
-            grp_scope_ids = None
-    if not can_view_all_data(role) and dep_scope_ids == [] and grp_scope_ids == []:
-        st.warning("Você não possui departamentos ou grupos vinculados para visualizar esta revisão.")
-        return
-
-    if dep_scope_ids is not None:
-        deps = [d for d in deps if d.get("id") in dep_scope_ids]
-    if grp_scope_ids is not None:
-        grupos = [g for g in grupos if g.get("id") in grp_scope_ids]
 
     # ── Header da revisão ───────────────────────────────────────────────────
     h1_col, h2_col = st.columns([0.82, 0.18])
