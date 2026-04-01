@@ -363,8 +363,9 @@ def _fragment_risco(
 
 # ── Ponto de entrada público ────────────────────────────────────────────
 
-_HOME_AUTO_REFRESH_EVERY = "15s"
 
+
+_HOME_AUTO_REFRESH_EVERY = "15s"
 
 @st.fragment(run_every=_HOME_AUTO_REFRESH_EVERY)
 def _fragment_home_live() -> None:
