@@ -1186,11 +1186,18 @@ def render_dashboard() -> None:
     )
 
     ver = str(st.session_state.get("data_version", "0"))
-    token = st.session_state.get("sb_access_token", "")
+    token = st.session_state.get("sb_access_token", "") or ""
+    token_key = _token_cache_key(token)
     with st.spinner("", show_time=False):
-        raw, raw_equipment, eq_meta, debug_meta = _load_base_cached(tenant_id, revisao_id, token, ver)
-        departamentos = _load_departamentos(tenant_id, ver, token)
-        grupos = _load_grupos(tenant_id, ver, token)
+        raw, raw_equipment, eq_meta, debug_meta = _load_base_cached(
+            tenant_id,
+            revisao_id,
+            token_key,
+            ver,
+            _token=token,
+        )
+        departamentos = _load_departamentos(tenant_id, token_key, ver, _token=token)
+        grupos = _load_grupos(tenant_id, token_key, ver, _token=token)
 
     if dep_scope_ids in (None, [] ) and grp_scope_ids not in (None, []):
         dep_scope_ids = sorted({str(g.get("departamento_id")) for g in grupos if g.get("id") in set(grp_scope_ids) and g.get("departamento_id")})
