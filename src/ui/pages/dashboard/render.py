@@ -7,7 +7,7 @@ calculados em transforms.py.
 from __future__ import annotations
 
 import hashlib
-import inspect
+import json
 import time
 
 import pandas as pd
@@ -55,42 +55,107 @@ def _token_cache_key(token: str = "") -> str:
     return hashlib.md5((token or "").encode()).hexdigest()[:8]
 
 
-def _apply_filters_compat(base_df, dep_ids=None, grp_ids=None):
-    """Compatibilidade com diferentes assinaturas de apply_filters em transforms.py."""
+def _json_cache_key(obj) -> str:
     try:
-        sig = inspect.signature(apply_filters)
-        names = list(sig.parameters.keys())
-        kwargs = {}
+        payload = json.dumps(obj, ensure_ascii=False, sort_keys=True, default=str)
+    except Exception:
+        payload = str(obj)
+    return hashlib.md5(payload.encode("utf-8")).hexdigest()[:16]
 
-        if "base" in names:
-            kwargs["base"] = base_df
-        elif names:
-            kwargs[names[0]] = base_df
 
-        if "departamento_ids" in names:
-            kwargs["departamento_ids"] = dep_ids
-        elif "dept_ids" in names:
-            kwargs["dept_ids"] = dep_ids
-        elif "departamentos" in names:
-            kwargs["departamentos"] = dep_ids
-        elif len(names) >= 2:
-            kwargs[names[1]] = dep_ids
+def _df_cache_key(df: pd.DataFrame, cols: list[str] | None = None) -> str:
+    """Gera chave leve e estável para cache de payload/figura de gráfico."""
+    try:
+        if df is None or df.empty:
+            return "empty"
+        sample = df if cols is None else df[[c for c in cols if c in df.columns]].copy()
+        payload = {
+            "shape": list(sample.shape),
+            "columns": list(sample.columns),
+            "head": sample.head(200).astype(str).to_dict("records"),
+        }
+        return _json_cache_key(payload)
+    except Exception:
+        return f"df:{id(df)}"
 
-        if "grupo_ids" in names:
-            kwargs["grupo_ids"] = grp_ids
-        elif "group_ids" in names:
-            kwargs["group_ids"] = grp_ids
-        elif "grupos" in names:
-            kwargs["grupos"] = grp_ids
-        elif len(names) >= 3:
-            kwargs[names[2]] = grp_ids
 
-        return apply_filters(**kwargs)
-    except TypeError:
-        try:
-            return apply_filters(base_df, dep_ids, grp_ids)
-        except TypeError:
-            return apply_filters(base_df, dep_ids)
+@st.cache_data(ttl=45, show_spinner=False)
+def _build_rank_chart_payload_cached(payload_key: str, records: list[dict], category_col: str, value_col: str, top_n: int = 10) -> list[dict]:
+    _ = payload_key
+    chart_df = pd.DataFrame(records or [])
+    if chart_df.empty or category_col not in chart_df.columns or value_col not in chart_df.columns:
+        return []
+    chart_df = chart_df[[category_col, value_col]].copy()
+    chart_df[category_col] = chart_df[category_col].fillna("—").astype(str)
+    chart_df[value_col] = pd.to_numeric(chart_df[value_col], errors="coerce").fillna(0).clip(0, 100)
+    chart_df = chart_df.sort_values(value_col, ascending=False).head(top_n)
+    chart_df = chart_df.sort_values(value_col, ascending=True)
+    chart_df["label"] = chart_df[value_col].map(lambda v: f"{int(round(v))}%")
+    chart_df["color"] = chart_df[value_col].apply(_pct_bar_color)
+    return chart_df.to_dict("records")
+
+
+@st.cache_data(ttl=45, show_spinner=False)
+def _build_rank_chart_figure_cached(payload_key: str, chart_records: list[dict], category_col: str, value_col: str, title: str):
+    _ = payload_key
+    chart_df = pd.DataFrame(chart_records or [])
+    if chart_df.empty:
+        return None
+    fig = px.bar(
+        chart_df,
+        x=value_col,
+        y=category_col,
+        orientation="h",
+        text="label",
+        color="color",
+        color_discrete_map="identity",
+        title=title,
+    )
+    fig.update_traces(
+        textposition="outside",
+        cliponaxis=False,
+        hovertemplate="%{y}<br>% Concluído: %{x:.0f}%<extra></extra>",
+    )
+    fig.update_layout(
+        height=max(380, 42 * len(chart_df) + 80),
+        margin=dict(l=10, r=90, t=48, b=10),
+        xaxis=dict(range=[0, 110], title="% Concluído"),
+        yaxis=dict(title="", type="category"),
+        paper_bgcolor="#06080B",
+        plot_bgcolor="#0C111A",
+        font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=11),
+        showlegend=False,
+    )
+    return fig
+
+
+@st.cache_data(ttl=45, show_spinner=False)
+def _build_heatmap_figure_cached(payload_key: str, records: list[dict]):
+    _ = payload_key
+    if not records:
+        return None
+    df = pd.DataFrame(records)
+    if df.empty or "x" not in df.columns or "y" not in df.columns or "z" not in df.columns:
+        return None
+    fig = px.density_heatmap(
+        df,
+        x="x",
+        y="y",
+        z="z",
+        histfunc="avg",
+        text_auto=".0f",
+        aspect="auto",
+    )
+    fig.update_layout(
+        margin=dict(l=10, r=10, t=10, b=10),
+        paper_bgcolor="#06080B",
+        plot_bgcolor="#0C111A",
+        font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=11),
+        xaxis_title="Grupo",
+        yaxis_title="Setor",
+        coloraxis_colorbar_title="% concluído",
+    )
+    return fig
 
 
 def _load_revisao(sb, tenant_id: str, revisao_id: str | None = None) -> dict | None:
@@ -534,47 +599,28 @@ def _render_pct_rank_chart(
         value_col: str,
         title: str,
         top_n: int = 10) -> None:
-    chart_df = df.copy()
-    if chart_df.empty or category_col not in chart_df.columns or value_col not in chart_df.columns:
+    if df is None or df.empty or category_col not in df.columns or value_col not in df.columns:
         st.info("Sem dados para exibir.")
         return
 
-    chart_df = chart_df[[category_col, value_col]].copy()
-    chart_df[category_col] = chart_df[category_col].fillna("—").astype(str)
-    chart_df[value_col] = pd.to_numeric(
-        chart_df[value_col], errors="coerce").fillna(0).clip(0, 100)
-    chart_df = chart_df.sort_values(value_col, ascending=False).head(top_n)
-    chart_df = chart_df.sort_values(value_col, ascending=True)
-    chart_df["label"] = chart_df[value_col].map(lambda v: f"{int(round(v))}%")
-    chart_df["color"] = chart_df[value_col].apply(_pct_bar_color)
-
-    fig = px.bar(
-        chart_df,
-        x=value_col,
-        y=category_col,
-        orientation="h",
-        text="label",
-        color="color",
-        color_discrete_map="identity",
-        title=title,
-    )
-    fig.update_traces(
-        textposition="outside",
-        cliponaxis=False,
-        hovertemplate="%{y}<br>% Concluído: %{x:.0f}%<extra></extra>")
-    fig.update_layout(
-        height=max(380, 42 * len(chart_df) + 80),
-        margin=dict(l=10, r=90, t=48, b=10),
-        xaxis=dict(range=[0, 110], title="% Concluído"),
-        yaxis=dict(title="", type="category"),
-        paper_bgcolor="#06080B",
-        plot_bgcolor="#0C111A",
-        font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=11),
-        showlegend=False,
-    )
-    st.plotly_chart(
-        fig, use_container_width=True, config={"displayModeBar": False})
-
+    records = df[[category_col, value_col]].copy().to_dict("records")
+    payload_key = _json_cache_key({
+        "records_key": _json_cache_key(records[:200]),
+        "category_col": category_col,
+        "value_col": value_col,
+        "title": title,
+        "top_n": top_n,
+        "nrows": len(records),
+    })
+    chart_records = _build_rank_chart_payload_cached(payload_key, records, category_col, value_col, top_n)
+    if not chart_records:
+        st.info("Sem dados para exibir.")
+        return
+    fig = _build_rank_chart_figure_cached(payload_key, chart_records, category_col, value_col, title)
+    if fig is None:
+        st.info("Sem dados para exibir.")
+        return
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 @st.fragment
 def _fragment_kpis_globais(overall: dict) -> None:
@@ -1001,35 +1047,41 @@ def _fragment_equipamentos(
 
 
 @st.fragment
-def _fragment_heatmap(heat: pd.DataFrame) -> None:
-    if heat.empty:
-        empty_message("Sem dados de heatmap para esta revisão.")
+def _fragment_heatmap(base: pd.DataFrame) -> None:
+    if base is None or base.empty:
+        empty_message("Sem dados para heatmap.")
         return
-    fig = px.density_heatmap(
-        heat,
-        x="setor",
-        y="grupo",
-        z="calor_score",
-        color_continuous_scale="RdYlGn_r",
-        labels={
-            "setor": "Setor",
-            "grupo": "Grupo",
-            "calor_score": "Score de risco"},
-        title="Heatmap de Risco — Grupo × Setor",
-    )
-    fig.update_layout(
-        height=max(300, len(heat["grupo"].unique()) * 40 + 80),
-        margin=dict(l=10, r=10, t=40, b=10),
-        paper_bgcolor="#06080B",
-        plot_bgcolor="#0C111A",
-        font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=11),
-    )
-    st.plotly_chart(
-        fig, use_container_width=True, config={
-            "displayModeBar": False})
-    st.caption(
-        "Score: travado × 3 + pendente × 1.5 + em_andamento × 1, normalizado por total.")
 
+    cols_needed = [c for c in ["grupo_nome", "setor_nome", "status"] if c in base.columns]
+    if len(cols_needed) < 3:
+        empty_message("Sem dados para heatmap.")
+        return
+
+    hm = base[["grupo_nome", "setor_nome", "status"]].copy()
+    if hm.empty:
+        empty_message("Sem dados para heatmap.")
+        return
+
+    done_status = {"concluido", "concluído"}
+    hm["done"] = hm["status"].astype(str).str.strip().str.lower().isin(done_status).astype(int)
+    agg = (
+        hm.groupby(["grupo_nome", "setor_nome"], dropna=False)["done"]
+        .mean()
+        .mul(100)
+        .round(0)
+        .reset_index()
+        .rename(columns={"grupo_nome": "x", "setor_nome": "y", "done": "z"})
+    )
+    records = agg.to_dict("records")
+    payload_key = _json_cache_key({
+        "records_key": _json_cache_key(records[:300]),
+        "nrows": len(records),
+    })
+    fig = _build_heatmap_figure_cached(payload_key, records)
+    if fig is None:
+        empty_message("Sem dados para heatmap.")
+        return
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 @st.fragment
 def _fragment_criticidade(crit: pd.DataFrame) -> None:
@@ -1174,6 +1226,12 @@ def _overall_from_group_kpis(kdf: pd.DataFrame) -> dict:
         "na": 0,
     }
 
+@st.cache_data(ttl=45, show_spinner=False)
+def _build_inteligencia_cached(payload_key: str, records: list[dict]) -> pd.DataFrame:
+    _ = payload_key
+    return _build_inteligencia_cached(_json_cache_key({"n": len(pd.DataFrame(records or []), "cols": list(pd.DataFrame(records or [].columns) if hasattr(pd.DataFrame(records or [], "columns") else []}), pd.DataFrame(records or [].to_dict("records") if hasattr(pd.DataFrame(records or [], "to_dict") else []))
+
+
 def render_dashboard() -> None:
     page_header("Dashboard")
 
@@ -1263,7 +1321,7 @@ def render_dashboard() -> None:
     # era manter equipment_base sem aplicar o escopo automático do gestor,
     # fazendo a aba listar equipamentos de outros departamentos/grupos.
     if dep_scope_ids is not None or grp_scope_ids is not None:
-        equipment_base = _apply_filters_compat(equipment_base, dep_scope_ids, grp_scope_ids)
+        equipment_base = apply_filters(equipment_base, dep_scope_ids, grp_scope_ids)
         if equipment_base.empty and dep_scope_ids not in (None, []):
             # Mesmo fallback defensivo usado na base principal: se o vínculo do
             # gestor vier por departamento e a lista de grupos estiver
@@ -1300,11 +1358,11 @@ def render_dashboard() -> None:
             _grp_scope_set = {str(x) for x in grp_scope_ids}
             kpi_df = kpi_df[kpi_df["grupo_id"].isin(_grp_scope_set)]
 
-    base = _apply_filters_compat(base, dep_scope_ids, grp_scope_ids)
+    base = apply_filters(base, dep_scope_ids, grp_scope_ids)
     if base.empty and dep_scope_ids not in (None, []):
         # fallback defensivo: quando o vínculo vier por departamento e a lista de grupos
         # estiver desatualizada, mantém o filtro por departamento em vez de zerar o dashboard.
-        base = _apply_filters_compat(raw_base, dep_scope_ids, None)
+        base = apply_filters(base=raw_base, departamento_ids=dep_scope_ids, grupo_ids=None)
 
     dashboard_groups = group_progress(base)
     base_overall = overall_from_base(base)
@@ -1372,7 +1430,7 @@ def render_dashboard() -> None:
         },
     )
 
-    base_filtered = _apply_filters_compat(base, effective_dept_ids, effective_group_ids)
+    base_filtered = apply_filters(base, effective_dept_ids, effective_group_ids)
     dashboard_groups_filtered = dashboard_groups.copy()
     if use_kpi_fallback and not dashboard_groups_filtered.empty:
         if effective_dept_ids and "departamento_id" in dashboard_groups_filtered.columns:
@@ -1415,7 +1473,7 @@ def render_dashboard() -> None:
     st.divider()
 
     detailed_available = not base_filtered.empty
-    equipment_base_filtered = _apply_filters_compat(equipment_base, effective_dept_ids, effective_group_ids)
+    equipment_base_filtered = apply_filters(equipment_base, effective_dept_ids, effective_group_ids)
     equipment_detailed_available = not equipment_base_filtered.empty
 
     equipment_detail_reason = ""
