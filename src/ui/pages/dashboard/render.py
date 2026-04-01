@@ -63,22 +63,6 @@ def _json_cache_key(obj) -> str:
     return hashlib.md5(payload.encode("utf-8")).hexdigest()[:16]
 
 
-def _df_cache_key(df: pd.DataFrame, cols: list[str] | None = None) -> str:
-    """Gera chave leve e estável para cache de payload/figura de gráfico."""
-    try:
-        if df is None or df.empty:
-            return "empty"
-        sample = df if cols is None else df[[c for c in cols if c in df.columns]].copy()
-        payload = {
-            "shape": list(sample.shape),
-            "columns": list(sample.columns),
-            "head": sample.head(200).astype(str).to_dict("records"),
-        }
-        return _json_cache_key(payload)
-    except Exception:
-        return f"df:{id(df)}"
-
-
 @st.cache_data(ttl=45, show_spinner=False)
 def _build_rank_chart_payload_cached(payload_key: str, records: list[dict], category_col: str, value_col: str, top_n: int = 10) -> list[dict]:
     _ = payload_key
@@ -132,30 +116,35 @@ def _build_rank_chart_figure_cached(payload_key: str, chart_records: list[dict],
 @st.cache_data(ttl=45, show_spinner=False)
 def _build_heatmap_figure_cached(payload_key: str, records: list[dict]):
     _ = payload_key
-    if not records:
-        return None
-    df = pd.DataFrame(records)
-    if df.empty or "x" not in df.columns or "y" not in df.columns or "z" not in df.columns:
+    heat = pd.DataFrame(records or [])
+    if heat.empty:
         return None
     fig = px.density_heatmap(
-        df,
-        x="x",
-        y="y",
-        z="z",
-        histfunc="avg",
-        text_auto=".0f",
-        aspect="auto",
+        heat,
+        x="setor",
+        y="grupo",
+        z="calor_score",
+        color_continuous_scale="RdYlGn_r",
+        labels={
+            "setor": "Setor",
+            "grupo": "Grupo",
+            "calor_score": "Score de risco"},
+        title="Heatmap de Risco — Grupo × Setor",
     )
     fig.update_layout(
-        margin=dict(l=10, r=10, t=10, b=10),
+        height=max(300, len(heat["grupo"].unique()) * 40 + 80),
+        margin=dict(l=10, r=10, t=40, b=10),
         paper_bgcolor="#06080B",
         plot_bgcolor="#0C111A",
         font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=11),
-        xaxis_title="Grupo",
-        yaxis_title="Setor",
-        coloraxis_colorbar_title="% concluído",
     )
     return fig
+
+
+@st.cache_data(ttl=45, show_spinner=False)
+def _build_inteligencia_cached(payload_key: str, records: list[dict]) -> pd.DataFrame:
+    _ = payload_key
+    return build_inteligencia(pd.DataFrame(records or []))
 
 
 def _load_revisao(sb, tenant_id: str, revisao_id: str | None = None) -> dict | None:
@@ -605,7 +594,7 @@ def _render_pct_rank_chart(
 
     records = df[[category_col, value_col]].copy().to_dict("records")
     payload_key = _json_cache_key({
-        "records_key": _json_cache_key(records[:200]),
+        "records_head": records[:200],
         "category_col": category_col,
         "value_col": value_col,
         "title": title,
@@ -1047,41 +1036,24 @@ def _fragment_equipamentos(
 
 
 @st.fragment
-def _fragment_heatmap(base: pd.DataFrame) -> None:
-    if base is None or base.empty:
-        empty_message("Sem dados para heatmap.")
+def _fragment_heatmap(heat: pd.DataFrame) -> None:
+    if heat.empty:
+        empty_message("Sem dados de heatmap para esta revisão.")
         return
-
-    cols_needed = [c for c in ["grupo_nome", "setor_nome", "status"] if c in base.columns]
-    if len(cols_needed) < 3:
-        empty_message("Sem dados para heatmap.")
-        return
-
-    hm = base[["grupo_nome", "setor_nome", "status"]].copy()
-    if hm.empty:
-        empty_message("Sem dados para heatmap.")
-        return
-
-    done_status = {"concluido", "concluído"}
-    hm["done"] = hm["status"].astype(str).str.strip().str.lower().isin(done_status).astype(int)
-    agg = (
-        hm.groupby(["grupo_nome", "setor_nome"], dropna=False)["done"]
-        .mean()
-        .mul(100)
-        .round(0)
-        .reset_index()
-        .rename(columns={"grupo_nome": "x", "setor_nome": "y", "done": "z"})
-    )
-    records = agg.to_dict("records")
+    records = heat[["setor", "grupo", "calor_score"]].copy().to_dict("records")
     payload_key = _json_cache_key({
-        "records_key": _json_cache_key(records[:300]),
+        "records_head": records[:300],
         "nrows": len(records),
     })
     fig = _build_heatmap_figure_cached(payload_key, records)
     if fig is None:
-        empty_message("Sem dados para heatmap.")
+        empty_message("Sem dados de heatmap para esta revisão.")
         return
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(
+        fig, use_container_width=True, config={
+            "displayModeBar": False})
+    st.caption(
+        "Score: travado × 3 + pendente × 1.5 + em_andamento × 1, normalizado por total.")
 
 @st.fragment
 def _fragment_criticidade(crit: pd.DataFrame) -> None:
@@ -1225,12 +1197,6 @@ def _overall_from_group_kpis(kdf: pd.DataFrame) -> dict:
         "trav": 0,
         "na": 0,
     }
-
-@st.cache_data(ttl=45, show_spinner=False)
-def _build_inteligencia_cached(payload_key: str, records: list[dict]) -> pd.DataFrame:
-    _ = payload_key
-    return _build_inteligencia_cached(_json_cache_key({"n": len(pd.DataFrame(records or []), "cols": list(pd.DataFrame(records or [].columns) if hasattr(pd.DataFrame(records or [], "columns") else []}), pd.DataFrame(records or [].to_dict("records") if hasattr(pd.DataFrame(records or [], "to_dict") else []))
-
 
 def render_dashboard() -> None:
     page_header("Dashboard")
