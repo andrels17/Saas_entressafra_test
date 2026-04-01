@@ -148,7 +148,7 @@ def _merge_sector_tables(sector_tables):
     return base.fillna(""), sector_groups
 
 
-def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
+def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_revisao=None) -> bytes:
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
     from reportlab.lib.pagesizes import A3, landscape
@@ -616,21 +616,39 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
     avg_pct = int(round(rv["%"].mean())) if not rv.empty else 0
     eq_zero = int((rv["%"] <= 0).sum()) if not rv.empty else 0
     emitido = _fmt_brt("%d/%m/%Y %H:%M")
-    # 🔹 Semana baseada nos dados da revisão (prioridade)
+
+    def _extract_semana_mais1_from_df(df: pd.DataFrame):
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            return None
+        for col in df.columns:
+            if "semana" in str(col).lower():
+                serie = (
+                    df[col]
+                    .astype(str)
+                    .str.extract(r"(\d+)", expand=False)
+                )
+                nums = pd.to_numeric(serie, errors="coerce").dropna()
+                if not nums.empty:
+                    return int(nums.max()) + 1
+        return None
+
     semana_impressao = None
+
+    # prioridade 1: semana explícita vinda do chamador
     try:
-        if isinstance(resumo_df, pd.DataFrame):
-            for col in resumo_df.columns:
-                if "semana" in str(col).lower():
-                    val = pd.to_numeric(resumo_df[col], errors="coerce").dropna()
-                    if not val.empty:
-                        ultima_semana = int(val.max())
-                        semana_impressao = ultima_semana + 1
-                        break
+        if semana_revisao is not None and str(semana_revisao).strip() != "":
+            semana_impressao = int(pd.to_numeric([semana_revisao], errors="coerce")[0])
     except Exception:
         semana_impressao = None
 
-    # fallback: semana atual
+    # prioridade 2: tentar inferir do resumo da revisão
+    if not semana_impressao:
+        try:
+            semana_impressao = _extract_semana_mais1_from_df(resumo_df)
+        except Exception:
+            semana_impressao = None
+
+    # fallback final: semana atual apenas se nada da revisão existir
     if not semana_impressao:
         try:
             _dt_emit = pd.to_datetime(emitido, dayfirst=True, errors="coerce")

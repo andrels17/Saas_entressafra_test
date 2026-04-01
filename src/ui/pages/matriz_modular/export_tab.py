@@ -5,6 +5,30 @@ import streamlit as st
 
 from .pdf_export import _build_pdf_tables, _df_to_csv_bytes, _reportlab_available
 
+def _extract_semana_revisao(*dfs):
+    """Retorna ultima semana encontrada + 1, a partir dos dataframes disponíveis."""
+    import re
+
+    for df in dfs:
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            continue
+
+        for col in df.columns:
+            if "semana" in str(col).lower():
+                try:
+                    vals = (
+                        df[col]
+                        .astype(str)
+                        .str.extract(r"(\d+)", expand=False)
+                    )
+                    nums = pd.to_numeric(vals, errors="coerce").dropna()
+                    if not nums.empty:
+                        return int(nums.max()) + 1
+                except Exception:
+                    continue
+    return None
+
+
 
 def render_export_tab(
     *,
@@ -87,11 +111,22 @@ def render_export_tab(
         with st.spinner("Gerando PDF otimizado..."):
             resumo_pdf_df = resumo_df.copy() if isinstance(resumo_df, pd.DataFrame) else pd.DataFrame()
             sector_tables_pdf = [(setor_nome, setor_df.copy()) for setor_nome, setor_df in (sector_tables_for_export or [])]
+            semana_revisao = _extract_semana_revisao(
+                resumo_pdf_df,
+                va_exp if isinstance(va_exp, pd.DataFrame) else pd.DataFrame(),
+                pd.concat(
+                    [df for _, df in sector_tables_pdf if isinstance(df, pd.DataFrame)],
+                    ignore_index=True,
+                    sort=False,
+                ) if sector_tables_pdf else pd.DataFrame(),
+            )
+
             st.session_state["mtz_pdf_export_bytes"] = _build_pdf_tables(
                 titulo=titulo,
                 grupo_nome=grupo_nome,
                 resumo_df=resumo_pdf_df,
                 sector_tables=sector_tables_pdf,
+                semana_revisao=semana_revisao,
             )
             st.session_state["mtz_pdf_export_ready"] = True
         st.success("PDF pronto 🚀")
