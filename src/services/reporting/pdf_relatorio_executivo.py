@@ -657,6 +657,29 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         c.setStrokeColor(BORDER)
         c.line(bx + 4, by - 9 * mm, bx + col_w - 4, by - 9 * mm)
         iy = by - 11 * mm
+        # MAIS AVANÇADOS PRIMEIRO
+        if top_melhores_v:
+            c.setFillColor(GREEN)
+            c.setFont('Helvetica-Bold', 7)
+            c.drawString(bx + 6, iy, 'Mais avançados:')
+            iy -= 5.5 * mm
+            for eq in top_melhores_v:
+                pct_eq = int(eq.get('pct', 0))
+                c.setFillColor(FG)
+                c.setFont('Helvetica-Bold', 7.5)
+                c.drawString(bx + 8, iy, str(eq.get('frota') or '—')[:7])
+                c.setFillColor(MUTED)
+                c.setFont('Helvetica', 7)
+                c.drawString(bx + 20 * mm, iy,
+                             str(eq.get('modelo') or '')[:13])
+                pbar(bx + col_w - 26 * mm, iy - 1.5 * mm, 18 * mm, 3.5 *
+                     mm, pct_eq, color=GREEN if pct_eq >= 80 else YELLOW)
+                c.setFillColor(GREEN)
+                c.setFont('Helvetica-Bold', 7.5)
+                c.drawRightString(bx + col_w - 4, iy, f"{pct_eq}%")
+                iy -= 6 * mm
+
+        # DEPOIS PIORES
         if top_criticos_v:
             c.setFillColor(RED)
             c.setFont('Helvetica-Bold', 7)
@@ -678,26 +701,6 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
                     3.5 * mm,
                     pct_eq)
                 c.setFillColor(_risk_color(pct_eq))
-                c.setFont('Helvetica-Bold', 7.5)
-                c.drawRightString(bx + col_w - 4, iy, f"{pct_eq}%")
-                iy -= 6 * mm
-        if top_melhores_v:
-            c.setFillColor(GREEN)
-            c.setFont('Helvetica-Bold', 7)
-            c.drawString(bx + 6, iy, 'Mais avançados:')
-            iy -= 5.5 * mm
-            for eq in top_melhores_v:
-                pct_eq = int(eq.get('pct', 0))
-                c.setFillColor(FG)
-                c.setFont('Helvetica-Bold', 7.5)
-                c.drawString(bx + 8, iy, str(eq.get('frota') or '—')[:7])
-                c.setFillColor(MUTED)
-                c.setFont('Helvetica', 7)
-                c.drawString(bx + 20 * mm, iy,
-                             str(eq.get('modelo') or '')[:13])
-                pbar(bx + col_w - 26 * mm, iy - 1.5 * mm, 18 * mm, 3.5 *
-                     mm, pct_eq, color=GREEN if pct_eq >= 80 else YELLOW)
-                c.setFillColor(GREEN)
                 c.setFont('Helvetica-Bold', 7.5)
                 c.drawRightString(bx + col_w - 4, iy, f"{pct_eq}%")
                 iy -= 6 * mm
