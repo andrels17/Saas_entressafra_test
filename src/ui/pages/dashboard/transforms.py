@@ -183,67 +183,6 @@ def _valid_scope(base: pd.DataFrame) -> pd.DataFrame:
     return valid
 
 
-def _equipment_summary(base: pd.DataFrame) -> pd.DataFrame:
-    cols = [
-        "equipamento_id",
-        "grupo_id",
-        "grupo",
-        "departamento_id",
-        "Frota",
-        "Modelo",
-        "Serviços previstos",
-        "% Concluído",
-        "Status Geral",
-        "Em atraso",
-        "Concluído",
-        "done_steps",
-        "expected_steps",
-    ]
-    if base is None or base.empty:
-        return pd.DataFrame(columns=cols)
-
-    base = base.copy()
-    base["frota"] = base.get("frota", pd.Series(index=base.index, dtype=object)).fillna("—").astype(str).str.strip()
-    base["modelo"] = base.get("modelo", pd.Series(index=base.index, dtype=object)).fillna("—").astype(str).str.strip()
-
-    rows = []
-    for (eid, gid, grupo, dept, frota, modelo), sub in base.groupby(
-        ["equipamento_id", "grupo_id", "grupo", "departamento_id", "frota", "modelo"], dropna=False
-    ):
-        valid = sub[~sub["na"].astype(bool)] if "na" in sub.columns else sub
-        expected = int(len(valid) * 3)
-        done = float(valid["ok_count"].sum()) if not valid.empty else 0.0
-        pct = round(done / max(expected, 1) * 100) if expected else 0
-
-        data_fim = pd.to_datetime(sub["data_fim"], errors="coerce").dropna().max() if "data_fim" in sub.columns else pd.NaT
-        hoje = pd.Timestamp(_now_brt()).normalize().tz_localize(None)
-        em_atraso = bool(pd.notna(data_fim) and hoje > data_fim.normalize() and pct < 100)
-
-        if pct <= 0:
-            status_geral = "Sem início"
-        elif pct >= 100:
-            status_geral = "Concluído"
-        else:
-            status_geral = "Em atraso" if em_atraso else "Em andamento"
-
-        rows.append({
-            "equipamento_id": eid,
-            "grupo_id": gid,
-            "grupo": grupo,
-            "departamento_id": dept,
-            "Frota": frota,
-            "Modelo": modelo,
-            "Serviços previstos": int(len(valid)),
-            "% Concluído": max(0.0, min(100.0, pct)),
-            "Status Geral": status_geral,
-            "Em atraso": "Sim" if em_atraso else "Não",
-            "Concluído": 1 if pct >= 100 else 0,
-            "done_steps": int(round(done)),
-            "expected_steps": expected,
-        })
-    return pd.DataFrame(rows, columns=cols)
-
-
 def overall_from_base(base: pd.DataFrame) -> dict:
     if base is None or base.empty:
         return {
@@ -253,32 +192,49 @@ def overall_from_base(base: pd.DataFrame) -> dict:
             "sem_inicio": 0,
             "andamento": 0,
             "atrasados": 0,
+            # chaves legadas para compatibilidade
+            "pend": 0,
+            "trav": 0,
             "na": 0,
         }
 
     valid = _valid_scope(base)
-    total = int(len(valid))
-    pct = round(float(valid["ok_count"].sum()) / max(total * 3, 1) * 100) if total else 0.0
+    total_linhas = int(len(valid))
+    pct = round(float(valid["ok_count"].sum()) / max(total_linhas * 3, 1) * 100) if total_linhas else 0.0
 
-    eq_df = _equipment_summary(base)
+    eq_df = equipment_progress(base)
     if eq_df.empty:
-        return {
-            "pct": float(max(0, min(100, pct))),
-            "total": 0,
-            "concl": 0,
-            "sem_inicio": 0,
-            "andamento": 0,
-            "atrasados": 0,
-            "na": int(base["na"].sum()) if "na" in base.columns else 0,
-        }
+        concl = sem_inicio = andamento = atrasados = 0
+    else:
+        progresso = pd.to_numeric(eq_df["% Concluído"], errors="coerce").fillna(0)
+        concl = int((progresso >= 100).sum())
+        sem_inicio = int((progresso <= 0).sum())
+        andamento = int(((progresso > 0) & (progresso < 100)).sum())
+        atrasados = 0
+        if "data_fim" in valid.columns:
+            hoje = pd.Timestamp(_now_brt()).normalize().tz_localize(None)
+            atrasados_ids = set()
+            for eid, sub in valid.groupby("equipamento_id", dropna=False):
+                data_fim_eq = pd.to_datetime(sub.get("data_fim"), errors="coerce").dropna()
+                if data_fim_eq.empty:
+                    continue
+                prazo = data_fim_eq.max().normalize()
+                expected = int(len(sub) * 3)
+                pct_eq = round(float(sub["ok_count"].sum()) / max(expected, 1) * 100, 1) if expected else 0.0
+                if hoje > prazo and pct_eq < 100:
+                    atrasados_ids.add(eid)
+            atrasados = len(atrasados_ids)
 
     return {
         "pct": float(max(0, min(100, pct))),
-        "total": int(len(eq_df)),
-        "concl": int((eq_df["Status Geral"] == "Concluído").sum()),
-        "sem_inicio": int((eq_df["Status Geral"] == "Sem início").sum()),
-        "andamento": int((eq_df["Status Geral"] == "Em andamento").sum()),
-        "atrasados": int((eq_df["Status Geral"] == "Em atraso").sum()),
+        "total": int(len(eq_df)) if not eq_df.empty else 0,
+        "concl": concl,
+        "sem_inicio": sem_inicio,
+        "andamento": andamento,
+        "atrasados": atrasados,
+        # chaves legadas para evitar quebrar trechos antigos do render
+        "pend": sem_inicio,
+        "trav": atrasados,
         "na": int(base["na"].sum()) if "na" in base.columns else 0,
     }
 
@@ -335,7 +291,61 @@ def sector_progress(base: pd.DataFrame) -> pd.DataFrame:
 
 
 def equipment_progress(base: pd.DataFrame) -> pd.DataFrame:
-    return _equipment_summary(base)
+    cols = [
+        "equipamento_id",
+        "grupo_id",
+        "grupo",
+        "departamento_id",
+        "Frota",
+        "Modelo",
+        "Total",
+        "% Concluído",
+        "Pendentes",
+        "Em andamento",
+        "Travados",
+        "Não aplica",
+        "Concluídos",
+        "done_steps",
+        "expected_steps"]
+    if base is None or base.empty:
+        return pd.DataFrame(columns=cols)
+    base = base.copy()
+    base["frota"] = base.get(
+        "frota",
+        pd.Series(
+            index=base.index,
+            dtype=object)).fillna("—").astype(str).str.strip()
+    base["modelo"] = base.get(
+        "modelo",
+        pd.Series(
+            index=base.index,
+            dtype=object)).fillna("—").astype(str).str.strip()
+    rows = []
+    for (eid, gid, grupo, dept, frota, modelo), sub in base.groupby(
+        ["equipamento_id", "grupo_id", "grupo", "departamento_id", "frota", "modelo"], dropna=False
+    ):
+        valid = sub[~sub["na"].astype(bool)] if "na" in sub.columns else sub
+        expected = int(len(valid) * 3)
+        done = float(valid["ok_count"].sum()) if not valid.empty else 0.0
+        pct = round(done / max(expected, 1) * 100) if expected else 0
+        rows.append({
+            "equipamento_id": eid,
+            "grupo_id": gid,
+            "grupo": grupo,
+            "departamento_id": dept,
+            "Frota": frota,
+            "Modelo": modelo,
+            "Total": int(len(sub)),
+            "% Concluído": max(0.0, min(100.0, pct)),
+            "Pendentes": int((valid["state"] == "pendente").sum()) if not valid.empty else 0,
+            "Em andamento": int((valid["state"] == "em_andamento").sum()) if not valid.empty else 0,
+            "Travados": int((valid["state"] == "travado").sum()) if not valid.empty else 0,
+            "Não aplica": int((sub["state"] == "nao_aplica").sum()),
+            "Concluídos": int((valid["state"] == "concluido").sum()) if not valid.empty else 0,
+            "done_steps": int(round(done)),
+            "expected_steps": expected,
+        })
+    return pd.DataFrame(rows)
 
 
 def build_inteligencia(
@@ -401,30 +411,29 @@ def build_inteligencia(
         total=total_valid,
         pct_concluido=pct)
 
-    data_inicio = pd.to_datetime(valid["data_inicio"], errors="coerce").dropna(
-    ).min() if "data_inicio" in valid.columns else pd.NaT
-    data_fim = pd.to_datetime(valid["data_fim"], errors="coerce").dropna(
-    ).max() if "data_fim" in valid.columns else pd.NaT
-    hoje = pd.Timestamp(_now_brt()).normalize().tz_localize(None)
-    dias_passados = int(
-        max((hoje - data_inicio.normalize()).days, 0)) if pd.notna(data_inicio) else 0
-    dias_planejados = int(max((data_fim.normalize() - data_inicio.normalize()).days, 0)
-                          ) if pd.notna(data_inicio) and pd.notna(data_fim) else 0
-    ritmo = round(pct / dias_passados, 4) if pct > 0 and dias_passados > 0 else 0.0
-    dias_est_total = round(100.0 / ritmo, 2) if ritmo > 0 else 0.0
-    dias_rest = round(max(dias_est_total - dias_passados, 0), 2) if ritmo > 0 else 0.0
-    prev_termino = (
-        data_inicio + pd.to_timedelta(int(round(dias_est_total)), unit="D")
-    ) if (pd.notna(data_inicio) and ritmo > 0) else pd.NaT
+    data_inicio = pd.to_datetime(valid["data_inicio"], errors="coerce").dropna().min() if "data_inicio" in valid.columns else pd.NaT
+    if pd.isna(data_inicio) and "dt_inicio" in valid.columns:
+        data_inicio = pd.to_datetime(valid["dt_inicio"], errors="coerce").dropna().min()
 
-    if pct <= 0 or pd.isna(data_inicio) or dias_passados <= 0:
-        status_prev = "sem_base"
-    elif pd.notna(data_fim) and hoje > data_fim and pct < 100:
+    data_fim = pd.to_datetime(valid["data_fim"], errors="coerce").dropna().max() if "data_fim" in valid.columns else pd.NaT
+    hoje = pd.Timestamp(_now_brt()).normalize().tz_localize(None)
+
+    dias_passados = int(max((hoje - data_inicio.normalize()).days, 0)) if pd.notna(data_inicio) else 0
+    dias_planejados = int(max((data_fim.normalize() - data_inicio.normalize()).days, 0)) if pd.notna(data_inicio) and pd.notna(data_fim) else 0
+    dias_rest_cal = int(max((data_fim.normalize() - hoje).days, 0)) if pd.notna(data_fim) else 0
+    ritmo = round(max(100.0 - pct, 0.0) / max(dias_rest_cal, 1), 4) if (pct < 100 and dias_rest_cal > 0) else 0.0
+
+    if pd.isna(data_fim):
+        status_prev = "sem_prazo"
+    elif pct >= 100:
+        status_prev = "concluido"
+    elif hoje > data_fim.normalize():
         status_prev = "atraso"
-    elif pd.notna(prev_termino) and (pd.isna(data_fim) or prev_termino <= data_fim):
-        status_prev = "no_prazo"
+    elif hoje == data_fim.normalize():
+        status_prev = "vence_hoje"
     else:
-        status_prev = "atraso"
+        status_prev = "no_prazo"
+
     previsao: dict[str, Any] = {
         "data_inicio": None if pd.isna(data_inicio) else data_inicio,
         "data_fim_planejada": None if pd.isna(data_fim) else data_fim,
@@ -432,9 +441,9 @@ def build_inteligencia(
         "dias_planejados": dias_planejados,
         "percentual_concluido": pct,
         "ritmo_medio_dia": ritmo,
-        "dias_estimados_total": dias_est_total,
-        "dias_restantes_estimados": dias_rest,
-        "previsao_termino": None if pd.isna(prev_termino) else prev_termino,
+        "dias_estimados_total": float(dias_planejados),
+        "dias_restantes_estimados": float(dias_rest_cal),
+        "previsao_termino": None,
         "status_previsao": status_prev,
     }
 

@@ -424,27 +424,27 @@ def _fragment_kpis_globais(overall: dict) -> None:
     from src.utils.ui_helpers import mobile_columns
     cols = mobile_columns(5, 2)
     labels = [("% Concluído",
-               f"{int(round(overall['pct']))}%",
+               f"{int(round(overall.get('pct', 0)))}%",
                None,
                "off",
                "Percentual global alinhado à mesma regra da Matriz/Home."),
               ("Concluídos",
-               overall["concl"],
+               overall.get("concl", 0),
                None,
                "off",
                None),
               ("Em andamento",
-               overall["andamento"],
+               overall.get("andamento", 0),
                None,
                "off",
                None),
-              ("Pendentes",
-               overall["pend"],
+              ("Sem início",
+               overall.get("sem_inicio", overall.get("pend", 0)),
                None,
                "off",
                None),
-              ("Travados",
-               overall["trav"],
+              ("Em atraso",
+               overall.get("atrasados", overall.get("trav", 0)),
                None,
                "off",
                None),
@@ -464,24 +464,22 @@ def _fragment_previsao(previsao: dict, risco: dict) -> None:
     _RISCO_ICONS = {"baixo": "🟢", "medio": "🟡", "alto": "🔴"}
     _PREV_LABELS = {
         "no_prazo": "No prazo",
-        "atraso": "Com atraso",
+        "atraso": "Em atraso",
+        "vence_hoje": "Vence hoje",
+        "concluido": "Concluído",
+        "sem_prazo": "Sem prazo",
         "sem_base": "Sem base"}
     status_prev = previsao.get("status_previsao", "sem_base")
     status_risco = risco.get("status_risco", "baixo")
 
     c1, c2 = st.columns(2)
     with c1:
+        prazo = previsao.get("data_fim_planejada")
         st.metric(
-            "Previsão de término",
-            _PREV_LABELS.get(
-                status_prev,
-                status_prev))
-        if previsao.get("previsao_termino"):
-            st.caption(
-                f"Data estimada: **{fmt_date(previsao['previsao_termino'])}**")
-        if previsao.get("data_fim_planejada"):
-            st.caption(
-                f"Data planejada: **{fmt_date(previsao['data_fim_planejada'])}**")
+            "Prazo da revisão",
+            fmt_date(prazo) if prazo is not None else "—")
+        st.caption(
+            f"Status: **{_PREV_LABELS.get(status_prev, status_prev)}**")
     with c2:
         icon = _RISCO_ICONS.get(status_risco, "⚪")
         st.metric(
@@ -490,9 +488,9 @@ def _fragment_previsao(previsao: dict, risco: dict) -> None:
             help="Score: travados × 3 + pendentes × 1.5 + em_andamento × 1.",
         )
         st.caption(
-            f"Ritmo: **{previsao.get('ritmo_medio_dia', 0):.2f}%/dia** | "
+            f"Ritmo necessário: **{previsao.get('ritmo_medio_dia', 0):.2f}%/dia** | "
             f"Dias passados: **{previsao.get('dias_passados', 0)}** | "
-            f"Dias rest. est.: **{previsao.get('dias_restantes_estimados', 0):.0f}**"
+            f"Dias restantes: **{previsao.get('dias_restantes_estimados', 0):.0f}**"
         )
 
 
@@ -929,8 +927,10 @@ def _overall_from_group_kpis(kdf: pd.DataFrame) -> dict:
         "pct": float(gk.get("pct", 0) or 0),
         "total": int(len(kdf)) if kdf is not None else 0,
         "concl": 0,
-        "pend": 0,
+        "sem_inicio": 0,
         "andamento": 0,
+        "atrasados": 0,
+        "pend": 0,
         "trav": 0,
         "na": 0,
     }
@@ -1018,15 +1018,15 @@ def render_dashboard() -> None:
 
     base = normalize_matriz_base(raw, eq_meta)
     if not base.empty:
-        rev_inicio = pd.to_datetime(rev.get("data_inicio"), errors="coerce") if rev else pd.NaT
-        rev_fim = pd.to_datetime(rev.get("data_fim"), errors="coerce") if rev else pd.NaT
-        if "data_inicio" not in base.columns or base["data_inicio"].isna().all():
-            base["data_inicio"] = rev_inicio
-        else:
+        if "data_inicio" not in base.columns:
+            base["data_inicio"] = pd.NaT
+        if "data_fim" not in base.columns:
+            base["data_fim"] = pd.NaT
+        rev_inicio = pd.to_datetime(rev.get("data_inicio"), errors="coerce")
+        rev_fim = pd.to_datetime(rev.get("data_fim"), errors="coerce")
+        if pd.notna(rev_inicio):
             base["data_inicio"] = pd.to_datetime(base["data_inicio"], errors="coerce").fillna(rev_inicio)
-        if "data_fim" not in base.columns or base["data_fim"].isna().all():
-            base["data_fim"] = rev_fim
-        else:
+        if pd.notna(rev_fim):
             base["data_fim"] = pd.to_datetime(base["data_fim"], errors="coerce").fillna(rev_fim)
     raw_base = base.copy()
 
@@ -1162,7 +1162,7 @@ def render_dashboard() -> None:
         with st.spinner("", show_time=False):
             risco, previsao, heat, crit, tl = build_inteligencia(base_filtered)
     else:
-        risco, previsao = {"status_risco": "baixo", "risco_score": 0}, {"status_previsao": "sem_prazo"}
+        risco, previsao = {"status_risco": "baixo", "risco_score": 0}, {"status_previsao": "sem_base"}
         heat = crit = tl = pd.DataFrame()
     _fragment_previsao(previsao, risco)
     st.divider()
