@@ -151,11 +151,18 @@ def _load_tarefas(
         return []
 
     if _tarefas_index is not None:
+        # _tarefas_index é indexado por equipamento_id.
+        # Retorna todas as tarefas — o filtro real por grupo_id acontece
+        # dentro de _build_dashboard_base via eq_map (que é restrito aos
+        # grupo_ids do departamento). Retornar tudo é seguro porque
+        # _build_dashboard_base ignora tarefas cujo equipamento_id não
+        # está em eq_map, que só contém equipamentos dos grupos alvo.
         out: list[dict] = []
         for tasks in _tarefas_index.values():
             out.extend(tasks)
         return out
 
+    # Fallback: query direta sem JOIN (evita RLS em equipamentos) — paginada
     rows: list[dict] = []
     _page_size = 1000
     _start = 0
@@ -186,7 +193,9 @@ def _load_tarefas(
 
 def _load_grupo_template(
         sb, tenant_id: str, grupo_ids: list[str]) -> dict[str, int]:
-    """Retorna {grupo_id: svc_count} — número de serviços do template por grupo."""
+    """Retorna {grupo_id: svc_count} — número de serviços do template por grupo.
+    Mesma fonte usada pela Matriz para calcular o denominador correto.
+    """
     if not grupo_ids:
         return {}
     rows = _with_fallback(
@@ -212,12 +221,17 @@ def _load_grupo_template(
 
 def _load_equipamentos_ativos(
         sb, tenant_id: str, grupo_ids: list[str]) -> dict[str, list[dict]]:
-    """Retorna {grupo_id: [{id, frota, modelo}]} — equipamentos ativos por grupo."""
+    """Retorna {grupo_id: [{id, frota, modelo}]} — equipamentos ativos por grupo.
+
+    Usa RPC get_equipamentos_dashboard (SECURITY DEFINER) para contornar RLS
+    scope-restritivo que bloqueia SELECT geral na tabela equipamentos.
+    """
     if not grupo_ids:
         return {}
 
     grupo_set = set(str(g) for g in grupo_ids)
 
+    # Tenta via RPC primeiro (bypassa RLS)
     rows = []
     try:
         rpc_result = sb.rpc(
@@ -229,6 +243,7 @@ def _load_equipamentos_ativos(
     except Exception:
         pass
 
+    # Fallback: query direta
     if not rows:
         rows = _with_fallback(
             lambda: (
@@ -306,7 +321,12 @@ def _calc_snapshot_from_kpi_engine(
     revisao_id: str,
     grupo_ids: list[str],
 ) -> dict:
-    """Snapshot consolidado por grupo usando o kpi_engine."""
+    """Snapshot consolidado por grupo usando o kpi_engine.
+
+    Usa o motor consolidado para alinhar os números do topo do PDF
+    com Home/Dashboard. O detalhamento por frota continua vindo do
+    mesmo pipeline do dashboard de equipamentos.
+    """
     try:
         from src.utils.kpi_engine import get_group_kpis
         kdf = get_group_kpis(tenant_id, revisao_id, "0", prefer_mv=True)
@@ -352,16 +372,25 @@ def _calc_snapshot_from_kpi_engine(
         return {}
 
 
+
+
+
+
+
 def _build_dashboard_base(
         sb, tenant_id: str, revisao_id: str, grupo_ids: list[str],
         tarefas: list[dict] | None = None) -> tuple[pd.DataFrame, list[dict]]:
-    """Monta a mesma base lógica usada no dashboard para um conjunto de grupos."""
+    """Monta a mesma base lógica usada no dashboard para um conjunto de grupos.
+
+    Retorna (base_normalizada, rows_equipamentos).
+    """
     from src.ui.pages.dashboard.transforms import normalize_matriz_base
 
     grupo_ids = [str(g) for g in (grupo_ids or []) if g]
     if not grupo_ids:
         return pd.DataFrame(), []
 
+    # Tarefas flat da revisão — paginadas para não truncar em 1000 linhas
     if tarefas is None:
         tarefas = []
         _page_size = 1000
@@ -385,6 +414,7 @@ def _build_dashboard_base(
                 break
             _start += _page_size
 
+    # Equipamentos dos grupos alvo
     eq_por_grupo = _load_equipamentos_ativos(sb, tenant_id, grupo_ids)
     eq_rows: list[dict] = []
     eq_map: dict[str, dict] = {}
@@ -395,6 +425,7 @@ def _build_dashboard_base(
             eq_rows.append(row)
             eq_map[str(eq.get("id"))] = row
 
+    # Grupos / serviços / grupo_servicos (sem filtrar ativo, como dashboard)
     grupo_rows = _with_fallback(
         lambda: (
             sb.table("equip_grupos")
@@ -455,15 +486,13 @@ def _build_dashboard_base(
             return dict(cur)
         merged = dict(prev)
         for etapa_col in ("etapa_d", "etapa_r", "etapa_m"):
-            merged[etapa_col] = _is_done(prev.get(etapa_col)) or _is_done(cur.get(etapa_col))
+            merged[etapa_col] = bool(prev.get(etapa_col)) or bool(cur.get(etapa_col))
         prev_status = prev.get("status")
         cur_status = cur.get("status")
         merged["status"] = cur_status if _status_rank(cur_status) >= _status_rank(prev_status) else prev_status
         prev_upd = str(prev.get("updated_at") or "")
         cur_upd = str(cur.get("updated_at") or "")
         merged["updated_at"] = cur.get("updated_at") if cur_upd >= prev_upd else prev.get("updated_at")
-        for dt_col in ("dt_etapa_d", "dt_etapa_r", "dt_etapa_m"):
-            merged[dt_col] = _best_ts(prev.get(dt_col), cur.get(dt_col))
         return merged
 
     raw_tasks = []
@@ -492,10 +521,6 @@ def _build_dashboard_base(
             "etapa_r": t.get("etapa_r"),
             "etapa_m": t.get("etapa_m"),
             "updated_at": t.get("updated_at"),
-            "dt_etapa_d": t.get("dt_etapa_d"),
-            "dt_etapa_r": t.get("dt_etapa_r"),
-            "dt_etapa_m": t.get("dt_etapa_m"),
-            "semana": t.get("semana"),
         }
         raw_tasks.append(enriched)
         if eid and sid:
@@ -513,14 +538,18 @@ def _build_dashboard_base(
         if sid_s not in group_services[gid_s]:
             group_services[gid_s].append(sid_s)
 
+    # Fonte principal: tarefas reais da revisão.
     raw = list(task_map.values())
-    seen_pairs = {
-        (str(r.get("equipamento_id")), str(r.get("servico_id")))
+    eids_with_task = {
+        str(r.get("equipamento_id"))
         for r in raw
-        if r.get("equipamento_id") is not None and r.get("servico_id") is not None
+        if r.get("equipamento_id") is not None
     }
 
+    # Fallback estrutural apenas para equipamentos sem qualquer tarefa ainda.
     for eid, eq in eq_map.items():
+        if eid in eids_with_task:
+            continue
         gid_s = str(eq.get("grupo_id") or "")
         if not gid_s or gid_s not in grupo_map:
             continue
@@ -529,9 +558,6 @@ def _build_dashboard_base(
         if not service_ids:
             continue
         for sid in service_ids:
-            key = (str(eq.get("id")), str(sid))
-            if key in seen_pairs:
-                continue
             svc = serv_map.get(str(sid), {})
             raw.append({
                 "equipamento_id": eq.get("id"),
@@ -547,10 +573,6 @@ def _build_dashboard_base(
                 "etapa_r": False,
                 "etapa_m": False,
                 "updated_at": None,
-                "dt_etapa_d": None,
-                "dt_etapa_r": None,
-                "dt_etapa_m": None,
-                "semana": None,
             })
 
     if not raw and raw_tasks:
@@ -572,7 +594,10 @@ def _build_dashboard_base(
     return base, eq_rows
 
 
+
 # ── Construção do payload ───────────────────────────────────────────────
+
+
 
 def _build_payload(
     *,
@@ -596,6 +621,7 @@ def _build_payload(
     data_inicio = revisao.get("data_inicio")
     semana_atual = _semana_atual(data_inicio, semanas_total)
 
+    # Mesmo caminho do dashboard de equipamentos para o detalhamento por frota.
     base, _eq_rows = _build_dashboard_base(
         sb, tenant_id, revisao.get("id", ""), grupo_ids, tarefas
     )
@@ -605,6 +631,7 @@ def _build_payload(
         "pct": 0.0, "total": 0, "concl": 0, "pend": 0, "andamento": 0, "trav": 0, "na": 0
     }
 
+    # Snapshot consolidado do kpi_engine para o topo do PDF.
     snapshot_kpi = _calc_snapshot_from_kpi_engine(
         tenant_id=tenant_id,
         revisao_id=revisao.get("id", ""),
@@ -612,6 +639,7 @@ def _build_payload(
     )
     group_pct_map = snapshot_kpi.get("group_pct_map") or {}
 
+    grupo_nomes: dict[str, str] = {}
     gnrows = _with_fallback(
         lambda: (
             sb.table("equip_grupos")
@@ -691,27 +719,19 @@ def _build_payload(
                 status_eq = "em_andamento"
 
             ultima_mov = None
-            ultima_mov_etapa = None
             ultima_semana = None
             for t in tasks:
-                mov_stage_ts = _best_ts(
+                mov_ts = _best_ts(
                     t.get("dt_etapa_m"),
                     t.get("dt_etapa_r"),
                     t.get("dt_etapa_d"),
+                    t.get("updated_at"),
                 )
-                if mov_stage_ts and (ultima_mov_etapa is None or mov_stage_ts > ultima_mov_etapa):
-                    ultima_mov_etapa = mov_stage_ts
+                if mov_ts and (ultima_mov is None or mov_ts > ultima_mov):
+                    ultima_mov = mov_ts
                 sem_t = int(t.get("semana") or 0)
                 if _sum_done_steps(t) > 0 and sem_t > 0 and (ultima_semana is None or sem_t > ultima_semana):
                     ultima_semana = sem_t
-
-            if ultima_mov_etapa:
-                ultima_mov = ultima_mov_etapa
-            elif done_steps > 0:
-                for t in tasks:
-                    upd = t.get("updated_at")
-                    if upd and (ultima_mov is None or upd > ultima_mov):
-                        ultima_mov = upd
 
             dias_sem_manut = _dias_desde(ultima_mov)
             dias_sem_manut_efetivo = (
@@ -763,7 +783,6 @@ def _build_payload(
                 "grupo_id": grupo_id,
                 "pct": pct,
                 "pct_anterior": pct_anterior,
-                "delta_pct": pct - pct_anterior,
                 "status": status_eq,
                 "done_steps": done_steps,
                 "total_steps": expected_steps,
@@ -773,6 +792,7 @@ def _build_payload(
                 "grupo_pct": int(group_pct_map.get(grupo_id, pct)),
             })
 
+    # Topo: usa kpi_engine quando disponível; senão cai no overall do dashboard.
     pct_geral_snapshot = int(snapshot_kpi.get("pct_geral") or round(float(overall.get("pct") or 0)))
     n_equipamentos = int(snapshot_kpi.get("n_equipamentos") or overall.get("total") or len(all_equipamentos))
     done_steps_total = int(snapshot_kpi.get("done_steps_total") or done_steps_total_dash)
@@ -780,39 +800,49 @@ def _build_payload(
 
     n_concluidos = max(n_concluidos_local, int(overall.get("concl") or 0))
     n_travados = max(n_travados_local, int(overall.get("trav") or 0))
+    # No dashboard, "pend" é por linha/serviço, não por frota. Para não inflar e nem zerar,
+    # preserva a contagem local por frota sem início.
     n_sem_inicio = n_sem_inicio_local
 
     evolucao: list[SemanaSnapshot] = []
     pct_semana_anterior = 0
     pct_semana_atual = pct_geral_snapshot
 
-    if expected_steps_total > 0:
+    if semana_done_steps and expected_steps_total > 0:
         cumulative_done = 0
+        expected_por_semana = round(expected_steps_total / max(semanas_total, 1)) if expected_steps_total > 0 else 0
+        cumulative_expected = 0
         for sem in range(1, semana_atual + 1):
-            cumulative_done += int(semana_done_steps.get(sem, 0) or 0)
-            pct_sem = max(0, min(100, round(cumulative_done / max(expected_steps_total, 1) * 100)))
+            cumulative_done += semana_done_steps.get(sem, 0)
+            cumulative_expected = min(expected_steps_total, cumulative_expected + expected_por_semana)
+            pct_sem = max(0, min(100, round(cumulative_done / max(cumulative_expected, 1) * 100))) if cumulative_expected > 0 else pct_geral_snapshot
             evolucao.append(SemanaSnapshot(
                 semana=sem,
                 concluidos=cumulative_done,
-                total=expected_steps_total,
+                total=cumulative_expected,
                 pct=pct_sem,
             ))
-        if evolucao:
-            # A tendência semanal é acumulada, então o ponto final precisa
-            # refletir exatamente o mesmo percentual mostrado no topo/KPI atual.
+        pct_semana_atual = evolucao[-1].pct if evolucao else pct_geral_snapshot
+
+        # Sincroniza SEMPRE o último ponto da tendência com o KPI atual do relatório.
+        # Assim, a curva acumulada termina exatamente no mesmo percentual exibido no topo.
+        if evolucao and int(pct_semana_atual or 0) != int(pct_geral_snapshot or 0):
+            pct_semana_atual = int(pct_geral_snapshot or 0)
             evolucao[-1] = SemanaSnapshot(
                 semana=evolucao[-1].semana,
                 concluidos=evolucao[-1].concluidos,
                 total=evolucao[-1].total,
-                pct=pct_geral_snapshot,
+                pct=pct_semana_atual,
             )
-            pct_semana_atual = pct_geral_snapshot
-            pct_semana_anterior = evolucao[-2].pct if len(evolucao) >= 2 else 0
-    elif pct_geral_snapshot > 0:
+        elif not evolucao:
+            pct_semana_atual = int(pct_geral_snapshot or 0)
+
+        pct_semana_anterior = evolucao[-2].pct if len(evolucao) >= 2 else 0
+    elif expected_steps_total > 0 or pct_geral_snapshot > 0:
         evolucao = [SemanaSnapshot(
             semana=max(int(semana_atual or 1), 1),
             concluidos=done_steps_total,
-            total=max(expected_steps_total, 1),
+            total=expected_steps_total,
             pct=pct_geral_snapshot,
         )]
         pct_semana_atual = pct_geral_snapshot
@@ -881,9 +911,9 @@ def dispatch_relatorio_semanal(
     revisao_id: str,
     dias_travado: int = 2,
     dias_sem_update: int = 5,
-    dry_run: bool = False,
-    dept_ids_filter: list[str] | None = None,
-    progress_callback=None,
+    dry_run: bool = False,        # True = gera PDF mas não envia
+    dept_ids_filter: list[str] | None = None,   # None = todos
+    progress_callback=None,       # callable(msg: str) para UI
 ) -> DispatchResult:
     """
     Ponto de entrada principal. Pode ser chamado do Streamlit ou do scheduler.
@@ -904,6 +934,7 @@ def dispatch_relatorio_semanal(
 
     result = DispatchResult()
 
+    # Configuração SMTP
     try:
         smtp_cfg = _load_config_from_secrets()
     except ValueError as e:
@@ -912,6 +943,8 @@ def dispatch_relatorio_semanal(
 
     sb = get_supabase_service()
 
+    # FAIL FAST — evita gastar tempo com queries pesadas quando a revisão
+    # não foi informada ou não existe.
     if not revisao_id:
         result.errors.append("Revisão não informada.")
         return result
@@ -921,14 +954,18 @@ def dispatch_relatorio_semanal(
         result.errors.append(f"Revisão não encontrada: {revisao_id}")
         return result
 
+    # Só carrega o restante depois de validar a revisão.
     _log(f"Revisão validada: id={revisao.get('id')} titulo={revisao.get('titulo') or '—'}")
     tenant_nome = _load_tenant_nome(sb, tenant_id)
     branding = _load_branding(sb, tenant_id)
 
+    # Grupos de destinatários (gestores — para envio de PDF por departamento)
     groups = get_recipient_groups(tenant_id)
     if dept_ids_filter:
         groups = [g for g in groups if g.departamento_id in dept_ids_filter]
 
+    # Todos os departamentos ativos — para o relatório executivo (independente
+    # de ter gestor)
     from src.services.email.recipients import _build_all_dept_groups
     all_dept_groups = _build_all_dept_groups(tenant_id)
     if dept_ids_filter:
@@ -944,6 +981,8 @@ def dispatch_relatorio_semanal(
 
     _log(f"Iniciando disparo para {len(groups)} departamento(s)…")
 
+    # Pré-carrega todas as tarefas uma única vez — evita N queries idênticas
+    # (uma por departamento) que antes buscavam o mesmo conjunto do banco.
     tarefas_index = _load_tarefas_all(sb, tenant_id, revisao_id)
 
     for grp in groups:
@@ -953,6 +992,8 @@ def dispatch_relatorio_semanal(
                 sb, tenant_id, revisao_id, grp.grupo_ids,
                 _tarefas_index=tarefas_index,
             )
+            # Não pula departamentos sem tarefas — podem ter equipamentos com
+            # 0% ainda sem início
 
             payload, eq_list = _build_payload(
                 tarefas=tarefas,
@@ -972,14 +1013,17 @@ def dispatch_relatorio_semanal(
                 f"_semana{payload.semana_atual}.pdf"
             )
 
+            # Valida integridade do PDF antes de tentar enviar.
             try:
                 from src.services.reporting.pdf_validator import (
                     validate_pdf as _validate_pdf,
                     PdfValidationError as _PdfValidationError,
                 )
+                _pdf_validator_ok = True
             except ImportError:
                 _validate_pdf = None
                 _PdfValidationError = Exception
+                _pdf_validator_ok = False
 
             try:
                 if _validate_pdf is not None:
@@ -1027,6 +1071,7 @@ def dispatch_relatorio_semanal(
                     msg = f"Falha ao enviar para {rec.email}: {e}"
                     result.errors.append(msg)
                     _log(f"    ↳ ❌ {msg}")
+                    # Enfileira na dead-letter para reprocessamento manual
                     try:
                         from src.services.email.dead_letter import enqueue_failed
                         enqueue_failed(
@@ -1041,7 +1086,7 @@ def dispatch_relatorio_semanal(
                             error=str(e),
                         )
                     except Exception:
-                        pass
+                        pass  # ignorado — operação opcional
 
         except Exception as e:
             result.failed += 1
@@ -1049,6 +1094,7 @@ def dispatch_relatorio_semanal(
             result.errors.append(msg)
             _log(f"  ❌ {msg}")
 
+    # ── Relatório executivo para supervisores/admins ────────────────────────
     _log("  → Gerando relatório executivo para supervisores…")
     try:
         from src.services.email.recipients import get_executive_recipients
@@ -1058,19 +1104,24 @@ def dispatch_relatorio_semanal(
 
         exec_recs = get_executive_recipients(tenant_id)
         if exec_recs:
+            # Constrói DeptSnapshot para cada grupo de departamento já
+            # processado
             dept_snapshots: list[DeptSnapshot] = []
             sem_atual_rev = _semana_atual(
-                revisao.get("data_inicio"), int(revisao.get("semanas_total") or 1)
-            )
+                revisao.get("data_inicio"), int(
+                    revisao.get("semanas_total") or 1))
             trend_acc: dict[int, dict[str, int]] = {}
             heatmap_semanal: list[dict] = []
             alertas_parados = {"atencao": 0, "critico": 0, "urgente": 0}
 
+            # Executivo: usa a MESMA lógica do semanal.
+            # Passa todas as tarefas da revisão para _build_payload e deixa
+            # o filtro real acontecer lá dentro, via grupo_ids.
             tarefas_all = []
             for _tasks in (tarefas_index or {}).values():
                 tarefas_all.extend(_tasks or [])
 
-            for grp in all_dept_groups:
+            for grp in all_dept_groups:  # TODOS os deptos, não só os com gestores
                 try:
                     p, eq_list_g = _build_payload(
                         tarefas=tarefas_all,
@@ -1085,10 +1136,14 @@ def dispatch_relatorio_semanal(
                         dias_sem_update=dias_sem_update,
                     )
 
+                    # Só entra no executivo se o departamento realmente tiver
+                    # equipamentos no escopo dele.
                     todos = p.todos_equipamentos or []
                     if not todos:
                         continue
 
+                    # Não deixa entrar depto desativado/sem atividade por engano:
+                    # exige pelo menos 1 equipamento com passos esperados.
                     if not any(int(e.get("total_steps", 0) or 0) > 0 for e in todos):
                         continue
 
@@ -1098,19 +1153,34 @@ def dispatch_relatorio_semanal(
                     ]
 
                     top_criticos = sorted(
-                        [e for e in candidatos_validos if int(e.get("pct", 0) or 0) < 100],
-                        key=lambda e: (int(e.get("pct", 0) or 0), str(e.get("frota") or "")),
+                        [
+                            e for e in candidatos_validos
+                            if int(e.get("pct", 0) or 0) < 100
+                        ],
+                        key=lambda e: (
+                            int(e.get("pct", 0) or 0),
+                            str(e.get("frota") or "")
+                        )
                     )[:3]
 
                     top_melhores = sorted(
-                        [e for e in candidatos_validos if 0 < int(e.get("pct", 0) or 0) < 100],
-                        key=lambda e: (-int(e.get("pct", 0) or 0), str(e.get("frota") or "")),
+                        [
+                            e for e in candidatos_validos
+                            if 0 < int(e.get("pct", 0) or 0) < 100
+                        ],
+                        key=lambda e: (
+                            -int(e.get("pct", 0) or 0),
+                            str(e.get("frota") or "")
+                        )
                     )[:3]
 
                     maiores_evolucoes = sorted(
-                        [e for e in candidatos_validos if int(e.get("delta_pct", 0) or 0) > 0],
+                        [
+                            e for e in candidatos_validos
+                            if (int(e.get("pct", 0) or 0) - int(e.get("pct_anterior", 0) or 0)) > 0
+                        ],
                         key=lambda e: (
-                            -int(e.get("delta_pct", 0) or 0),
+                            -(int(e.get("pct", 0) or 0) - int(e.get("pct_anterior", 0) or 0)),
                             -int(e.get("pct", 0) or 0),
                             str(e.get("frota") or "")
                         )
@@ -1134,20 +1204,32 @@ def dispatch_relatorio_semanal(
                         _expected_steps=p.expected_steps,
                     ))
 
+                    # Acumula trend e monta heatmap usando pct INCREMENTAL por semana.
+                    # wk.pct é cumulativo (semanas 1..N); para o heatmap queremos
+                    # o progresso *daquela* semana isolada, calculado pelo delta
+                    # done/total entre semanas consecutivas.
                     evolucao_sorted = sorted(p.evolucao or [], key=lambda w: getattr(w, "semana", 0))
+                    prev_done = 0
                     for wk in evolucao_sorted:
                         sem = int(getattr(wk, "semana", 0) or 0)
                         if sem <= 0:
                             continue
                         wk_done = int(getattr(wk, "concluidos", 0) or 0)
+                        wk_total = int(getattr(wk, "total", 0) or 0)
                         acc = trend_acc.setdefault(sem, {"done": 0, "total": 0})
                         acc["done"] += wk_done
-                        acc["total"] += int(p.expected_steps or 0)
+                        acc["total"] += wk_total
+                        # pct incremental: etapas feitas *nessa semana* / total esperado
+                        delta_done = wk_done - prev_done
+                        pct_incremental = max(0, min(100, round(
+                            delta_done / max(wk_total, 1) * 100
+                        ))) if wk_total > 0 else int(getattr(wk, "pct", 0) or 0)
                         heatmap_semanal.append({
                             "departamento": grp.departamento_nome,
                             "semana": sem,
-                            "pct": int(getattr(wk, "pct", 0) or 0),
+                            "pct": pct_incremental,
                         })
+                        prev_done = wk_done
 
                     for par in (p.parados_detalhe or []):
                         dias = int(par.get("dias_parado") or 0)
@@ -1158,11 +1240,20 @@ def dispatch_relatorio_semanal(
                         elif dias > 7:
                             alertas_parados["atencao"] += 1
                 except Exception as e_g:
-                    _log(f"    ↳ Aviso: erro ao montar snapshot de {grp.departamento_nome}: {e_g}")
+                    _log(
+                        f"    ↳ Aviso: erro ao montar snapshot de {grp.departamento_nome}: {e_g}")
 
             if dept_snapshots:
-                total_done_g = sum(getattr(s, "_done_steps", 0) for s in dept_snapshots)
-                total_expected_g = sum(getattr(s, "_expected_steps", 0) for s in dept_snapshots)
+                # pct_global ponderado: sum(done_steps) / sum(expected_steps)
+                # idêntico à fórmula do kpi_engine — evita distorção por deptos
+                # de tamanhos diferentes
+                total_done_g = sum(getattr(s, "_done_steps", 0)
+                                   for s in dept_snapshots)
+                total_expected_g = sum(
+                    getattr(
+                        s,
+                        "_expected_steps",
+                        0) for s in dept_snapshots)
                 pct_global = (
                     max(0, min(100, round(total_done_g / total_expected_g * 100)))
                     if total_expected_g > 0
@@ -1171,15 +1262,19 @@ def dispatch_relatorio_semanal(
                 n_equip_total = sum(d.n_equipamentos for d in dept_snapshots)
                 n_equip_concl = sum(d.n_concluidos for d in dept_snapshots)
                 n_alertas_total = sum(
-                    d.n_travados + d.n_risco_prazo + d.n_parados + d.n_sem_inicio
-                    for d in dept_snapshots
-                )
+                    d.n_travados +
+                    d.n_risco_prazo +
+                    d.n_parados +
+                    d.n_sem_inicio for d in dept_snapshots)
 
                 trend_semanal = []
                 for sem in sorted(trend_acc):
                     total_sem = int(trend_acc[sem].get("total") or 0)
                     done_sem = int(trend_acc[sem].get("done") or 0)
-                    pct_sem = max(0, min(100, round(done_sem / max(total_sem, 1) * 100))) if total_sem > 0 else 0
+                    pct_sem = max(
+                        0, min(
+                            100, round(
+                                done_sem / total_sem * 100))) if total_sem > 0 else 0
                     trend_semanal.append({"semana": sem, "pct": pct_sem})
                 trend_semanal = trend_semanal[-4:]
 
@@ -1240,9 +1335,11 @@ def dispatch_relatorio_semanal(
             else:
                 _log("    ↳ Sem dados para executivo — pulando.")
         else:
-            _log("    ↳ Nenhum supervisor/admin com e-mail — relatório executivo não enviado.")
+            _log(
+                "    ↳ Nenhum supervisor/admin com e-mail — relatório executivo não enviado.")
     except Exception as e_exec:
         _log(f"  ⚠️ Erro ao gerar executivo: {e_exec}")
 
-    _log(f"Concluído: {result.sent} enviados, {result.failed} falhas, {result.skipped} pulados.")
+    _log(
+        f"Concluído: {result.sent} enviados, {result.failed} falhas, {result.skipped} pulados.")
     return result
