@@ -1,7 +1,7 @@
 """Dashboard — camada de renderização.
 
 Responsabilidade: exibir KPIs, progresso por grupo/setor/equipamento,
-heatmap de risco e timeline de movimentação, tudo a partir dos dados
+heatmap de risco e tendência semanal, tudo a partir dos dados
 calculados em transforms.py.
 """
 from __future__ import annotations
@@ -46,6 +46,7 @@ from .transforms import (
     group_progress,
     normalize_matriz_base,
     overall_from_base,
+    tendencia_alertas,
 )
 
 
@@ -424,27 +425,27 @@ def _fragment_kpis_globais(overall: dict) -> None:
     from src.utils.ui_helpers import mobile_columns
     cols = mobile_columns(5, 2)
     labels = [("% Concluído",
-               f"{int(round(overall['pct']))}%",
+               f"{int(round(overall.get('pct', 0)))}%",
                None,
                "off",
                "Percentual global alinhado à mesma regra da Matriz/Home."),
               ("Concluídos",
-               overall["concl"],
+               overall.get("concl", 0),
                None,
                "off",
                None),
               ("Em andamento",
-               overall["andamento"],
+               overall.get("andamento", 0),
                None,
                "off",
                None),
-              ("Pendentes",
-               overall["pend"],
+              ("Sem início",
+               overall.get("sem_inicio", overall.get("pend", 0)),
                None,
                "off",
                None),
-              ("Travados",
-               overall["trav"],
+              ("Em atraso",
+               overall.get("atrasados", overall.get("trav", 0)),
                None,
                "off",
                None),
@@ -464,24 +465,22 @@ def _fragment_previsao(previsao: dict, risco: dict) -> None:
     _RISCO_ICONS = {"baixo": "🟢", "medio": "🟡", "alto": "🔴"}
     _PREV_LABELS = {
         "no_prazo": "No prazo",
-        "atraso": "Com atraso",
+        "atraso": "Em atraso",
+        "vence_hoje": "Vence hoje",
+        "concluido": "Concluído",
+        "sem_prazo": "Sem prazo",
         "sem_base": "Sem base"}
     status_prev = previsao.get("status_previsao", "sem_base")
     status_risco = risco.get("status_risco", "baixo")
 
     c1, c2 = st.columns(2)
     with c1:
+        prazo = previsao.get("data_fim_planejada")
         st.metric(
-            "Previsão de término",
-            _PREV_LABELS.get(
-                status_prev,
-                status_prev))
-        if previsao.get("previsao_termino"):
-            st.caption(
-                f"Data estimada: **{fmt_date(previsao['previsao_termino'])}**")
-        if previsao.get("data_fim_planejada"):
-            st.caption(
-                f"Data planejada: **{fmt_date(previsao['data_fim_planejada'])}**")
+            "Prazo da revisão",
+            fmt_date(prazo) if prazo is not None else "—")
+        st.caption(
+            f"Status: **{_PREV_LABELS.get(status_prev, status_prev)}**")
     with c2:
         icon = _RISCO_ICONS.get(status_risco, "⚪")
         st.metric(
@@ -490,9 +489,9 @@ def _fragment_previsao(previsao: dict, risco: dict) -> None:
             help="Score: travados × 3 + pendentes × 1.5 + em_andamento × 1.",
         )
         st.caption(
-            f"Ritmo: **{previsao.get('ritmo_medio_dia', 0):.2f}%/dia** | "
+            f"Ritmo necessário: **{previsao.get('ritmo_medio_dia', 0):.2f}%/dia** | "
             f"Dias passados: **{previsao.get('dias_passados', 0)}** | "
-            f"Dias rest. est.: **{previsao.get('dias_restantes_estimados', 0):.0f}**"
+            f"Dias restantes: **{previsao.get('dias_restantes_estimados', 0):.0f}**"
         )
 
 
@@ -865,40 +864,86 @@ def _fragment_criticidade(crit: pd.DataFrame) -> None:
 
 
 @st.fragment
-def _fragment_timeline(tl: pd.DataFrame) -> None:
-    if tl.empty:
-        empty_message("Sem movimentações registradas nesta revisão.")
+def _fragment_tendencia(trend: pd.DataFrame) -> None:
+    if trend.empty:
+        empty_message("Sem base suficiente para tendência semanal nesta revisão.")
         return
-    plot_df = tl.copy().sort_values("dia")
-    plot_df["dia_label"] = pd.to_datetime(
-        plot_df["dia"], errors="coerce").dt.strftime("%d/%m")
-    fig = px.bar(
+
+    trend = trend.copy().sort_values("week_number")
+    alert = tendencia_alertas(trend)
+    status = alert.get("status", "sem_base")
+    tone_map = {
+        "acima": "success",
+        "atencao": "warning",
+        "abaixo": "warning",
+        "estagnado": "warning",
+        "sem_base": "info",
+    }
+    title_map = {
+        "acima": "Tendência saudável",
+        "atencao": "Tendência em atenção",
+        "abaixo": "Ritmo abaixo do ideal",
+        "estagnado": "Evolução estagnada",
+        "sem_base": "Sem base suficiente",
+    }
+    notice_card(
+        title_map.get(status, "Tendência semanal"),
+        f"{alert.get('mensagem', 'Sem leitura disponível.')} "
+        f"Delta atual: {alert.get('delta_atual', 0):+.1f} p.p. | "
+        f"Ganho última semana: {alert.get('ganho_ultima_semana', 0):+.1f} p.p.",
+        tone=tone_map.get(status, "info"),
+    )
+
+    plot_df = trend.melt(
+        id_vars=["week_number", "semana_label"],
+        value_vars=["pct_real", "pct_ideal"],
+        var_name="serie",
+        value_name="pct",
+    )
+    plot_df["serie"] = plot_df["serie"].map({
+        "pct_real": "Real",
+        "pct_ideal": "Ideal",
+    }).fillna(plot_df["serie"])
+
+    fig = px.line(
         plot_df,
-        x="dia_label",
-        y="movimentacoes",
-        text="movimentacoes",
-        title="Movimentações por dia")
-    fig.update_traces(textposition="outside", cliponaxis=False)
+        x="semana_label",
+        y="pct",
+        color="serie",
+        markers=True,
+        line_dash="serie",
+        category_orders={"serie": ["Real", "Ideal"]},
+        title="Evolução semanal da revisão",
+        color_discrete_map={"Real": "#22C55E", "Ideal": "#94A3B8"},
+        line_dash_map={"Real": "solid", "Ideal": "dash"},
+    )
+    fig.update_traces(hovertemplate="%{x}<br>%{fullData.name}: %{y:.1f}%<extra></extra>")
     fig.update_layout(
         height=360,
         margin=dict(l=10, r=10, t=48, b=10),
-        xaxis_title="Dia",
-        yaxis_title="Movimentações",
+        xaxis_title="Semana",
+        yaxis_title="% Concluído",
+        yaxis=dict(range=[0, 100]),
         paper_bgcolor="#06080B",
         plot_bgcolor="#0C111A",
         font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=11),
-        showlegend=False,
+        legend_title_text="",
     )
-    st.plotly_chart(
-        fig, use_container_width=True, config={
-            "displayModeBar": False})
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+    display = trend[["semana_label", "pct_real", "pct_ideal", "delta_pct"]].copy()
+    display = display.rename(columns={
+        "semana_label": "Semana",
+        "pct_real": "Real (%)",
+        "pct_ideal": "Ideal (%)",
+        "delta_pct": "Delta (p.p.)",
+    })
     data_table(
-        tl.sort_values("dia", ascending=False),
+        display.sort_values("Semana", ascending=False),
         column_config={
-            "dia": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-            "movimentacoes": st.column_config.NumberColumn("Movimentações"),
-            "concluidos": st.column_config.NumberColumn("Concluídos"),
-            "restantes": st.column_config.NumberColumn("Restantes"),
+            "Real (%)": st.column_config.NumberColumn("Real (%)", format="%.1f"),
+            "Ideal (%)": st.column_config.NumberColumn("Ideal (%)", format="%.1f"),
+            "Delta (p.p.)": st.column_config.NumberColumn("Delta (p.p.)", format="%.1f"),
         },
     )
 
@@ -929,8 +974,10 @@ def _overall_from_group_kpis(kdf: pd.DataFrame) -> dict:
         "pct": float(gk.get("pct", 0) or 0),
         "total": int(len(kdf)) if kdf is not None else 0,
         "concl": 0,
-        "pend": 0,
+        "sem_inicio": 0,
         "andamento": 0,
+        "atrasados": 0,
+        "pend": 0,
         "trav": 0,
         "na": 0,
     }
@@ -1017,6 +1064,17 @@ def render_dashboard() -> None:
                    for g in grupos if g.get("id")}
 
     base = normalize_matriz_base(raw, eq_meta)
+    if not base.empty:
+        if "data_inicio" not in base.columns:
+            base["data_inicio"] = pd.NaT
+        if "data_fim" not in base.columns:
+            base["data_fim"] = pd.NaT
+        rev_inicio = pd.to_datetime(rev.get("data_inicio"), errors="coerce")
+        rev_fim = pd.to_datetime(rev.get("data_fim"), errors="coerce")
+        if pd.notna(rev_inicio):
+            base["data_inicio"] = pd.to_datetime(base["data_inicio"], errors="coerce").fillna(rev_inicio)
+        if pd.notna(rev_fim):
+            base["data_fim"] = pd.to_datetime(base["data_fim"], errors="coerce").fillna(rev_fim)
     raw_base = base.copy()
 
     # KPI consolidado para fallback de perfis com escopo/RLS mais restritivo.
@@ -1043,11 +1101,9 @@ def render_dashboard() -> None:
     base_overall = overall_from_base(base)
     kpi_overall = _overall_from_group_kpis(kpi_df) if not kpi_df.empty else {"pct": 0}
 
-    # Para gestores com escopo, a base detalhada pode existir mesmo quando o
-    # percentual consolidado vier zerado ou incompleto. Nesse caso, manter a
-    # base detalhada preserva as abas de Equipamentos/Heatmap/Criticidade e faz
-    # os KPIs seguirem o escopo real do usuário. O fallback consolidado só deve
-    # entrar quando realmente não houver linhas detalhadas após aplicar o escopo.
+    # Fallback consolidado somente quando a base detalhada realmente estiver vazia.
+    # Não usar pct==0 como gatilho, porque isso mascara dashboards válidos ainda no início
+    # da revisão e pode "zerar" a leitura detalhada para perfis de gestor.
     use_kpi_fallback = bool(base.empty and float(kpi_overall.get("pct", 0) or 0) > 0)
     if use_kpi_fallback:
         dashboard_groups = _groups_from_kpi_df(kpi_df, gid_to_name, gid_to_dept)
@@ -1143,8 +1199,9 @@ def render_dashboard() -> None:
         )
         return
 
-    # Quando a base detalhada vier vazia/zerada para perfis com escopo, usa a
-    # fonte consolidada por grupo para não exibir todos os percentuais como 0.
+    # Quando a base detalhada vier realmente vazia para perfis com escopo, usa a
+    # fonte consolidada por grupo. Se houver linhas detalhadas, preserva sempre o
+    # dashboard completo do gestor para evitar zerar departamentos/equipamentos.
     if use_kpi_fallback:
         overall = _overall_from_group_kpis(kpi_df if effective_group_ids is None and effective_dept_ids is None else dashboard_groups_filtered.rename(columns={"pct_concluido": "pct"}))
     else:
@@ -1155,10 +1212,10 @@ def render_dashboard() -> None:
 
     if not use_kpi_fallback:
         with st.spinner("", show_time=False):
-            risco, previsao, heat, crit, tl = build_inteligencia(base_filtered)
+            risco, previsao, heat, crit, trend = build_inteligencia(base_filtered)
     else:
         risco, previsao = {"status_risco": "baixo", "risco_score": 0}, {"status_previsao": "sem_base"}
-        heat = crit = tl = pd.DataFrame()
+        heat = crit = trend = pd.DataFrame()
     _fragment_previsao(previsao, risco)
     st.divider()
 
@@ -1168,7 +1225,7 @@ def render_dashboard() -> None:
         "Equipamentos",
         "Heatmap",
         "Criticidade",
-        "Timeline"]
+        "Tendência semanal"]
 
     def _on_tab_change() -> None:
         st.session_state["_dash_tab"] = st.session_state["_dash_tab_ctrl"]
@@ -1199,24 +1256,24 @@ def render_dashboard() -> None:
     elif active == "Equipamentos":
         st.markdown("### Progresso por equipamento")
         if use_kpi_fallback:
-            empty_message("Detalhamento por equipamento indisponível nesta revisão; exibindo KPIs consolidados por grupo.")
+            empty_message("Detalhamento por equipamento indisponível neste perfil; exibindo KPIs consolidados por grupo.")
         else:
             _fragment_equipamentos(base_filtered, dept_map, top_n=top_n)
     elif active == "Heatmap":
         st.markdown("### Heatmap de risco — Grupo × Setor")
         if use_kpi_fallback:
-            empty_message("Heatmap indisponível porque esta revisão não retornou base detalhada no escopo atual.")
+            empty_message("Heatmap indisponível no fallback consolidado desta revisão.")
         else:
             _fragment_heatmap(heat)
     elif active == "Criticidade":
         st.markdown("### Top equipamentos críticos")
         if use_kpi_fallback:
-            empty_message("Criticidade detalhada indisponível porque esta revisão não retornou base detalhada no escopo atual.")
+            empty_message("Criticidade detalhada indisponível no fallback consolidado desta revisão.")
         else:
             _fragment_criticidade(crit)
     else:
-        st.markdown("### Timeline de movimentações")
+        st.markdown("### Tendência semanal")
         if use_kpi_fallback:
-            empty_message("Tendência detalhada indisponível porque esta revisão não retornou base detalhada no escopo atual.")
+            empty_message("Tendência semanal indisponível no fallback consolidado desta revisão.")
         else:
-            _fragment_timeline(tl)
+            _fragment_tendencia(trend)
