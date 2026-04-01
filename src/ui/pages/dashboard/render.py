@@ -6,6 +6,7 @@ calculados em transforms.py.
 """
 from __future__ import annotations
 
+import hashlib
 import time
 
 import pandas as pd
@@ -48,6 +49,9 @@ from .transforms import (
     overall_from_base,
     tendencia_alertas,
 )
+
+def _token_cache_key(token: str = "") -> str:
+    return hashlib.md5((token or "").encode()).hexdigest()[:8]
 
 
 def _load_revisao(sb, tenant_id: str, revisao_id: str | None = None) -> dict | None:
@@ -141,15 +145,9 @@ def _load_task_rows_with_fallback(sb, tenant_id: str, revisao_id: str, fetch_all
     return [], meta
 
 @st.cache_data(ttl=30, show_spinner=False)
-def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
-                      ver: str = "0") -> tuple[list, list, list, dict]:
-    # IMPORTANTE: _token tem underscore (excluído do cache key pelo Streamlit).
-    # Para evitar que uma chamada inicial com token vazio cache eq_rows=[] e
-    # contamine chamadas posteriores com token válido, incluímos um hash do
-    # token no ver. Isso garante que o cache é invalidado quando o token muda.
-    import hashlib as _hl
-    _tok_hash = _hl.md5((_token or "").encode()).hexdigest()[:8]
-    ver = f"{ver}_{_tok_hash}"
+def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
+                      ver: str = "0", _token: str = "") -> tuple[list, list, list, dict]:
+    _ = token_key, ver
     sb = _sb_from_token(_token)
 
     def _fetch_all(query, page_size: int = 1000):
@@ -445,9 +443,8 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _load_departamentos(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]:
-    import hashlib as _hl
-    ver = f"{ver}_{_hl.md5((_token or '').encode()).hexdigest()[:8]}"
+def _load_departamentos(tenant_id: str, token_key: str = "", ver: str = "0", _token: str = "") -> list[dict]:
+    _ = token_key, ver
     sb = _sb_from_token(_token)
     try:
         return (
@@ -465,9 +462,8 @@ def _load_departamentos(tenant_id: str, ver: str = "0", _token: str = "") -> lis
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _load_grupos(tenant_id: str, ver: str = "0", _token: str = "") -> list[dict]:
-    import hashlib as _hl
-    ver = f"{ver}_{_hl.md5((_token or '').encode()).hexdigest()[:8]}"
+def _load_grupos(tenant_id: str, token_key: str = "", ver: str = "0", _token: str = "") -> list[dict]:
+    _ = token_key, ver
     sb = _sb_from_token(_token)
     try:
         return (
