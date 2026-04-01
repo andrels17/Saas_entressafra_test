@@ -1387,12 +1387,24 @@ def render_dashboard() -> None:
         _fragment_departamentos(dashboard_groups_filtered, gid_to_dept, dept_map)
     elif active == "Equipamentos":
         st.markdown("### Progresso por equipamento")
+        task_rows_current = int((debug_meta or {}).get("task_rows_current_revision") or 0)
         if equipment_detailed_available:
             _fragment_equipamentos(equipment_base_filtered, dept_map, top_n=top_n)
+        elif detailed_available and task_rows_current > 0:
+            st.caption("Usando base detalhada da revisão atual para montar o ranking de equipamentos.")
+            _fragment_equipamentos(base_filtered, dept_map, top_n=top_n)
+            with st.expander("Diagnóstico do detalhamento", expanded=False):
+                st.caption(f"tarefas visíveis na revisão atual: {task_rows_current}")
+                st.caption(f"tarefas visíveis em qualquer revisão: {int((debug_meta or {}).get('task_rows_any_revision_visible') or 0)}")
+                st.caption(f"fonte das tarefas: {(debug_meta or {}).get('task_source') or 'table'}")
+                rpc_used = (debug_meta or {}).get("task_rpc_used")
+                if rpc_used:
+                    st.caption(f"rpc testada/usada: {rpc_used}")
+                st.caption("observação: a leitura RPC já trouxe tarefas da revisão atual; por isso o ranking foi montado mesmo sem a base task-only isolada.")
         elif detailed_available:
             empty_message(equipment_detail_reason or "Não há tarefas de equipamento visíveis neste perfil para a revisão atual.")
             with st.expander("Diagnóstico do detalhamento", expanded=False):
-                st.caption(f"tarefas visíveis na revisão atual: {int((debug_meta or {}).get('task_rows_current_revision') or 0)}")
+                st.caption(f"tarefas visíveis na revisão atual: {task_rows_current}")
                 st.caption(f"tarefas visíveis em qualquer revisão: {int((debug_meta or {}).get('task_rows_any_revision_visible') or 0)}")
                 st.caption(f"fonte das tarefas: {(debug_meta or {}).get('task_source') or 'table'}")
                 rpc_used = (debug_meta or {}).get("task_rpc_used")
