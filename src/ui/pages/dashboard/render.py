@@ -126,7 +126,7 @@ def _load_task_rows_with_fallback(sb, tenant_id: str, revisao_id: str, fetch_all
 
 @st.cache_data(ttl=30, show_spinner=False)
 def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
-                      ver: str = "0") -> tuple[list, list, dict]:
+                      ver: str = "0") -> tuple[list, list, list, dict]:
     # IMPORTANTE: _token tem underscore (excluído do cache key pelo Streamlit).
     # Para evitar que uma chamada inicial com token vazio cache eq_rows=[] e
     # contamine chamadas posteriores com token válido, incluímos um hash do
@@ -400,9 +400,21 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
     if fallback_tasks:
         raw.extend(fallback_tasks)
 
+    # Base dedicada da aba Equipamentos: além da grade sintética, inclui
+    # também as tarefas reais dos equipamentos já cobertos por grupo_servicos.
+    # Isso permite que o ranking híbrido sobrescreva corretamente o progresso
+    # por equipamento quando a junção sintética não conseguir casar alguma
+    # combinação equipamento × serviço, sem inflar os KPIs globais das outras abas.
+    covered_task_rows = [t for t in raw_tasks if str(t.get("equipamento_id") or "") in eids_covered]
+    raw_equipment = list(raw)
+    if covered_task_rows:
+        raw_equipment.extend(covered_task_rows)
+
     # Fallback total: se nenhuma grade pôde ser montada, usa todas as tarefas.
     if not raw and raw_tasks:
         raw = raw_tasks
+    if not raw_equipment and raw_tasks:
+        raw_equipment = list(raw_tasks)
 
     eq_meta = [
         {
@@ -413,7 +425,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
         }
         for r in eq_rows
     ]
-    return raw, eq_meta, debug_meta
+    return raw, raw_equipment, eq_meta, debug_meta
 
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -1164,7 +1176,7 @@ def render_dashboard() -> None:
     ver = str(st.session_state.get("data_version", "0"))
     token = st.session_state.get("sb_access_token", "")
     with st.spinner("", show_time=False):
-        raw, eq_meta, debug_meta = _load_base_cached(tenant_id, revisao_id, token, ver)
+        raw, raw_equipment, eq_meta, debug_meta = _load_base_cached(tenant_id, revisao_id, token, ver)
         departamentos = _load_departamentos(tenant_id, ver, token)
         grupos = _load_grupos(tenant_id, ver, token)
 
@@ -1193,12 +1205,12 @@ def render_dashboard() -> None:
                    for g in grupos if g.get("id")}
 
     base = normalize_matriz_base(raw, eq_meta)
+    equipment_base = normalize_matriz_base(raw_equipment, eq_meta)
     # Para equipamentos, preservamos a base completa SOMENTE dentro do escopo do
     # usuário. A combinação híbrida entre linhas sintéticas e linhas reais de
     # tarefa acontece dentro de _fragment_equipamentos(). O problema anterior
     # era manter equipment_base sem aplicar o escopo automático do gestor,
     # fazendo a aba listar equipamentos de outros departamentos/grupos.
-    equipment_base = base.copy()
     if dep_scope_ids is not None or grp_scope_ids is not None:
         equipment_base = apply_filters(equipment_base, dep_scope_ids, grp_scope_ids)
         if equipment_base.empty and dep_scope_ids not in (None, []):
