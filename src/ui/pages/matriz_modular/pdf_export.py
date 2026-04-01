@@ -148,7 +148,7 @@ def _merge_sector_tables(sector_tables):
     return base.fillna(""), sector_groups
 
 
-def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_revisao=None) -> bytes:
+def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_revisao=None, tarefas_servico_df=None, revisao_id=None) -> bytes:
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
     from reportlab.lib.pagesizes import A3, landscape
@@ -632,16 +632,59 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                     return int(nums.max()) + 1
         return None
 
+    def _extract_semana_from_tarefas_servico(df: pd.DataFrame, revisao_id):
+        if not isinstance(df, pd.DataFrame) or df.empty or "semana" not in df.columns:
+            return None
+
+        work = df.copy()
+
+        # filtra pela revisão atual se a coluna existir
+        if revisao_id is not None and "revisao_id" in work.columns:
+            try:
+                work = work[work["revisao_id"].astype(str) == str(revisao_id)]
+            except Exception:
+                pass
+
+        if work.empty:
+            return None
+
+        # prioriza linhas com updated_at preenchido
+        if "updated_at" in work.columns:
+            try:
+                work["updated_at"] = pd.to_datetime(work["updated_at"], errors="coerce", utc=True)
+                work = work.sort_values("updated_at")
+            except Exception:
+                pass
+
+        nums = (
+            work["semana"]
+            .astype(str)
+            .str.extract(r"(\d+)", expand=False)
+            .pipe(pd.to_numeric, errors="coerce")
+            .dropna()
+        )
+        if nums.empty:
+            return None
+
+        return int(nums.max()) + 1
+
     semana_impressao = None
 
-    # prioridade 1: semana explícita vinda do chamador
+    # prioridade 1: tabela tarefa_servicos da revisão atual
     try:
-        if semana_revisao is not None and str(semana_revisao).strip() != "":
-            semana_impressao = int(pd.to_numeric([semana_revisao], errors="coerce")[0])
+        semana_impressao = _extract_semana_from_tarefas_servico(tarefas_servico_df, revisao_id)
     except Exception:
         semana_impressao = None
 
-    # prioridade 2: tentar inferir do resumo da revisão
+    # prioridade 2: semana explícita vinda do chamador
+    if not semana_impressao:
+        try:
+            if semana_revisao is not None and str(semana_revisao).strip() != "":
+                semana_impressao = int(pd.to_numeric([semana_revisao], errors="coerce")[0])
+        except Exception:
+            semana_impressao = None
+
+    # prioridade 3: tentar inferir do resumo da revisão
     if not semana_impressao:
         try:
             semana_impressao = _extract_semana_mais1_from_df(resumo_df)

@@ -41,6 +41,7 @@ def render_export_tab(
     view_agg,
     sector_tables_for_export,
     data_version,
+    tarefas_servico_df=None,
 ) -> None:
     st.markdown("### Exportações")
     res_exp = resumo_df if (isinstance(resumo_df, pd.DataFrame) and not resumo_df.empty) else pd.DataFrame()
@@ -127,6 +128,8 @@ def render_export_tab(
                 resumo_df=resumo_pdf_df,
                 sector_tables=sector_tables_pdf,
                 semana_revisao=semana_revisao,
+                tarefas_servico_df=tarefas_servico_df.copy() if isinstance(tarefas_servico_df, pd.DataFrame) else None,
+                revisao_id=revisao_id,
             )
             st.session_state["mtz_pdf_export_ready"] = True
         st.success("PDF pronto 🚀")
