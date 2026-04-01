@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import pandas as pd
@@ -381,19 +382,20 @@ def build_inteligencia(
             "travados",
             "pendentes",
             "pct_concluido"])
-    EMPTY_TL = pd.DataFrame(
+    EMPTY_TREND = pd.DataFrame(
         columns=[
-            "dia",
-            "movimentacoes",
-            "concluidos",
-            "restantes"])
+            "week_number",
+            "semana_label",
+            "pct_real",
+            "pct_ideal",
+            "delta_pct"])
 
     if base is None or base.empty:
-        return EMPTY_RISCO, EMPTY_PREV, EMPTY_HEAT, EMPTY_CRIT, EMPTY_TL
+        return EMPTY_RISCO, EMPTY_PREV, EMPTY_HEAT, EMPTY_CRIT, EMPTY_TREND
 
     valid = _valid_scope(base)
     if valid.empty:
-        return EMPTY_RISCO, EMPTY_PREV, EMPTY_HEAT, EMPTY_CRIT, EMPTY_TL
+        return EMPTY_RISCO, EMPTY_PREV, EMPTY_HEAT, EMPTY_CRIT, EMPTY_TREND
 
     total_valid = len(valid)
     etapas_ok = float(valid["ok_count"].sum())
@@ -478,18 +480,159 @@ def build_inteligencia(
                                 False, True, True]).reset_index(drop=True)
         crit["ranking_criticidade"] = range(1, len(crit) + 1)
 
-    tl = EMPTY_TL
-    if "updated_at" in valid.columns:
-        vt = valid[valid["updated_at"].notna()].copy()
-        if not vt.empty:
-            vt["dia"] = vt["updated_at"].dt.floor("D")
-            tl = vt.groupby("dia", dropna=False).agg(
-                movimentacoes=("equipamento_id", "size"),
-                concluidos=("state", lambda s: int((s == "concluido").sum())),
-                restantes=("state", lambda s: int((s != "concluido").sum())),
-            ).reset_index().sort_values("dia")
+    trend = build_tendencia_semanal(valid, data_inicio=data_inicio, data_fim=data_fim, pct_atual=pct)
 
-    return dict(risco), previsao, heat, crit, tl
+    return dict(risco), previsao, heat, crit, trend
+
+
+def build_tendencia_semanal(
+    base: pd.DataFrame,
+    data_inicio: pd.Timestamp | None = None,
+    data_fim: pd.Timestamp | None = None,
+    pct_atual: float | None = None,
+) -> pd.DataFrame:
+    cols = ["week_number", "semana_label", "pct_real", "pct_ideal", "delta_pct"]
+    if base is None or base.empty:
+        return pd.DataFrame(columns=cols)
+
+    valid = _valid_scope(base)
+    if valid.empty:
+        return pd.DataFrame(columns=cols)
+
+    start = pd.to_datetime(data_inicio, errors="coerce") if data_inicio is not None else pd.NaT
+    end = pd.to_datetime(data_fim, errors="coerce") if data_fim is not None else pd.NaT
+    hoje = pd.Timestamp(_now_brt()).normalize().tz_localize(None)
+
+    if pd.isna(start) and "data_inicio" in valid.columns:
+        start = pd.to_datetime(valid["data_inicio"], errors="coerce").dropna().min()
+    if pd.isna(end) and "data_fim" in valid.columns:
+        end = pd.to_datetime(valid["data_fim"], errors="coerce").dropna().max()
+
+    updated = None
+    if "updated_at" in valid.columns:
+        updated = pd.to_datetime(valid["updated_at"], errors="coerce")
+
+    expected_total = int(len(valid) * 3)
+    if expected_total <= 0:
+        return pd.DataFrame(columns=cols)
+
+    if pct_atual is None:
+        pct_atual = round(float(valid["ok_count"].sum()) / expected_total * 100, 1)
+    pct_atual = float(max(0.0, min(100.0, pct_atual)))
+
+    observed_weeks = 0
+    if updated is not None and updated.notna().any():
+        upd = updated.dropna().dt.tz_localize(None).dt.normalize()
+        if pd.notna(start):
+            observed_weeks = int((((upd - start.normalize()).dt.days).clip(lower=0) // 7) + 1).max()
+        else:
+            observed_weeks = int(upd.dt.isocalendar().week.max()) if not upd.empty else 0
+
+    planned_weeks = 0
+    if pd.notna(start) and pd.notna(end):
+        planned_weeks = max(1, int(math.ceil(((end.normalize() - start.normalize()).days + 1) / 7.0)))
+    current_week = 1
+    if pd.notna(start):
+        current_week = max(1, int(((hoje - start.normalize()).days // 7) + 1))
+
+    total_weeks = max(1, planned_weeks, observed_weeks, current_week)
+
+    rows: list[dict[str, float | int | str]] = []
+    cumulative_pct = 0.0
+
+    if updated is not None and updated.notna().any():
+        vt = valid.copy()
+        vt = vt[updated.notna()].copy()
+        vt["updated_at"] = pd.to_datetime(vt["updated_at"], errors="coerce").dt.tz_localize(None).dt.normalize()
+        if pd.notna(start):
+            vt["week_number"] = (((vt["updated_at"] - start.normalize()).dt.days).clip(lower=0) // 7) + 1
+        else:
+            # Fallback: ordena semanas observadas em sequência
+            ordered_days = sorted(vt["updated_at"].dropna().unique())
+            day_to_week = {day: idx + 1 for idx, day in enumerate(ordered_days)}
+            vt["week_number"] = vt["updated_at"].map(day_to_week)
+
+        weekly_done = (
+            vt.groupby("week_number", dropna=False)["ok_count"]
+            .sum()
+            .reset_index(name="done_steps")
+            .sort_values("week_number")
+        )
+        weekly_done["week_number"] = pd.to_numeric(weekly_done["week_number"], errors="coerce").fillna(0).astype(int)
+        weekly_done = weekly_done[weekly_done["week_number"] > 0]
+        done_map = {int(r.week_number): float(r.done_steps) for r in weekly_done.itertuples()}
+
+        cumulative_done = 0.0
+        for week in range(1, total_weeks + 1):
+            cumulative_done += float(done_map.get(week, 0.0))
+            pct_real = round(max(0.0, min(100.0, cumulative_done / expected_total * 100)), 1)
+            pct_ideal = round(max(0.0, min(100.0, week / max(total_weeks, 1) * 100)), 1)
+            rows.append({
+                "week_number": week,
+                "semana_label": f"S{week}",
+                "pct_real": pct_real,
+                "pct_ideal": pct_ideal,
+                "delta_pct": round(pct_real - pct_ideal, 1),
+            })
+        if rows:
+            rows[-1]["pct_real"] = round(pct_atual, 1)
+            rows[-1]["delta_pct"] = round(rows[-1]["pct_real"] - rows[-1]["pct_ideal"], 1)
+    else:
+        week = max(1, min(total_weeks, current_week))
+        for w in range(1, total_weeks + 1):
+            pct_real = round(pct_atual, 1) if w == week else (0.0 if w < week else round(pct_atual, 1))
+            pct_ideal = round(max(0.0, min(100.0, w / max(total_weeks, 1) * 100)), 1)
+            rows.append({
+                "week_number": w,
+                "semana_label": f"S{w}",
+                "pct_real": pct_real,
+                "pct_ideal": pct_ideal,
+                "delta_pct": round(pct_real - pct_ideal, 1),
+            })
+
+    trend = pd.DataFrame(rows, columns=cols)
+    if not trend.empty:
+        trend["pct_real"] = pd.to_numeric(trend["pct_real"], errors="coerce").fillna(0).clip(0, 100)
+        trend["pct_ideal"] = pd.to_numeric(trend["pct_ideal"], errors="coerce").fillna(0).clip(0, 100)
+        trend["delta_pct"] = (trend["pct_real"] - trend["pct_ideal"]).round(1)
+    return trend
+
+
+def tendencia_alertas(trend: pd.DataFrame) -> dict[str, Any]:
+    if trend is None or trend.empty:
+        return {
+            "status": "sem_base",
+            "mensagem": "Sem dados suficientes para tendência semanal.",
+            "delta_atual": 0.0,
+            "ganho_ultima_semana": 0.0,
+        }
+
+    t = trend.sort_values("week_number").copy()
+    t["ganho_semanal"] = t["pct_real"].diff().fillna(t["pct_real"])
+    delta_atual = float(t["delta_pct"].iloc[-1])
+    ganho_ultima = float(t["ganho_semanal"].iloc[-1])
+    ultimos = t.tail(2)
+    estagnado = len(ultimos) >= 2 and float(ultimos["ganho_semanal"].max()) <= 0.5 and float(t["pct_real"].iloc[-1]) < 100
+
+    if estagnado:
+        status = "estagnado"
+        mensagem = "Evolução estagnada nas últimas semanas."
+    elif delta_atual >= 0:
+        status = "acima"
+        mensagem = "Ritmo igual ou acima da linha ideal."
+    elif delta_atual > -10:
+        status = "atencao"
+        mensagem = "Leve desvio abaixo da linha ideal."
+    else:
+        status = "abaixo"
+        mensagem = "Abaixo da linha ideal de avanço."
+
+    return {
+        "status": status,
+        "mensagem": mensagem,
+        "delta_atual": round(delta_atual, 1),
+        "ganho_ultima_semana": round(ganho_ultima, 1),
+    }
 
 
 def fmt_date(v) -> str:

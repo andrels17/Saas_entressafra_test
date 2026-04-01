@@ -1,7 +1,7 @@
 """Dashboard — camada de renderização.
 
 Responsabilidade: exibir KPIs, progresso por grupo/setor/equipamento,
-heatmap de risco e timeline de movimentação, tudo a partir dos dados
+heatmap de risco e tendência semanal, tudo a partir dos dados
 calculados em transforms.py.
 """
 from __future__ import annotations
@@ -46,6 +46,7 @@ from .transforms import (
     group_progress,
     normalize_matriz_base,
     overall_from_base,
+    tendencia_alertas,
 )
 
 
@@ -863,40 +864,86 @@ def _fragment_criticidade(crit: pd.DataFrame) -> None:
 
 
 @st.fragment
-def _fragment_timeline(tl: pd.DataFrame) -> None:
-    if tl.empty:
-        empty_message("Sem movimentações registradas nesta revisão.")
+def _fragment_tendencia(trend: pd.DataFrame) -> None:
+    if trend.empty:
+        empty_message("Sem base suficiente para tendência semanal nesta revisão.")
         return
-    plot_df = tl.copy().sort_values("dia")
-    plot_df["dia_label"] = pd.to_datetime(
-        plot_df["dia"], errors="coerce").dt.strftime("%d/%m")
-    fig = px.bar(
+
+    trend = trend.copy().sort_values("week_number")
+    alert = tendencia_alertas(trend)
+    status = alert.get("status", "sem_base")
+    tone_map = {
+        "acima": "success",
+        "atencao": "warning",
+        "abaixo": "warning",
+        "estagnado": "warning",
+        "sem_base": "info",
+    }
+    title_map = {
+        "acima": "Tendência saudável",
+        "atencao": "Tendência em atenção",
+        "abaixo": "Ritmo abaixo do ideal",
+        "estagnado": "Evolução estagnada",
+        "sem_base": "Sem base suficiente",
+    }
+    notice_card(
+        title_map.get(status, "Tendência semanal"),
+        f"{alert.get('mensagem', 'Sem leitura disponível.')} "
+        f"Delta atual: {alert.get('delta_atual', 0):+.1f} p.p. | "
+        f"Ganho última semana: {alert.get('ganho_ultima_semana', 0):+.1f} p.p.",
+        tone=tone_map.get(status, "info"),
+    )
+
+    plot_df = trend.melt(
+        id_vars=["week_number", "semana_label"],
+        value_vars=["pct_real", "pct_ideal"],
+        var_name="serie",
+        value_name="pct",
+    )
+    plot_df["serie"] = plot_df["serie"].map({
+        "pct_real": "Real",
+        "pct_ideal": "Ideal",
+    }).fillna(plot_df["serie"])
+
+    fig = px.line(
         plot_df,
-        x="dia_label",
-        y="movimentacoes",
-        text="movimentacoes",
-        title="Movimentações por dia")
-    fig.update_traces(textposition="outside", cliponaxis=False)
+        x="semana_label",
+        y="pct",
+        color="serie",
+        markers=True,
+        line_dash="serie",
+        category_orders={"serie": ["Real", "Ideal"]},
+        title="Evolução semanal da revisão",
+        color_discrete_map={"Real": "#22C55E", "Ideal": "#94A3B8"},
+        line_dash_map={"Real": "solid", "Ideal": "dash"},
+    )
+    fig.update_traces(hovertemplate="%{x}<br>%{fullData.name}: %{y:.1f}%<extra></extra>")
     fig.update_layout(
         height=360,
         margin=dict(l=10, r=10, t=48, b=10),
-        xaxis_title="Dia",
-        yaxis_title="Movimentações",
+        xaxis_title="Semana",
+        yaxis_title="% Concluído",
+        yaxis=dict(range=[0, 100]),
         paper_bgcolor="#06080B",
         plot_bgcolor="#0C111A",
         font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=11),
-        showlegend=False,
+        legend_title_text="",
     )
-    st.plotly_chart(
-        fig, use_container_width=True, config={
-            "displayModeBar": False})
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+    display = trend[["semana_label", "pct_real", "pct_ideal", "delta_pct"]].copy()
+    display = display.rename(columns={
+        "semana_label": "Semana",
+        "pct_real": "Real (%)",
+        "pct_ideal": "Ideal (%)",
+        "delta_pct": "Delta (p.p.)",
+    })
     data_table(
-        tl.sort_values("dia", ascending=False),
+        display.sort_values("Semana", ascending=False),
         column_config={
-            "dia": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-            "movimentacoes": st.column_config.NumberColumn("Movimentações"),
-            "concluidos": st.column_config.NumberColumn("Concluídos"),
-            "restantes": st.column_config.NumberColumn("Restantes"),
+            "Real (%)": st.column_config.NumberColumn("Real (%)", format="%.1f"),
+            "Ideal (%)": st.column_config.NumberColumn("Ideal (%)", format="%.1f"),
+            "Delta (p.p.)": st.column_config.NumberColumn("Delta (p.p.)", format="%.1f"),
         },
     )
 
@@ -1160,10 +1207,10 @@ def render_dashboard() -> None:
 
     if not use_kpi_fallback:
         with st.spinner("", show_time=False):
-            risco, previsao, heat, crit, tl = build_inteligencia(base_filtered)
+            risco, previsao, heat, crit, trend = build_inteligencia(base_filtered)
     else:
         risco, previsao = {"status_risco": "baixo", "risco_score": 0}, {"status_previsao": "sem_base"}
-        heat = crit = tl = pd.DataFrame()
+        heat = crit = trend = pd.DataFrame()
     _fragment_previsao(previsao, risco)
     st.divider()
 
@@ -1173,7 +1220,7 @@ def render_dashboard() -> None:
         "Equipamentos",
         "Heatmap",
         "Criticidade",
-        "Timeline"]
+        "Tendência semanal"]
 
     def _on_tab_change() -> None:
         st.session_state["_dash_tab"] = st.session_state["_dash_tab_ctrl"]
@@ -1220,8 +1267,8 @@ def render_dashboard() -> None:
         else:
             _fragment_criticidade(crit)
     else:
-        st.markdown("### Timeline de movimentações")
+        st.markdown("### Tendência semanal")
         if use_kpi_fallback:
-            empty_message("Timeline detalhada indisponível no fallback consolidado desta revisão.")
+            empty_message("Tendência semanal indisponível no fallback consolidado desta revisão.")
         else:
-            _fragment_timeline(tl)
+            _fragment_tendencia(trend)
