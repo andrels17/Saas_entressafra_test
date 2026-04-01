@@ -1135,12 +1135,6 @@ def _overall_from_group_kpis(kdf: pd.DataFrame) -> dict:
         "na": 0,
     }
 
-
-@st.cache_data(ttl=20, show_spinner=False)
-def _build_inteligencia_cached(base_filtered: pd.DataFrame, token_key: str = "", ver: str = "0"):
-    _ = token_key, ver
-    return build_inteligencia(base_filtered)
-
 def render_dashboard() -> None:
     page_header("Dashboard")
 
@@ -1193,40 +1187,10 @@ def render_dashboard() -> None:
 
     ver = str(st.session_state.get("data_version", "0"))
     token = st.session_state.get("sb_access_token", "")
-    token_key = _token_cache_key(token)
-
-    tabs = [
-        "Departamentos",
-        "Grupos",
-        "Equipamentos",
-        "Heatmap",
-        "Criticidade",
-        "Tendência semanal"]
-
-    active = st.session_state.get("_dash_tab", tabs[0])
-    if active not in tabs:
-        active = tabs[0]
-
     with st.spinner("", show_time=False):
-        departamentos = _load_departamentos(
-            tenant_id=tenant_id,
-            token_key=token_key,
-            ver=ver,
-            _token=token,
-        )
-        grupos = _load_grupos(
-            tenant_id=tenant_id,
-            token_key=token_key,
-            ver=ver,
-            _token=token,
-        )
-        kpi_df = get_group_kpis(tenant_id, revisao_id, ver, prefer_mv=True, _token=token)
-
-    raw: list = []
-    raw_equipment: list = []
-    eq_meta: list = []
-    debug_meta: dict = {}
-    needs_detailed_base = active in {"Equipamentos", "Heatmap", "Criticidade", "Tendência semanal"}
+        raw, raw_equipment, eq_meta, debug_meta = _load_base_cached(tenant_id, revisao_id, token, ver)
+        departamentos = _load_departamentos(tenant_id, ver, token)
+        grupos = _load_grupos(tenant_id, ver, token)
 
     if dep_scope_ids in (None, [] ) and grp_scope_ids not in (None, []):
         dep_scope_ids = sorted({str(g.get("departamento_id")) for g in grupos if g.get("id") in set(grp_scope_ids) and g.get("departamento_id")})
@@ -1252,28 +1216,6 @@ def render_dashboard() -> None:
     gid_to_dept = {str(g["id"]): str(g.get("departamento_id")) if g.get("departamento_id") else None
                    for g in grupos if g.get("id")}
 
-    if kpi_df is None:
-        kpi_df = pd.DataFrame()
-    if not kpi_df.empty:
-        kpi_df = kpi_df.copy()
-        kpi_df["grupo_id"] = kpi_df["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None)
-        if dep_scope_ids not in (None, []):
-            _dep_scope_set = {str(x) for x in dep_scope_ids}
-            kpi_df = kpi_df[kpi_df["grupo_id"].map(lambda v: gid_to_dept.get(str(v)) if v is not None else None).isin(_dep_scope_set)]
-        if grp_scope_ids not in (None, []):
-            _grp_scope_set = {str(x) for x in grp_scope_ids}
-            kpi_df = kpi_df[kpi_df["grupo_id"].isin(_grp_scope_set)]
-
-    if needs_detailed_base or kpi_df.empty:
-        with st.spinner("", show_time=False):
-            raw, raw_equipment, eq_meta, debug_meta = _load_base_cached(
-                tenant_id=tenant_id,
-                revisao_id=revisao_id,
-                token_key=token_key,
-                ver=ver,
-                _token=token,
-            )
-
     base = normalize_matriz_base(raw, eq_meta)
     equipment_base = normalize_matriz_base(raw_equipment, eq_meta)
     # Para equipamentos, preservamos a base completa SOMENTE dentro do escopo do
@@ -1282,7 +1224,7 @@ def render_dashboard() -> None:
     # era manter equipment_base sem aplicar o escopo automático do gestor,
     # fazendo a aba listar equipamentos de outros departamentos/grupos.
     if dep_scope_ids is not None or grp_scope_ids is not None:
-        equipment_base = apply_filters(equipment_base, dep_scope_ids, grp_scope_ids)
+        equipment_base = apply_filters(base=equipment_base, departamento_ids=dep_scope_ids, grupo_ids=grp_scope_ids)
         if equipment_base.empty and dep_scope_ids not in (None, []):
             # Mesmo fallback defensivo usado na base principal: se o vínculo do
             # gestor vier por departamento e a lista de grupos estiver
@@ -1305,7 +1247,21 @@ def render_dashboard() -> None:
             base["data_fim"] = pd.to_datetime(base["data_fim"], errors="coerce").fillna(rev_fim)
     raw_base = base.copy()
 
-    base = apply_filters(base, dep_scope_ids, grp_scope_ids)
+    # KPI consolidado para fallback de perfis com escopo/RLS mais restritivo.
+    kpi_df = get_group_kpis(tenant_id, revisao_id, ver, prefer_mv=True, _token=token)
+    if kpi_df is None:
+        kpi_df = pd.DataFrame()
+    if not kpi_df.empty:
+        kpi_df = kpi_df.copy()
+        kpi_df["grupo_id"] = kpi_df["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None)
+        if dep_scope_ids not in (None, []):
+            _dep_scope_set = {str(x) for x in dep_scope_ids}
+            kpi_df = kpi_df[kpi_df["grupo_id"].map(lambda v: gid_to_dept.get(str(v)) if v is not None else None).isin(_dep_scope_set)]
+        if grp_scope_ids not in (None, []):
+            _grp_scope_set = {str(x) for x in grp_scope_ids}
+            kpi_df = kpi_df[kpi_df["grupo_id"].isin(_grp_scope_set)]
+
+    base = apply_filters(base=base, departamento_ids=dep_scope_ids, grupo_ids=grp_scope_ids)
     if base.empty and dep_scope_ids not in (None, []):
         # fallback defensivo: quando o vínculo vier por departamento e a lista de grupos
         # estiver desatualizada, mantém o filtro por departamento em vez de zerar o dashboard.
@@ -1377,7 +1333,7 @@ def render_dashboard() -> None:
         },
     )
 
-    base_filtered = apply_filters(base, effective_dept_ids, effective_group_ids)
+    base_filtered = apply_filters(base=base, departamento_ids=effective_dept_ids, grupo_ids=effective_group_ids)
     dashboard_groups_filtered = dashboard_groups.copy()
     if use_kpi_fallback and not dashboard_groups_filtered.empty:
         if effective_dept_ids and "departamento_id" in dashboard_groups_filtered.columns:
@@ -1420,7 +1376,7 @@ def render_dashboard() -> None:
     st.divider()
 
     detailed_available = not base_filtered.empty
-    equipment_base_filtered = apply_filters(equipment_base, effective_dept_ids, effective_group_ids)
+    equipment_base_filtered = apply_filters(base=equipment_base, departamento_ids=effective_dept_ids, grupo_ids=effective_group_ids)
     equipment_detailed_available = not equipment_base_filtered.empty
 
     equipment_detail_reason = ""
@@ -1449,12 +1405,20 @@ def render_dashboard() -> None:
 
     if detailed_available:
         with st.spinner("", show_time=False):
-            risco, previsao, heat, crit, trend = _build_inteligencia_cached(base_filtered, token_key=token_key, ver=ver)
+            risco, previsao, heat, crit, trend = build_inteligencia(base_filtered)
     else:
         risco, previsao = {"status_risco": "baixo", "risco_score": 0}, {"status_previsao": "sem_base"}
         heat = crit = trend = pd.DataFrame()
     _fragment_previsao(previsao, risco)
     st.divider()
+
+    tabs = [
+        "Departamentos",
+        "Grupos",
+        "Equipamentos",
+        "Heatmap",
+        "Criticidade",
+        "Tendência semanal"]
 
     def _on_tab_change() -> None:
         st.session_state["_dash_tab"] = st.session_state["_dash_tab_ctrl"]
