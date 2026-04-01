@@ -105,11 +105,27 @@ def _load_task_rows_with_fallback(sb, tenant_id: str, revisao_id: str, fetch_all
         ("get_dashboard_tarefas", {"p_tenant_id": tenant_id, "p_revisao_id": revisao_id}),
     ]
 
+    def _fetch_all_rpc(rpc_name: str, rpc_params: dict, page_size: int = 1000) -> list:
+        rows = []
+        start = 0
+        while True:
+            chunk = (
+                sb.rpc(rpc_name, rpc_params)
+                .range(start, start + page_size - 1)
+                .execute()
+                .data
+                or []
+            )
+            rows.extend(chunk)
+            if len(chunk) < page_size:
+                break
+            start += page_size
+        return rows
+
     required_cols = {"equipamento_id", "servico_id", "status"}
     for rpc_name, rpc_params in rpc_candidates:
         try:
-            rpc_result = sb.rpc(rpc_name, rpc_params).execute()
-            rpc_rows = rpc_result.data or []
+            rpc_rows = _fetch_all_rpc(rpc_name, rpc_params)
             if rpc_rows and required_cols.issubset(set(rpc_rows[0].keys())):
                 meta["task_source"] = "rpc"
                 meta["task_rpc_used"] = rpc_name
