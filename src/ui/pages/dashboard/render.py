@@ -803,16 +803,41 @@ def _fragment_equipamentos(
         top_n: int = 10) -> None:
     base_eq = base.copy()
 
-    # Para perfis de gestor, a grade sintética montada via grupo_servicos pode
-    # aparecer completa, mas sem etapas marcadas, resultando em 0% para todos os
-    # equipamentos mesmo quando tarefas_servico já possui progresso real.
-    # Nessa visão, priorizamos SEMPRE as linhas reais vindas de tarefas_servico.
+    # Para perfis de gestor, a grade sintética via grupo_servicos pode empurrar
+    # todos os equipamentos para 0%. Por outro lado, usar SOMENTE as linhas de
+    # tarefas pode esconder equipamentos cuja cobertura ainda depende da grade.
+    # Estratégia híbrida: calcula no base completo e, quando houver linhas reais
+    # de tarefa, sobrescreve apenas os equipamentos presentes nelas.
+    edf_full = equipment_progress(base_eq)
+    edf = edf_full.copy()
     if not base_eq.empty and "row_source" in base_eq.columns:
         task_only = base_eq[base_eq["row_source"].astype(str).eq("task")].copy()
         if not task_only.empty:
-            base_eq = task_only
+            edf_task = equipment_progress(task_only)
+            if not edf_task.empty and "equipamento_id" in edf_task.columns:
+                edf_full = edf_full.copy() if not edf_full.empty else pd.DataFrame(columns=edf_task.columns)
+                edf_full["equipamento_id"] = edf_full.get("equipamento_id", pd.Series(dtype=object)).map(
+                    lambda v: str(v).strip() if pd.notna(v) and str(v).strip() else None
+                )
+                edf_task["equipamento_id"] = edf_task["equipamento_id"].map(
+                    lambda v: str(v).strip() if pd.notna(v) and str(v).strip() else None
+                )
+                if edf_full.empty:
+                    edf = edf_task.copy()
+                else:
+                    task_ids = set(edf_task["equipamento_id"].dropna())
+                    edf = pd.concat(
+                        [
+                            edf_task,
+                            edf_full[~edf_full["equipamento_id"].isin(task_ids)],
+                        ],
+                        ignore_index=True,
+                    )
+            else:
+                edf = edf_full.copy()
+        else:
+            edf = edf_full.copy()
 
-    edf = equipment_progress(base_eq)
     if edf.empty:
         st.info("Sem dados de equipamentos.")
         return
