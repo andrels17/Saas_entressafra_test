@@ -33,6 +33,41 @@ from src.db.supabase_client import get_supabase_anon
 def _token_cache_key(token: str = "") -> str:
     return hashlib.md5((token or "").encode()).hexdigest()[:8]
 
+
+@st.cache_data(ttl=45, show_spinner=False)
+def _load_scope_for_user_cached(
+    tenant_id: str,
+    user_id: str,
+    role: str,
+    token_key: str = "",
+) -> tuple[list | None, list | None]:
+    return get_user_scope(tenant_id, user_id, role=role, token_hash=token_key)
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _load_panel_context_cached(
+    tenant_id: str,
+    user_id: str,
+    role: str,
+    token_key: str = "",
+    _token: str = "",
+) -> dict:
+    scope_dept_ids, scope_grp_ids = _load_scope_for_user_cached(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        role=role,
+        token_key=token_key,
+    )
+    scope_dept_tuple = tuple(scope_dept_ids) if scope_dept_ids else None
+    scope_grp_tuple = tuple(scope_grp_ids) if scope_grp_ids is not None else None
+    return {
+        "scope_dept_ids": scope_dept_ids,
+        "scope_grp_ids": scope_grp_ids,
+        "rev": _load_revisao_ativa(tenant_id, token_key, _token=_token),
+        "grupos": _load_grupos_gestor(tenant_id, scope_dept_tuple, scope_grp_tuple, token_key, _token=_token),
+        "setores": _load_setores_gestor(tenant_id, token_key, _token=_token),
+    }
+
 # ── Funções de dados cacheadas ────────────────────────────────────────────────
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -167,8 +202,6 @@ def _load_tarefas_cached(
     if _token:
         sb.postgrest.auth(_token)
 
-    # Ordena primeiro pelos registros mais recentes e mantém o limite já
-    # após o recorte por revisão/escopo para reduzir payload em perfis com RLS.
     q = (
         sb.table("tarefas_servico")
         .select(
@@ -211,6 +244,9 @@ def _load_tarefas_cached(
             "Semana": r.get("semana") or "",
             "Atualizado": (r.get("updated_at") or "")[:16].replace("T", " "),
             "Observação": r.get("observacao") or "",
+            "_equipamento_lc": equip.lower(),
+            "_setor_lc": setor.lower(),
+            "_grupo_lc": (grp.get("nome") or "Sem grupo").lower(),
         })
 
     df = pd.DataFrame(out)
@@ -247,7 +283,7 @@ def _load_tarefas(
 def _action_panel(sb, df: pd.DataFrame, tab_status: str) -> None:
     """Painel de ação rápida ao selecionar uma linha (desktop)."""
     evento = st.dataframe(
-        df.drop(columns=["_id", "_status", "_grupo_id", "_dep_id"]),
+        df.drop(columns=["_id", "_status", "_grupo_id", "_dep_id", "_equipamento_lc", "_setor_lc", "_grupo_lc"], errors="ignore"),
         use_container_width=True,
         hide_index=True,
         selection_mode="single-row",
@@ -411,8 +447,7 @@ def _fragment_painel(
         df_filtered = df_filtered[df_filtered["Setor"] == setor_sel]
     if busca.strip():
         bl = busca.strip().lower()
-        equip_search = df_filtered["Equipamento"].astype(str).str.lower()
-        df_filtered = df_filtered[equip_search.str.contains(bl, na=False)]
+        df_filtered = df_filtered[df_filtered["_equipamento_lc"].str.contains(bl, na=False)]
 
     # ── Métricas resumidas ─────────────────────────────────────────────────
     n_trav = int((df_filtered["_status"] == "travado").sum())
@@ -495,10 +530,16 @@ def render_gestor_painel() -> None:
     token   = st.session_state.get("sb_access_token", "")
 
     token_key = _token_cache_key(token)
-    scope_dept_ids, scope_grp_ids = get_user_scope(tenant_id, user_id, role=role, token_hash=token_key)
-
-    # Revisão ativa — cacheada TTL=30s
-    rev = _load_revisao_ativa(tenant_id, token_key, _token=token)
+    ctx = _load_panel_context_cached(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        role=role,
+        token_key=token_key,
+        _token=token,
+    )
+    scope_dept_ids = ctx.get("scope_dept_ids")
+    scope_grp_ids = ctx.get("scope_grp_ids")
+    rev = ctx.get("rev")
 
     if not rev:
         empty_state(
@@ -523,10 +564,7 @@ def render_gestor_painel() -> None:
             bump_data_version()
             st.rerun()
 
-    # Grupos e setores — cacheados TTL=120s e 300s
-    scope_dept_tuple = tuple(scope_dept_ids) if scope_dept_ids else None
-    scope_grp_tuple  = tuple(scope_grp_ids)  if scope_grp_ids is not None else None
-    grupos  = _load_grupos_gestor(tenant_id, scope_dept_tuple, scope_grp_tuple, token_key, _token=token)
-    setores = _load_setores_gestor(tenant_id, token_key, _token=token)
+    grupos = ctx.get("grupos") or []
+    setores = ctx.get("setores") or []
 
     _fragment_painel(tenant_id, revisao_id, scope_dept_ids, scope_grp_ids, grupos, setores)
