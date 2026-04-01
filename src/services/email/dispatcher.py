@@ -798,17 +798,16 @@ def _build_payload(
                 pct=pct_sem,
             ))
         if evolucao:
-            pct_semana_atual = evolucao[-1].pct
+            # A tendência semanal é acumulada, então o ponto final precisa
+            # refletir exatamente o mesmo percentual mostrado no topo/KPI atual.
+            evolucao[-1] = SemanaSnapshot(
+                semana=evolucao[-1].semana,
+                concluidos=evolucao[-1].concluidos,
+                total=evolucao[-1].total,
+                pct=pct_geral_snapshot,
+            )
+            pct_semana_atual = pct_geral_snapshot
             pct_semana_anterior = evolucao[-2].pct if len(evolucao) >= 2 else 0
-            if pct_geral_snapshot > pct_semana_atual:
-                evolucao[-1] = SemanaSnapshot(
-                    semana=evolucao[-1].semana,
-                    concluidos=evolucao[-1].concluidos,
-                    total=evolucao[-1].total,
-                    pct=pct_geral_snapshot,
-                )
-                pct_semana_atual = pct_geral_snapshot
-                pct_semana_anterior = evolucao[-2].pct if len(evolucao) >= 2 else 0
     elif pct_geral_snapshot > 0:
         evolucao = [SemanaSnapshot(
             semana=max(int(semana_atual or 1), 1),
