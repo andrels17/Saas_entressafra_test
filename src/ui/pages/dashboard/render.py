@@ -71,6 +71,59 @@ def _load_revisao(sb, tenant_id: str, revisao_id: str | None = None) -> dict | N
     return ativa or (rows[0] if rows else None)
 
 
+
+
+def _load_task_rows_with_fallback(sb, tenant_id: str, revisao_id: str, fetch_all) -> tuple[list, dict]:
+    """Carrega tarefas do dashboard tentando leitura direta primeiro e RPC depois.
+
+    Motivo: quando a RPC existir mas retornar [] por configuração incorreta,
+    não podemos deixar isso zerar o dashboard inteiro de perfis que já possuem
+    leitura direta válida na tabela.
+    """
+    meta = {
+        "task_source": "table",
+        "task_rpc_used": None,
+        "task_rpc_available": False,
+        "task_load_error": "",
+    }
+
+    try:
+        rows = fetch_all(
+            sb.table("tarefas_servico")
+            .select("equipamento_id,servico_id,status,etapa_d,etapa_r,etapa_m,updated_at,revisao_id")
+            .eq("tenant_id", tenant_id)
+            .eq("revisao_id", revisao_id)
+        )
+        if rows:
+            return rows, meta
+    except Exception as exc:
+        meta["task_load_error"] = str(exc)
+
+    rpc_candidates = [
+        ("get_tarefas_dashboard", {"p_tenant_id": tenant_id, "p_revisao_id": revisao_id}),
+        ("get_tarefas_servico_dashboard", {"p_tenant_id": tenant_id, "p_revisao_id": revisao_id}),
+        ("get_dashboard_tarefas", {"p_tenant_id": tenant_id, "p_revisao_id": revisao_id}),
+    ]
+
+    required_cols = {"equipamento_id", "servico_id", "status"}
+    for rpc_name, rpc_params in rpc_candidates:
+        try:
+            rpc_result = sb.rpc(rpc_name, rpc_params).execute()
+            rpc_rows = rpc_result.data or []
+            if rpc_rows and required_cols.issubset(set(rpc_rows[0].keys())):
+                meta["task_source"] = "rpc"
+                meta["task_rpc_used"] = rpc_name
+                meta["task_rpc_available"] = True
+                return rpc_rows, meta
+            if rpc_rows == []:
+                meta["task_rpc_used"] = rpc_name
+                meta["task_rpc_available"] = True
+        except Exception as exc:
+            meta["task_load_error"] = str(exc)
+            continue
+
+    return [], meta
+
 @st.cache_data(ttl=30, show_spinner=False)
 def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
                       ver: str = "0") -> tuple[list, list, dict]:
@@ -99,15 +152,15 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
         "task_rows_any_revision_visible": 0,
         "latest_visible_revisao_ids": [],
         "diagnostic_hint": "",
+        "task_source": "table",
+        "task_rpc_used": None,
+        "task_rpc_available": False,
+        "task_load_error": "",
     }
 
     try:
-        task_rows = _fetch_all(
-            sb.table("tarefas_servico")
-            .select("equipamento_id,servico_id,status,etapa_d,etapa_r,etapa_m,updated_at,revisao_id")
-            .eq("tenant_id", tenant_id)
-            .eq("revisao_id", revisao_id)
-        )
+        task_rows, task_meta = _load_task_rows_with_fallback(sb, tenant_id, revisao_id, _fetch_all)
+        debug_meta.update(task_meta)
     except Exception as exc:
         log_error(exc, context="dashboard._load_base_cached", table="tarefas_servico")
         task_rows = []
@@ -137,6 +190,8 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
                 debug_meta["diagnostic_hint"] = "escopo_ou_rls_filtrando_tarefas"
             else:
                 debug_meta["diagnostic_hint"] = "rls_sem_visibilidade_em_tarefas"
+                if not debug_meta.get("task_rpc_available"):
+                    debug_meta["diagnostic_hint"] = "rpc_ausente_e_rls_bloqueando_tarefas"
         except Exception as exc:
             log_error(exc, context="dashboard._load_base_cached.diagnostic", table="tarefas_servico")
             debug_meta["diagnostic_hint"] = "diagnostico_indisponivel"
@@ -1339,6 +1394,10 @@ def render_dashboard() -> None:
             with st.expander("Diagnóstico do detalhamento", expanded=False):
                 st.caption(f"tarefas visíveis na revisão atual: {int((debug_meta or {}).get('task_rows_current_revision') or 0)}")
                 st.caption(f"tarefas visíveis em qualquer revisão: {int((debug_meta or {}).get('task_rows_any_revision_visible') or 0)}")
+                st.caption(f"fonte das tarefas: {(debug_meta or {}).get('task_source') or 'table'}")
+                rpc_used = (debug_meta or {}).get("task_rpc_used")
+                if rpc_used:
+                    st.caption(f"rpc testada/usada: {rpc_used}")
                 latest_visible = (debug_meta or {}).get("latest_visible_revisao_ids") or []
                 if latest_visible:
                     st.caption("revisões com tarefas visíveis: " + ", ".join(str(x) for x in latest_visible))
