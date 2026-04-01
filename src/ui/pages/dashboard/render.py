@@ -73,7 +73,7 @@ def _load_revisao(sb, tenant_id: str, revisao_id: str | None = None) -> dict | N
 
 @st.cache_data(ttl=30, show_spinner=False)
 def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
-                      ver: str = "0") -> tuple[list, list]:
+                      ver: str = "0") -> tuple[list, list, dict]:
     # IMPORTANTE: _token tem underscore (excluído do cache key pelo Streamlit).
     # Para evitar que uma chamada inicial com token vazio cache eq_rows=[] e
     # contamine chamadas posteriores com token válido, incluímos um hash do
@@ -94,16 +94,52 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
             start += page_size
         return rows
 
+    debug_meta = {
+        "task_rows_current_revision": 0,
+        "task_rows_any_revision_visible": 0,
+        "latest_visible_revisao_ids": [],
+        "diagnostic_hint": "",
+    }
+
     try:
         task_rows = _fetch_all(
             sb.table("tarefas_servico")
-            .select("equipamento_id,servico_id,status,etapa_d,etapa_r,etapa_m,updated_at")
+            .select("equipamento_id,servico_id,status,etapa_d,etapa_r,etapa_m,updated_at,revisao_id")
             .eq("tenant_id", tenant_id)
             .eq("revisao_id", revisao_id)
         )
     except Exception as exc:
         log_error(exc, context="dashboard._load_base_cached", table="tarefas_servico")
         task_rows = []
+    debug_meta["task_rows_current_revision"] = len(task_rows)
+
+    if not task_rows:
+        try:
+            visible_tasks_sample = (
+                sb.table("tarefas_servico")
+                .select("revisao_id,updated_at")
+                .eq("tenant_id", tenant_id)
+                .order("updated_at", desc=True)
+                .range(0, 199)
+                .execute()
+                .data
+            ) or []
+            visible_rev_ids = []
+            for row in visible_tasks_sample:
+                rid = str(row.get("revisao_id") or "").strip()
+                if rid and rid not in visible_rev_ids:
+                    visible_rev_ids.append(rid)
+            debug_meta["task_rows_any_revision_visible"] = len(visible_tasks_sample)
+            debug_meta["latest_visible_revisao_ids"] = visible_rev_ids[:5]
+            if visible_tasks_sample and str(revisao_id) not in visible_rev_ids:
+                debug_meta["diagnostic_hint"] = "revisao_sem_tarefas_visiveis"
+            elif visible_tasks_sample:
+                debug_meta["diagnostic_hint"] = "escopo_ou_rls_filtrando_tarefas"
+            else:
+                debug_meta["diagnostic_hint"] = "rls_sem_visibilidade_em_tarefas"
+        except Exception as exc:
+            log_error(exc, context="dashboard._load_base_cached.diagnostic", table="tarefas_servico")
+            debug_meta["diagnostic_hint"] = "diagnostico_indisponivel"
 
     # Busca equipamentos via RPC (SECURITY DEFINER) para contornar RLS restritivo.
     # Fallback progressivo: rpc -> table ativo=true -> table all -> IN por tarefa IDs.
@@ -322,7 +358,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
         }
         for r in eq_rows
     ]
-    return raw, eq_meta
+    return raw, eq_meta, debug_meta
 
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -1048,7 +1084,7 @@ def render_dashboard() -> None:
     ver = str(st.session_state.get("data_version", "0"))
     token = st.session_state.get("sb_access_token", "")
     with st.spinner("", show_time=False):
-        raw, eq_meta = _load_base_cached(tenant_id, revisao_id, token, ver)
+        raw, eq_meta, debug_meta = _load_base_cached(tenant_id, revisao_id, token, ver)
         departamentos = _load_departamentos(tenant_id, ver, token)
         grupos = _load_grupos(tenant_id, ver, token)
 
@@ -1227,6 +1263,30 @@ def render_dashboard() -> None:
     equipment_base_filtered = apply_filters(equipment_base, effective_dept_ids, effective_group_ids)
     equipment_detailed_available = not equipment_base_filtered.empty
 
+    equipment_detail_reason = ""
+    if not equipment_detailed_available:
+        hint = str((debug_meta or {}).get("diagnostic_hint") or "")
+        visible_count = int((debug_meta or {}).get("task_rows_any_revision_visible") or 0)
+        latest_visible = (debug_meta or {}).get("latest_visible_revisao_ids") or []
+        if hint == "rls_sem_visibilidade_em_tarefas":
+            equipment_detail_reason = (
+                "Este perfil não está enxergando linhas de tarefas_servico. "
+                "Os equipamentos aparecem, mas as tarefas da revisão não ficaram visíveis para o login atual."
+            )
+        elif hint == "revisao_sem_tarefas_visiveis":
+            latest_txt = ", ".join([str(x)[:8] for x in latest_visible]) if latest_visible else "—"
+            equipment_detail_reason = (
+                "Há tarefas visíveis em outras revisões, mas não na revisão atual. "
+                f"Revisões com tarefas visíveis recentemente: {latest_txt}."
+            )
+        elif hint == "escopo_ou_rls_filtrando_tarefas":
+            equipment_detail_reason = (
+                "Existem tarefas visíveis neste tenant, porém o escopo final do gestor "
+                "está filtrando o detalhamento de equipamentos nesta revisão."
+            )
+        elif visible_count <= 0:
+            equipment_detail_reason = "Não há tarefas de equipamento visíveis neste perfil para a revisão atual."
+
     if detailed_available:
         with st.spinner("", show_time=False):
             risco, previsao, heat, crit, trend = build_inteligencia(base_filtered)
@@ -1275,7 +1335,13 @@ def render_dashboard() -> None:
         if equipment_detailed_available:
             _fragment_equipamentos(equipment_base_filtered, dept_map, top_n=top_n)
         elif detailed_available:
-            empty_message("Não há tarefas de equipamento visíveis neste perfil para a revisão atual.")
+            empty_message(equipment_detail_reason or "Não há tarefas de equipamento visíveis neste perfil para a revisão atual.")
+            with st.expander("Diagnóstico do detalhamento", expanded=False):
+                st.caption(f"tarefas visíveis na revisão atual: {int((debug_meta or {}).get('task_rows_current_revision') or 0)}")
+                st.caption(f"tarefas visíveis em qualquer revisão: {int((debug_meta or {}).get('task_rows_any_revision_visible') or 0)}")
+                latest_visible = (debug_meta or {}).get("latest_visible_revisao_ids") or []
+                if latest_visible:
+                    st.caption("revisões com tarefas visíveis: " + ", ".join(str(x) for x in latest_visible))
         else:
             empty_message("Detalhamento por equipamento indisponível neste perfil; exibindo KPIs consolidados por grupo.")
     elif active == "Heatmap":
