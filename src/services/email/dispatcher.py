@@ -653,33 +653,8 @@ def _build_payload(
     )
     grupo_nomes = {str(r["id"]): r.get("nome") or str(r["id"]) for r in gnrows if r.get("id")}
 
-    # IMPORTANTE:
-    # quando as tarefas vêm do pré-carregamento global da revisão, a lista pode
-    # conter equipamentos de TODOS os departamentos. A base/eq_prog já está
-    # filtrada para os grupos do payload atual, então usamos os equipamento_ids
-    # dela para recortar as tarefas antes de montar tendência semanal,
-    # heatmap, parados e detalhes por frota.
-    valid_eids: set[str] = set()
-    if base is not None and not base.empty and "equipamento_id" in base.columns:
-        valid_eids = {
-            str(v) for v in base["equipamento_id"].dropna().astype(str).tolist()
-            if str(v).strip()
-        }
-    elif not eq_prog.empty and "equipamento_id" in eq_prog.columns:
-        valid_eids = {
-            str(v) for v in eq_prog["equipamento_id"].dropna().astype(str).tolist()
-            if str(v).strip()
-        }
-
-    tarefas_filtradas = []
-    for t in tarefas or []:
-        eid = str(t.get("equipamento_id") or "")
-        if valid_eids and eid not in valid_eids:
-            continue
-        tarefas_filtradas.append(t)
-
     eq_tasks: dict[str, list[dict]] = {}
-    for t in tarefas_filtradas:
+    for t in tarefas or []:
         eid = str(t.get("equipamento_id") or "")
         if eid:
             eq_tasks.setdefault(eid, []).append(t)
@@ -697,7 +672,7 @@ def _build_payload(
     expected_steps_total_dash = 0
 
     semana_done_steps: dict[int, int] = {}
-    for t in tarefas_filtradas:
+    for t in tarefas or []:
         sem = int(t.get("semana") or 0)
         if sem <= 0:
             continue
@@ -833,39 +808,65 @@ def _build_payload(
     pct_semana_anterior = 0
     pct_semana_atual = pct_geral_snapshot
 
-    if semana_done_steps and expected_steps_total > 0:
+    if expected_steps_total > 0 or pct_geral_snapshot > 0:
+        # A tendência precisa respeitar a coluna "semana" da tarefas_servico,
+        # mas terminar exatamente no mesmo percentual do topo.
+        #
+        # Como o KPI consolidado pode usar uma métrica diferente da soma bruta
+        # das flags por semana, fazemos a distribuição temporal pelo peso dos
+        # apontamentos semanais e ESCALAMOS a curva para fechar no pct_geral.
         cumulative_done = 0
-        expected_por_semana = round(expected_steps_total / max(semanas_total, 1)) if expected_steps_total > 0 else 0
-        cumulative_expected = 0
+        total_done_weeks = sum(int(v or 0) for v in semana_done_steps.values())
+
         for sem in range(1, semana_atual + 1):
-            cumulative_done += semana_done_steps.get(sem, 0)
-            cumulative_expected = min(expected_steps_total, cumulative_expected + expected_por_semana)
-            pct_sem = max(0, min(100, round(cumulative_done / max(cumulative_expected, 1) * 100))) if cumulative_expected > 0 else pct_geral_snapshot
+            cumulative_done += int(semana_done_steps.get(sem, 0) or 0)
+
+            if total_done_weeks > 0:
+                pct_sem = max(
+                    0,
+                    min(100, round((cumulative_done / total_done_weeks) * int(pct_geral_snapshot or 0)))
+                )
+            else:
+                pct_sem = 0
+
             evolucao.append(SemanaSnapshot(
                 semana=sem,
                 concluidos=cumulative_done,
-                total=cumulative_expected,
+                total=total_done_weeks if total_done_weeks > 0 else expected_steps_total,
                 pct=pct_sem,
             ))
-        pct_semana_atual = evolucao[-1].pct if evolucao else pct_geral_snapshot
-        if pct_semana_atual == 0 and pct_geral_snapshot > 0:
-            pct_semana_atual = pct_geral_snapshot
-            if evolucao:
-                evolucao[-1] = SemanaSnapshot(
-                    semana=evolucao[-1].semana,
-                    concluidos=evolucao[-1].concluidos,
-                    total=evolucao[-1].total,
-                    pct=pct_semana_atual,
-                )
+
+        # Se ainda não houver nenhum apontamento por semana, mostra apenas o
+        # status atual consolidado.
+        if not evolucao:
+            evolucao = [SemanaSnapshot(
+                semana=max(int(semana_atual or 1), 1),
+                concluidos=done_steps_total,
+                total=expected_steps_total,
+                pct=int(pct_geral_snapshot or 0),
+            )]
+
+        # Garante que o último ponto bata exatamente com o topo.
+        pct_semana_atual = int(pct_geral_snapshot or 0)
+        if evolucao:
+            evolucao[-1] = SemanaSnapshot(
+                semana=evolucao[-1].semana,
+                concluidos=evolucao[-1].concluidos,
+                total=evolucao[-1].total,
+                pct=pct_semana_atual,
+            )
+
+        # Sem avanço na semana atual => mantém o patamar da semana anterior.
+        if len(evolucao) >= 2 and int(semana_done_steps.get(semana_atual, 0) or 0) == 0:
+            evolucao[-1] = SemanaSnapshot(
+                semana=evolucao[-1].semana,
+                concluidos=evolucao[-1].concluidos,
+                total=evolucao[-1].total,
+                pct=int(evolucao[-2].pct or 0),
+            )
+            pct_semana_atual = int(evolucao[-1].pct or 0)
+
         pct_semana_anterior = evolucao[-2].pct if len(evolucao) >= 2 else 0
-    elif expected_steps_total > 0 or pct_geral_snapshot > 0:
-        evolucao = [SemanaSnapshot(
-            semana=max(int(semana_atual or 1), 1),
-            concluidos=done_steps_total,
-            total=expected_steps_total,
-            pct=pct_geral_snapshot,
-        )]
-        pct_semana_atual = pct_geral_snapshot
 
     parados_detalhe = sorted(
         parados_detalhe,
