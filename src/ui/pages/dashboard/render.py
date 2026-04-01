@@ -381,7 +381,14 @@ def _equipment_progress_robusto(base: pd.DataFrame) -> pd.DataFrame:
     retornam 0 apesar de existir movimentação/status, recompõe o progresso por
     equipamento diretamente da base filtrada.
     """
-    edf = _equipment_progress_robusto(base)
+    # Primeiro tenta a implementação oficial de transforms.py.
+    # A versão anterior chamava esta própria função recursivamente,
+    # o que fazia a aba de equipamentos quebrar/zerar.
+    try:
+        edf = equipment_progress(base)
+    except Exception:
+        edf = pd.DataFrame()
+
     if edf is None or edf.empty:
         edf = pd.DataFrame()
 
