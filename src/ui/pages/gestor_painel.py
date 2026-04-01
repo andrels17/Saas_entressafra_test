@@ -9,6 +9,8 @@ Estrutura:
 """
 from __future__ import annotations
 
+import hashlib
+
 import streamlit as st
 import pandas as pd
 
@@ -28,11 +30,14 @@ from src.auth.roles import Role
 from src.ui.core.cache import bump_data_version
 from src.db.supabase_client import get_supabase_anon
 
+def _token_cache_key(token: str = "") -> str:
+    return hashlib.md5((token or "").encode()).hexdigest()[:8]
 
 # ── Funções de dados cacheadas ────────────────────────────────────────────────
 
 @st.cache_data(ttl=30, show_spinner=False)
-def _load_revisao_ativa(tenant_id: str, _token: str = "") -> dict | None:
+def _load_revisao_ativa(tenant_id: str, token_key: str = "", _token: str = "") -> dict | None:
+    _ = token_key
     """Revisão ativa do tenant — TTL curto para refletir mudanças rapidamente."""
     sb = get_supabase_anon()
     if _token:
@@ -55,8 +60,10 @@ def _load_grupos_gestor(
     tenant_id: str,
     scope_dept_ids: tuple | None,
     scope_grp_ids: tuple | None,
+    token_key: str = "",
     _token: str = "",
 ) -> list[dict]:
+    _ = token_key
     """Grupos ativos para os filtros do painel — TTL 2min."""
     sb = get_supabase_anon()
     if _token:
@@ -76,7 +83,8 @@ def _load_grupos_gestor(
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _load_setores_gestor(tenant_id: str, _token: str = "") -> list[dict]:
+def _load_setores_gestor(tenant_id: str, token_key: str = "", _token: str = "") -> list[dict]:
+    _ = token_key
     """Setores ativos para os filtros — TTL 5min (raramente mudam)."""
     sb = get_supabase_anon()
     if _token:
@@ -113,57 +121,92 @@ _TAB_STATUS = {
 
 # ── Carregamento de dados ──────────────────────────────────────────────────────
 
-def _load_tarefas(
-    sb, tenant_id: str, revisao_id: str,
-    scope_dept_ids, scope_grp_ids,
+@st.cache_data(ttl=30, show_spinner=False)
+def _load_scope_equipment_ids(
+    tenant_id: str,
+    allowed_group_ids: tuple | None,
+    token_key: str = "",
+    _token: str = "",
+) -> tuple[str, ...] | None:
+    _ = token_key
+    if allowed_group_ids == ():
+        return ()
+    if allowed_group_ids is None:
+        return None
+
+    sb = get_supabase_anon()
+    if _token:
+        sb.postgrest.auth(_token)
+
+    rows = (
+        sb.table("equipamentos")
+        .select("id")
+        .eq("tenant_id", tenant_id)
+        .eq("ativo", True)
+        .in_("grupo_id", list(allowed_group_ids))
+        .execute()
+        .data
+    ) or []
+    return tuple(str(r.get("id")) for r in rows if r.get("id"))
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def _load_tarefas_cached(
+    tenant_id: str,
+    revisao_id: str,
+    allowed_equipment_ids: tuple | None,
     limit: int = 500,
+    token_key: str = "",
+    _token: str = "",
 ) -> pd.DataFrame:
-    """Carrega tarefas não concluídas com join completo."""
+    _ = token_key
+    if allowed_equipment_ids == ():
+        return pd.DataFrame()
+
+    sb = get_supabase_anon()
+    if _token:
+        sb.postgrest.auth(_token)
+
     q = (
         sb.table("tarefas_servico")
         .select(
-            "id,status,semana,observacao,updated_at,"
+            "id,status,semana,observacao,updated_at,equipamento_id,"
             "servicos(nome,setores(nome)),"
             "equipamentos(id,frota,modelo,equip_grupos(id,nome,departamento_id))"
         )
         .eq("tenant_id", tenant_id)
         .eq("revisao_id", revisao_id)
         .in_("status", ["travado", "pendente", "em_andamento"])
-        .order("updated_at", desc=False)
+        .order("updated_at", desc=True)
         .limit(limit)
     )
+    if allowed_equipment_ids is not None:
+        q = q.in_("equipamento_id", list(allowed_equipment_ids))
+
     rows = q.execute().data or []
 
     out = []
     for r in rows:
-        svc   = r.get("servicos") or {}
+        svc = r.get("servicos") or {}
         setor = (svc.get("setores") or {}).get("nome") or "—"
-        eq    = r.get("equipamentos") or {}
-        grp   = eq.get("equip_grupos") or {}
-        grp_id  = grp.get("id")
-        dep_id  = grp.get("departamento_id")
-
-        # Filtro de escopo
-        if scope_dept_ids and dep_id and dep_id not in scope_dept_ids:
-            continue
-        if scope_grp_ids is not None and grp_id and grp_id not in scope_grp_ids:
-            continue
+        eq = r.get("equipamentos") or {}
+        grp = eq.get("equip_grupos") or {}
 
         frota = eq.get("frota") or ""
         modelo = eq.get("modelo") or ""
         equip = f"{frota} — {modelo}".strip(" —") or frota or "—"
 
         out.append({
-            "_id":        r.get("id"),
-            "_status":    r.get("status"),
-            "_grupo_id":  grp_id,
-            "_dep_id":    dep_id,
-            "Grupo":      grp.get("nome") or "Sem grupo",
+            "_id": r.get("id"),
+            "_status": r.get("status"),
+            "_grupo_id": grp.get("id"),
+            "_dep_id": grp.get("departamento_id"),
+            "Grupo": grp.get("nome") or "Sem grupo",
             "Equipamento": equip,
-            "Setor":      setor,
-            "Serviço":    svc.get("nome") or "—",
-            "Status":     _STATUS_LABELS.get(r.get("status"), r.get("status") or "—"),
-            "Semana":     r.get("semana") or "",
+            "Setor": setor,
+            "Serviço": svc.get("nome") or "—",
+            "Status": _STATUS_LABELS.get(r.get("status"), r.get("status") or "—"),
+            "Semana": r.get("semana") or "",
             "Atualizado": (r.get("updated_at") or "")[:16].replace("T", " "),
             "Observação": r.get("observacao") or "",
         })
@@ -173,6 +216,28 @@ def _load_tarefas(
         df["_prio"] = df["_status"].map(_STATUS_PRIORITY).fillna(5)
         df = df.sort_values(["_prio", "Grupo", "Equipamento", "Setor"]).drop(columns=["_prio"])
     return df
+
+
+def _load_tarefas(
+    tenant_id: str,
+    revisao_id: str,
+    scope_dept_ids,
+    scope_grp_ids,
+    grupos: list[dict],
+    limit: int = 500,
+    _token: str = "",
+) -> pd.DataFrame:
+    token_key = _token_cache_key(_token)
+
+    if scope_grp_ids is not None:
+        allowed_group_ids = tuple(str(gid) for gid in scope_grp_ids)
+    elif scope_dept_ids:
+        allowed_group_ids = tuple(str(g.get("id")) for g in grupos if g.get("id"))
+    else:
+        allowed_group_ids = None
+
+    allowed_equipment_ids = _load_scope_equipment_ids(tenant_id, allowed_group_ids, token_key, _token)
+    return _load_tarefas_cached(tenant_id, revisao_id, allowed_equipment_ids, limit, token_key, _token)
 
 
 # ── Componentes de UI ──────────────────────────────────────────────────────────
@@ -289,7 +354,7 @@ def _mobile_cards(sb, df: pd.DataFrame, tab_status: str) -> None:
 
 # ── Fragment principal ─────────────────────────────────────────────────────────
 
-_GESTOR_AUTO_REFRESH_EVERY = "15s"
+_GESTOR_AUTO_REFRESH_EVERY = "45s"
 
 @st.fragment(run_every=_GESTOR_AUTO_REFRESH_EVERY)
 def _fragment_painel(
@@ -326,7 +391,7 @@ def _fragment_painel(
 
     # ── Carrega dados ──────────────────────────────────────────────────────
     with st.spinner("Carregando pendências…", show_time=False):
-        df_all = _load_tarefas(sb, tenant_id, revisao_id, scope_dept_ids, scope_grp_ids, limite)
+        df_all = _load_tarefas(tenant_id, revisao_id, scope_dept_ids, scope_grp_ids, grupos, limite, _token=st.session_state.get("sb_access_token", ""))
 
     if df_all.empty:
         notice_card(
@@ -426,12 +491,11 @@ def render_gestor_painel() -> None:
     user_id = st.session_state.get("sb_user_id") or ""
     token   = st.session_state.get("sb_access_token", "")
 
-    import hashlib as _hl
-    _tok_hash = _hl.md5(token.encode()).hexdigest()[:8]
-    scope_dept_ids, scope_grp_ids = get_user_scope(tenant_id, user_id, role=role, token_hash=_tok_hash)
+    token_key = _token_cache_key(token)
+    scope_dept_ids, scope_grp_ids = get_user_scope(tenant_id, user_id, role=role, token_hash=token_key)
 
     # Revisão ativa — cacheada TTL=30s
-    rev = _load_revisao_ativa(tenant_id, _token=token)
+    rev = _load_revisao_ativa(tenant_id, token_key, _token=token)
 
     if not rev:
         empty_state(
@@ -459,7 +523,7 @@ def render_gestor_painel() -> None:
     # Grupos e setores — cacheados TTL=120s e 300s
     scope_dept_tuple = tuple(scope_dept_ids) if scope_dept_ids else None
     scope_grp_tuple  = tuple(scope_grp_ids)  if scope_grp_ids is not None else None
-    grupos  = _load_grupos_gestor(tenant_id, scope_dept_tuple, scope_grp_tuple, _token=token)
-    setores = _load_setores_gestor(tenant_id, _token=token)
+    grupos  = _load_grupos_gestor(tenant_id, scope_dept_tuple, scope_grp_tuple, token_key, _token=token)
+    setores = _load_setores_gestor(tenant_id, token_key, _token=token)
 
     _fragment_painel(tenant_id, revisao_id, scope_dept_ids, scope_grp_ids, grupos, setores)
