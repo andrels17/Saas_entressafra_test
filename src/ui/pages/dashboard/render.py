@@ -235,6 +235,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
         grp = grupo_map.get(gid_s, {})
         svc = serv_map.get(sid, {})
         raw_tasks.append({
+            "row_source": "task",
             "equipamento_id": t.get("equipamento_id"),
             "grupo_id": gid,
             "grupo_nome": grp.get("nome"),
@@ -284,6 +285,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, _token: str = "",
             svc = serv_map.get(str(sid), {})
             t = task_map.get((eid, str(sid)), {})
             raw.append({
+                "row_source": "synthetic",
                 "equipamento_id": eq.get("id"),
                 "grupo_id": gid,
                 "grupo_nome": grp.get("nome"),
@@ -708,7 +710,18 @@ def _fragment_equipamentos(
         base: pd.DataFrame,
         dept_map: dict,
         top_n: int = 10) -> None:
-    edf = equipment_progress(base)
+    base_eq = base.copy()
+
+    # Para perfis de gestor, a grade sintética montada via grupo_servicos pode
+    # aparecer completa, mas sem etapas marcadas, resultando em 0% para todos os
+    # equipamentos mesmo quando tarefas_servico já possui progresso real.
+    # Nessa visão, priorizamos SEMPRE as linhas reais vindas de tarefas_servico.
+    if not base_eq.empty and "row_source" in base_eq.columns:
+        task_only = base_eq[base_eq["row_source"].astype(str).eq("task")].copy()
+        if not task_only.empty:
+            base_eq = task_only
+
+    edf = equipment_progress(base_eq)
     if edf.empty:
         st.info("Sem dados de equipamentos.")
         return
@@ -1064,6 +1077,11 @@ def render_dashboard() -> None:
                    for g in grupos if g.get("id")}
 
     base = normalize_matriz_base(raw, eq_meta)
+    equipment_base = base.copy()
+    if not equipment_base.empty and "row_source" in equipment_base.columns:
+        equipment_base = equipment_base[
+            equipment_base["row_source"].fillna("").astype(str).str.lower().eq("task")
+        ].copy()
     if not base.empty:
         if "data_inicio" not in base.columns:
             base["data_inicio"] = pd.NaT
@@ -1206,6 +1224,8 @@ def render_dashboard() -> None:
     st.divider()
 
     detailed_available = not base_filtered.empty
+    equipment_base_filtered = apply_filters(equipment_base, effective_dept_ids, effective_group_ids)
+    equipment_detailed_available = not equipment_base_filtered.empty
 
     if detailed_available:
         with st.spinner("", show_time=False):
@@ -1252,10 +1272,12 @@ def render_dashboard() -> None:
         _fragment_departamentos(dashboard_groups_filtered, gid_to_dept, dept_map)
     elif active == "Equipamentos":
         st.markdown("### Progresso por equipamento")
-        if not detailed_available:
-            empty_message("Detalhamento por equipamento indisponível neste perfil; exibindo KPIs consolidados por grupo.")
+        if equipment_detailed_available:
+            _fragment_equipamentos(equipment_base_filtered, dept_map, top_n=top_n)
+        elif detailed_available:
+            empty_message("Não há tarefas de equipamento visíveis neste perfil para a revisão atual.")
         else:
-            _fragment_equipamentos(base_filtered, dept_map, top_n=top_n)
+            empty_message("Detalhamento por equipamento indisponível neste perfil; exibindo KPIs consolidados por grupo.")
     elif active == "Heatmap":
         st.markdown("### Heatmap de risco — Grupo × Setor")
         if not detailed_available:
