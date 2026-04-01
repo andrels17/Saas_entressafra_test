@@ -622,9 +622,9 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
         if isinstance(resumo_df, pd.DataFrame):
             for col in resumo_df.columns:
                 if "semana" in str(col).lower():
-                    val = resumo_df[col].dropna()
+                    val = pd.to_numeric(resumo_df[col], errors="coerce").dropna()
                     if not val.empty:
-                        semana_impressao = int(val.iloc[0])
+                        semana_impressao = int(val.max())
                         break
     except Exception:
         semana_impressao = None
