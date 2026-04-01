@@ -11,6 +11,7 @@ import time
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from src.auth.scope import get_my_scope
@@ -535,6 +536,185 @@ def _render_pct_rank_chart(
     )
     st.plotly_chart(
         fig, use_container_width=True, config={"displayModeBar": False})
+
+
+
+def _build_rank_df_from_groups(
+        dashboard_groups_filtered: pd.DataFrame,
+        top_n: int = 10) -> pd.DataFrame:
+    if dashboard_groups_filtered is None or dashboard_groups_filtered.empty:
+        return pd.DataFrame(columns=["Categoria", "Valor", "label"])
+    src = dashboard_groups_filtered.copy()
+    value_col = "pct_concluido" if "pct_concluido" in src.columns else "pct"
+    name_col = "grupo" if "grupo" in src.columns else "Grupo"
+    if value_col not in src.columns or name_col not in src.columns:
+        return pd.DataFrame(columns=["Categoria", "Valor", "label"])
+    out = (
+        src[[name_col, value_col]]
+        .rename(columns={name_col: "Categoria", value_col: "Valor"})
+        .copy()
+    )
+    out["Valor"] = pd.to_numeric(out["Valor"], errors="coerce").fillna(0).clip(0, 100)
+    out["label"] = out["Valor"].map(lambda v: f"{int(round(v))}%")
+    return out.sort_values(["Valor", "Categoria"], ascending=[False, True]).head(top_n)
+
+
+def _build_rank_df_from_departments(
+        dashboard_groups_filtered: pd.DataFrame,
+        gid_to_dept: dict,
+        dept_map: dict,
+        top_n: int = 10) -> pd.DataFrame:
+    if dashboard_groups_filtered is None or dashboard_groups_filtered.empty:
+        return pd.DataFrame(columns=["Categoria", "Valor", "label"])
+    tmp = dashboard_groups_filtered.copy()
+    if "departamento_id" not in tmp.columns:
+        tmp["departamento_id"] = tmp["grupo_id"].map(
+            lambda v: gid_to_dept.get(str(v)) if pd.notna(v) else None
+        )
+    tmp["departamento_id"] = tmp["departamento_id"].map(
+        lambda v: str(v) if pd.notna(v) and v is not None else None
+    )
+    tmp = tmp.dropna(subset=["departamento_id"])
+    if tmp.empty:
+        return pd.DataFrame(columns=["Categoria", "Valor", "label"])
+    agg = (
+        tmp.groupby("departamento_id", dropna=True)
+        .agg(done_steps=("done_steps", "sum"), expected_steps=("expected_steps", "sum"))
+        .reset_index()
+    )
+    agg = agg[agg["expected_steps"] > 0]
+    if agg.empty:
+        return pd.DataFrame(columns=["Categoria", "Valor", "label"])
+    agg["Categoria"] = agg["departamento_id"].map(lambda v: dept_map.get(str(v), "—"))
+    agg["Valor"] = ((agg["done_steps"] / agg["expected_steps"]) * 100).round(0).clip(0, 100)
+    agg["label"] = agg["Valor"].map(lambda v: f"{int(round(v))}%")
+    return agg[["Categoria", "Valor", "label"]].sort_values(["Valor", "Categoria"], ascending=[False, True]).head(top_n)
+
+
+def _build_rank_df_from_equipment(
+        equipment_source: pd.DataFrame,
+        top_n: int = 10) -> pd.DataFrame:
+    if equipment_source is None or equipment_source.empty:
+        return pd.DataFrame(columns=["Categoria", "Valor", "label"])
+    edf = equipment_progress(equipment_source.copy())
+    if edf is None or edf.empty:
+        return pd.DataFrame(columns=["Categoria", "Valor", "label"])
+    if "Frota" not in edf.columns or "Modelo" not in edf.columns:
+        return pd.DataFrame(columns=["Categoria", "Valor", "label"])
+    value_col = "% Concluído" if "% Concluído" in edf.columns else "pct_concluido"
+    if value_col not in edf.columns:
+        return pd.DataFrame(columns=["Categoria", "Valor", "label"])
+    edf = edf.copy()
+
+    def _equip_name(row) -> str:
+        frota = str(row.get("Frota") or "").strip()
+        modelo = str(row.get("Modelo") or "").strip()
+        if frota and modelo:
+            return f"{frota} — {modelo}"
+        return frota or modelo or "—"
+
+    edf["Categoria"] = edf.apply(_equip_name, axis=1)
+    edf["Valor"] = pd.to_numeric(edf[value_col], errors="coerce").fillna(0).clip(0, 100)
+    edf["label"] = edf["Valor"].map(lambda v: f"{int(round(v))}%")
+    return edf[["Categoria", "Valor", "label"]].sort_values(["Valor", "Categoria"], ascending=[False, True]).head(top_n)
+
+
+@st.cache_data(ttl=45, show_spinner=False)
+def _build_unified_rank_figure_cached(
+        payload_key: str,
+        dept_records: list[dict],
+        group_records: list[dict],
+        equip_records: list[dict]):
+    _ = payload_key
+    datasets = [
+        ("Departamentos", dept_records),
+        ("Grupos", group_records),
+        ("Equipamentos", equip_records),
+    ]
+    fig = go.Figure()
+    for idx, (name, records) in enumerate(datasets):
+        df = pd.DataFrame(records or [])
+        if df.empty:
+            x, y, txt = [], [], []
+        else:
+            df = df.sort_values("Valor", ascending=True)
+            x = df["Valor"].tolist()
+            y = df["Categoria"].tolist()
+            txt = df["label"].tolist()
+        fig.add_trace(
+            go.Bar(
+                x=x,
+                y=y,
+                orientation="h",
+                text=txt,
+                textposition="outside",
+                name=name,
+                visible=(idx == 0),
+                hovertemplate="%{y}<br>% Concluído: %{x:.0f}%<extra></extra>",
+            )
+        )
+
+    buttons = []
+    for idx, (name, _) in enumerate(datasets):
+        visible = [False] * len(datasets)
+        visible[idx] = True
+        buttons.append(
+            dict(
+                label=name,
+                method="update",
+                args=[{"visible": visible}, {"title": f"Visão consolidada — {name}"}],
+            )
+        )
+
+    max_items = max([len(dept_records or []), len(group_records or []), len(equip_records or []), 1])
+
+    fig.update_layout(
+        title="Visão consolidada — Departamentos",
+        updatemenus=[
+            dict(
+                type="buttons",
+                direction="right",
+                x=0.0,
+                y=1.18,
+                showactive=True,
+                buttons=buttons,
+            )
+        ],
+        height=max(420, 42 * max_items + 120),
+        margin=dict(l=10, r=90, t=90, b=10),
+        xaxis=dict(range=[0, 110], title="% Concluído"),
+        yaxis=dict(title="", type="category"),
+        paper_bgcolor="#06080B",
+        plot_bgcolor="#0C111A",
+        font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=11),
+        showlegend=False,
+    )
+    return fig
+
+
+def _render_unified_rank_chart(
+        dashboard_groups_filtered: pd.DataFrame,
+        gid_to_dept: dict,
+        dept_map: dict,
+        equipment_source: pd.DataFrame,
+        top_n: int = 10) -> None:
+    dept_df = _build_rank_df_from_departments(dashboard_groups_filtered, gid_to_dept, dept_map, top_n=top_n)
+    group_df = _build_rank_df_from_groups(dashboard_groups_filtered, top_n=top_n)
+    equip_df = _build_rank_df_from_equipment(equipment_source, top_n=top_n)
+
+    if dept_df.empty and group_df.empty and equip_df.empty:
+        st.info("Sem dados para exibir.")
+        return
+
+    payload_key = str(hash(str(dept_df.to_dict("records")[:50]) + str(group_df.to_dict("records")[:50]) + str(equip_df.to_dict("records")[:50]) + str(top_n)))
+    fig = _build_unified_rank_figure_cached(
+        payload_key,
+        dept_df.to_dict("records"),
+        group_df.to_dict("records"),
+        equip_df.to_dict("records"),
+    )
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.caption("Use os botões do próprio gráfico para alternar entre departamentos, grupos e equipamentos sem rerun.")
 
 
 @st.fragment
@@ -1412,85 +1592,23 @@ def render_dashboard() -> None:
     _fragment_previsao(previsao, risco)
     st.divider()
 
-    tabs = [
-        "Departamentos",
-        "Grupos",
-        "Equipamentos",
-        "Heatmap",
-        "Criticidade",
-        "Tendência semanal"]
+    task_rows_current = int((debug_meta or {}).get("task_rows_current_revision") or 0)
+    equipment_source_for_chart = equipment_base_filtered.copy()
+    if equipment_source_for_chart.empty and detailed_available and task_rows_current > 0:
+        equipment_source_for_chart = base_filtered.copy()
 
-    def _on_tab_change() -> None:
-        st.session_state["_dash_tab"] = st.session_state["_dash_tab_ctrl"]
+    st.markdown("### Visão consolidada")
+    _render_unified_rank_chart(
+        dashboard_groups_filtered,
+        gid_to_dept,
+        dept_map,
+        equipment_source_for_chart,
+        top_n=top_n,
+    )
 
-    active = st.session_state.get("_dash_tab", tabs[0])
-    if active not in tabs:
-        active = tabs[0]
-
-    st.segmented_control(
-        "Visão",
-        tabs,
-        default=active,
-        key="_dash_tab_ctrl",
-        on_change=_on_tab_change,
-        label_visibility="collapsed")
-    active = st.session_state.get("_dash_tab", tabs[0])
-
-    if active == "Grupos":
-        st.markdown("### Progresso por grupo")
-        _fragment_grupos(
-            base_filtered,
-            dept_map,
-            dashboard_groups_filtered,
-            top_n=top_n)
-    elif active == "Departamentos":
-        st.markdown("### Progresso por departamento")
-        _fragment_departamentos(dashboard_groups_filtered, gid_to_dept, dept_map)
-    elif active == "Equipamentos":
-        st.markdown("### Progresso por equipamento")
-        task_rows_current = int((debug_meta or {}).get("task_rows_current_revision") or 0)
-        if equipment_detailed_available:
-            _fragment_equipamentos(equipment_base_filtered, dept_map, top_n=top_n)
-        elif detailed_available and task_rows_current > 0:
-            st.caption("Usando base detalhada da revisão atual para montar o ranking de equipamentos.")
-            _fragment_equipamentos(base_filtered, dept_map, top_n=top_n)
-            with st.expander("Diagnóstico do detalhamento", expanded=False):
-                st.caption(f"tarefas visíveis na revisão atual: {task_rows_current}")
-                st.caption(f"tarefas visíveis em qualquer revisão: {int((debug_meta or {}).get('task_rows_any_revision_visible') or 0)}")
-                st.caption(f"fonte das tarefas: {(debug_meta or {}).get('task_source') or 'table'}")
-                rpc_used = (debug_meta or {}).get("task_rpc_used")
-                if rpc_used:
-                    st.caption(f"rpc testada/usada: {rpc_used}")
-                st.caption("observação: a leitura RPC já trouxe tarefas da revisão atual; por isso o ranking foi montado mesmo sem a base task-only isolada.")
-        elif detailed_available:
-            empty_message(equipment_detail_reason or "Não há tarefas de equipamento visíveis neste perfil para a revisão atual.")
-            with st.expander("Diagnóstico do detalhamento", expanded=False):
-                st.caption(f"tarefas visíveis na revisão atual: {task_rows_current}")
-                st.caption(f"tarefas visíveis em qualquer revisão: {int((debug_meta or {}).get('task_rows_any_revision_visible') or 0)}")
-                st.caption(f"fonte das tarefas: {(debug_meta or {}).get('task_source') or 'table'}")
-                rpc_used = (debug_meta or {}).get("task_rpc_used")
-                if rpc_used:
-                    st.caption(f"rpc testada/usada: {rpc_used}")
-                latest_visible = (debug_meta or {}).get("latest_visible_revisao_ids") or []
-                if latest_visible:
-                    st.caption("revisões com tarefas visíveis: " + ", ".join(str(x) for x in latest_visible))
-        else:
-            empty_message("Detalhamento por equipamento indisponível neste perfil; exibindo KPIs consolidados por grupo.")
-    elif active == "Heatmap":
-        st.markdown("### Heatmap de risco — Grupo × Setor")
-        if not detailed_available:
-            empty_message("Heatmap indisponível no fallback consolidado desta revisão.")
-        else:
-            _fragment_heatmap(heat)
-    elif active == "Criticidade":
-        st.markdown("### Top equipamentos críticos")
-        if not detailed_available:
-            empty_message("Criticidade detalhada indisponível no fallback consolidado desta revisão.")
-        else:
-            _fragment_criticidade(crit)
+    st.divider()
+    st.markdown("### Evolução semanal")
+    if detailed_available:
+        _fragment_tendencia(trend)
     else:
-        st.markdown("### Tendência semanal")
-        if not detailed_available:
-            empty_message("Tendência semanal indisponível no fallback consolidado desta revisão.")
-        else:
-            _fragment_tendencia(trend)
+        empty_message("Evolução semanal indisponível no fallback consolidado desta revisão.")
