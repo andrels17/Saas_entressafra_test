@@ -1101,11 +1101,22 @@ def render_dashboard() -> None:
     base_overall = overall_from_base(base)
     kpi_overall = _overall_from_group_kpis(kpi_df) if not kpi_df.empty else {"pct": 0}
 
-    # Fallback consolidado somente quando a base detalhada realmente estiver vazia.
-    # Não usar pct==0 como gatilho, porque isso mascara dashboards válidos ainda no início
-    # da revisão e pode "zerar" a leitura detalhada para perfis de gestor.
-    use_kpi_fallback = bool(base.empty and float(kpi_overall.get("pct", 0) or 0) > 0)
-    if use_kpi_fallback:
+    # Fallback consolidado somente para visão agregada quando a base detalhada
+    # vier sem etapas concluídas, mas a fonte consolidada por grupo tiver progresso.
+    # Isso evita zerar gráficos por departamento/grupo para gestores com RLS mais
+    # restritivo, sem bloquear as abas detalhadas quando a base de equipamentos existe.
+    base_done_steps = 0
+    try:
+        if not base.empty and "ok_count" in base.columns:
+            base_done_steps = int(pd.to_numeric(base["ok_count"], errors="coerce").fillna(0).sum())
+    except Exception:
+        base_done_steps = 0
+    kpi_pct_value = float(kpi_overall.get("pct", 0) or 0)
+    use_kpi_aggregate_fallback = bool(
+        kpi_pct_value > 0 and (base.empty or base_done_steps <= 0)
+    )
+    detailed_tabs_available = not base.empty
+    if use_kpi_aggregate_fallback:
         dashboard_groups = _groups_from_kpi_df(kpi_df, gid_to_name, gid_to_dept)
 
     st.markdown("### Filtros")
@@ -1169,7 +1180,7 @@ def render_dashboard() -> None:
 
     base_filtered = apply_filters(base, effective_dept_ids, effective_group_ids)
     dashboard_groups_filtered = dashboard_groups.copy()
-    if use_kpi_fallback and not dashboard_groups_filtered.empty:
+    if use_kpi_aggregate_fallback and not dashboard_groups_filtered.empty:
         if effective_dept_ids and "departamento_id" in dashboard_groups_filtered.columns:
             _eff_dept = {str(x) for x in effective_dept_ids}
             dashboard_groups_filtered = dashboard_groups_filtered[
@@ -1199,18 +1210,22 @@ def render_dashboard() -> None:
         )
         return
 
-    # Quando a base detalhada vier realmente vazia para perfis com escopo, usa a
-    # fonte consolidada por grupo. Se houver linhas detalhadas, preserva sempre o
-    # dashboard completo do gestor para evitar zerar departamentos/equipamentos.
-    if use_kpi_fallback:
-        overall = _overall_from_group_kpis(kpi_df if effective_group_ids is None and effective_dept_ids is None else dashboard_groups_filtered.rename(columns={"pct_concluido": "pct"}))
+    # Quando a base detalhada vier vazia/zerada para perfis com escopo, usa a
+    # fonte consolidada por grupo somente para os agregados principais.
+    if use_kpi_aggregate_fallback:
+        overall = _overall_from_group_kpis(
+            kpi_df if effective_group_ids is None and effective_dept_ids is None
+            else dashboard_groups_filtered.rename(columns={"pct_concluido": "pct"})
+        )
     else:
         overall = overall_from_base(base_filtered)
 
     _fragment_kpis_globais(overall)
+    if use_kpi_aggregate_fallback and detailed_tabs_available:
+        st.caption("ℹ️ Percentuais agregados exibidos pela fonte consolidada por grupo para preservar os valores corretos dentro do seu escopo.")
     st.divider()
 
-    if not use_kpi_fallback:
+    if detailed_tabs_available and not base_filtered.empty:
         with st.spinner("", show_time=False):
             risco, previsao, heat, crit, trend = build_inteligencia(base_filtered)
     else:
@@ -1255,25 +1270,25 @@ def render_dashboard() -> None:
         _fragment_departamentos(dashboard_groups_filtered, gid_to_dept, dept_map)
     elif active == "Equipamentos":
         st.markdown("### Progresso por equipamento")
-        if use_kpi_fallback:
-            empty_message("Detalhamento por equipamento indisponível neste perfil; exibindo KPIs consolidados por grupo.")
+        if not detailed_tabs_available or base_filtered.empty:
+            empty_message("Detalhamento por equipamento indisponível para os filtros atuais.")
         else:
             _fragment_equipamentos(base_filtered, dept_map, top_n=top_n)
     elif active == "Heatmap":
         st.markdown("### Heatmap de risco — Grupo × Setor")
-        if use_kpi_fallback:
-            empty_message("Heatmap indisponível no fallback consolidado desta revisão.")
+        if not detailed_tabs_available or heat.empty:
+            empty_message("Heatmap indisponível para os filtros atuais.")
         else:
             _fragment_heatmap(heat)
     elif active == "Criticidade":
         st.markdown("### Top equipamentos críticos")
-        if use_kpi_fallback:
-            empty_message("Criticidade detalhada indisponível no fallback consolidado desta revisão.")
+        if not detailed_tabs_available or crit.empty:
+            empty_message("Criticidade detalhada indisponível para os filtros atuais.")
         else:
             _fragment_criticidade(crit)
     else:
         st.markdown("### Tendência semanal")
-        if use_kpi_fallback:
-            empty_message("Tendência semanal indisponível no fallback consolidado desta revisão.")
+        if not detailed_tabs_available or trend.empty:
+            empty_message("Tendência semanal indisponível para os filtros atuais.")
         else:
             _fragment_tendencia(trend)
