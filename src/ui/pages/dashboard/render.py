@@ -372,6 +372,105 @@ def _pct_bar_color(v: float) -> str:
     return "#EF4444"
 
 
+def _equipment_progress_robusto(base: pd.DataFrame) -> pd.DataFrame:
+    """Fallback robusto para equipamentos quando equipment_progress vier zerado."""
+    try:
+        edf = _equipment_progress_robusto(base)
+    except Exception:
+        edf = pd.DataFrame()
+
+    def _all_zero(df: pd.DataFrame) -> bool:
+        if df is None or df.empty or "% Concluído" not in df.columns:
+            return True
+        vals = pd.to_numeric(df["% Concluído"], errors="coerce").fillna(0)
+        return float(vals.max()) <= 0
+
+    if not _all_zero(edf):
+        return edf
+
+    if base is None or base.empty or "equipamento_id" not in base.columns:
+        return edf
+
+    tmp = base.copy()
+
+    def _to_bool(series: pd.Series) -> pd.Series:
+        s = series.fillna(False)
+        if s.dtype == bool:
+            return s
+        sval = s.astype(str).str.strip().str.lower()
+        return sval.isin({"1", "true", "t", "sim", "s", "yes", "y", "ok", "x"})
+
+    status_col = (
+        tmp["status"].astype(str).str.strip().str.lower()
+        if "status" in tmp.columns
+        else pd.Series("", index=tmp.index)
+    )
+
+    for c in ("etapa_d", "etapa_r", "etapa_m"):
+        if c not in tmp.columns:
+            tmp[c] = False
+        tmp[c] = _to_bool(tmp[c])
+
+    tmp["_pend"] = status_col.eq("pendente")
+    tmp["_and"] = status_col.isin(["em_andamento", "em andamento", "andamento"])
+    tmp["_trav"] = status_col.eq("travado")
+    tmp["_na"] = status_col.isin(["nao_aplica", "não aplica", "nao aplica"])
+    tmp["_concl"] = status_col.isin(["concluido", "concluído"])
+
+    tmp["_done_steps"] = tmp[["etapa_d", "etapa_r", "etapa_m"]].sum(axis=1).astype(float)
+    tmp["_expected_steps"] = 3.0
+
+    no_step_progress = tmp["_done_steps"].le(0)
+    tmp.loc[no_step_progress & tmp["_and"], "_done_steps"] = 1.0
+    tmp.loc[no_step_progress & tmp["_trav"], "_done_steps"] = 1.0
+    tmp.loc[no_step_progress & tmp["_concl"], "_done_steps"] = 3.0
+    tmp.loc[tmp["_na"], "_expected_steps"] = 0.0
+
+    keys = ["equipamento_id"]
+    for extra in ("frota", "modelo", "departamento_id"):
+        if extra in tmp.columns:
+            keys.append(extra)
+
+    agg = (
+        tmp.groupby(keys, dropna=False)
+        .agg(
+            Total=("equipamento_id", "size"),
+            Pendentes=("_pend", "sum"),
+            **{"Em andamento": ("_and", "sum")},
+            Travados=("_trav", "sum"),
+            **{"Não aplica": ("_na", "sum")},
+            **{"Concluídos": ("_concl", "sum")},
+            _done_steps=("_done_steps", "sum"),
+            _expected_steps=("_expected_steps", "sum"),
+        )
+        .reset_index()
+    )
+
+    agg.rename(columns={"frota": "Frota", "modelo": "Modelo"}, inplace=True)
+
+    pct_steps = (
+        agg["_done_steps"] / agg["_expected_steps"].replace(0, pd.NA) * 100
+    ).fillna(0)
+    pct_status = (
+        (agg["Concluídos"] + (agg["Em andamento"] * 0.5) + (agg["Travados"] * 0.33))
+        / agg["Total"].replace(0, pd.NA) * 100
+    ).fillna(0)
+
+    agg["% Concluído"] = (
+        pd.concat([pct_steps, pct_status], axis=1).max(axis=1).round(0).clip(0, 100)
+    )
+
+    for col in ("Frota", "Modelo"):
+        if col not in agg.columns:
+            agg[col] = "—"
+
+    keep = [
+        "equipamento_id", "Frota", "Modelo", "departamento_id", "Total",
+        "% Concluído", "Pendentes", "Em andamento", "Travados", "Não aplica", "Concluídos",
+    ]
+    return agg[[c for c in keep if c in agg.columns]].copy()
+
+
 def _render_pct_rank_chart(
         df: pd.DataFrame,
         category_col: str,
@@ -1250,25 +1349,25 @@ def render_dashboard() -> None:
         _fragment_departamentos(dashboard_groups_filtered, gid_to_dept, dept_map)
     elif active == "Equipamentos":
         st.markdown("### Progresso por equipamento")
-        if base_filtered.empty:
-            empty_message("Detalhamento por equipamento indisponível para os filtros/escopo atuais.")
+        if use_kpi_fallback:
+            empty_message("Detalhamento por equipamento indisponível neste perfil; exibindo KPIs consolidados por grupo.")
         else:
             _fragment_equipamentos(base_filtered, dept_map, top_n=top_n)
     elif active == "Heatmap":
         st.markdown("### Heatmap de risco — Grupo × Setor")
-        if base_filtered.empty:
-            empty_message("Heatmap indisponível para os filtros/escopo atuais.")
+        if use_kpi_fallback:
+            empty_message("Heatmap indisponível no fallback consolidado desta revisão.")
         else:
             _fragment_heatmap(heat)
     elif active == "Criticidade":
         st.markdown("### Top equipamentos críticos")
-        if base_filtered.empty:
-            empty_message("Criticidade detalhada indisponível para os filtros/escopo atuais.")
+        if use_kpi_fallback:
+            empty_message("Criticidade detalhada indisponível no fallback consolidado desta revisão.")
         else:
             _fragment_criticidade(crit)
     else:
         st.markdown("### Tendência semanal")
-        if base_filtered.empty:
-            empty_message("Tendência semanal indisponível para os filtros/escopo atuais.")
+        if use_kpi_fallback:
+            empty_message("Tendência semanal indisponível no fallback consolidado desta revisão.")
         else:
             _fragment_tendencia(trend)
