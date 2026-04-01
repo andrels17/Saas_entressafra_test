@@ -935,9 +935,11 @@ def _overall_from_group_kpis(kdf: pd.DataFrame) -> dict:
         "na": 0,
     }
 
-def render_dashboard() -> None:
-    page_header("Dashboard")
+_DASH_AUTO_REFRESH_EVERY = "15s"
 
+
+@st.fragment(run_every=_DASH_AUTO_REFRESH_EVERY)
+def _fragment_dashboard_live() -> None:
     tenant_id = current_tenant_id()
     if not tenant_id:
         st.info("Selecione um tenant para ver o dashboard.")
@@ -1214,3 +1216,9 @@ def render_dashboard() -> None:
             empty_message("Timeline detalhada indisponível no fallback consolidado desta revisão.")
         else:
             _fragment_timeline(tl)
+
+
+def render_dashboard() -> None:
+    page_header("Dashboard")
+    st.caption(f"Atualização automática ativa a cada {_DASH_AUTO_REFRESH_EVERY}.")
+    _fragment_dashboard_live()

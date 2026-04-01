@@ -289,7 +289,7 @@ def _mobile_cards(sb, df: pd.DataFrame, tab_status: str) -> None:
 
 # ── Fragment principal ─────────────────────────────────────────────────────────
 
-@st.fragment
+@st.fragment(run_every=_GESTOR_AUTO_REFRESH_EVERY)
 def _fragment_painel(
     tenant_id: str,
     revisao_id: str,
@@ -407,9 +407,13 @@ def _fragment_painel(
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
+_GESTOR_AUTO_REFRESH_EVERY = "15s"
+
+
 def render_gestor_painel() -> None:
     _ph("◈", "Painel do Gestor",
         "Visão operacional de pendências críticas — filtre, aja e exporte.")
+    st.caption(f"Atualização automática ativa a cada {_GESTOR_AUTO_REFRESH_EVERY}.")
 
     role = current_role()
     if role not in Role.MANAGER_ROLES:

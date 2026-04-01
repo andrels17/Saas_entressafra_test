@@ -363,8 +363,11 @@ def _fragment_risco(
 
 # ── Ponto de entrada público ────────────────────────────────────────────
 
-def render_home_overview() -> None:
-    page_header("Home")
+_HOME_AUTO_REFRESH_EVERY = "15s"
+
+
+@st.fragment(run_every=_HOME_AUTO_REFRESH_EVERY)
+def _fragment_home_live() -> None:
     tenant_id = current_tenant_id()
     if not tenant_id:
         st.info("Selecione um tenant para ver o resumo.")
@@ -576,3 +579,9 @@ def render_home_overview() -> None:
     else:  # Tendência
         st.markdown("### Tendência semanal")
         _fragment_tendencia(tenant_id, rev["id"], ver, week, scope)
+
+
+def render_home_overview() -> None:
+    page_header("Home")
+    st.caption(f"Atualização automática ativa a cada {_HOME_AUTO_REFRESH_EVERY}.")
+    _fragment_home_live()
