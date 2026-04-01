@@ -674,14 +674,21 @@ def _build_unified_rank_figure_cached(
             dict(
                 type="buttons",
                 direction="right",
-                x=0.0,
-                y=1.18,
+                x=0.5,
+                xanchor="center",
+                y=1.16,
+                yanchor="top",
                 showactive=True,
+                bgcolor="rgba(12, 17, 26, 0.96)",
+                bordercolor="rgba(148, 163, 184, 0.28)",
+                borderwidth=1,
+                font=dict(color="#E8EDF5", size=12, family="DM Sans, sans-serif"),
+                pad=dict(t=8, r=8, b=8, l=8),
                 buttons=buttons,
             )
         ],
         height=max(420, 42 * max_items + 120),
-        margin=dict(l=10, r=90, t=90, b=10),
+        margin=dict(l=10, r=90, t=110, b=10),
         xaxis=dict(range=[0, 110], title="% Concluído"),
         yaxis=dict(title="", type="category"),
         paper_bgcolor="#06080B",
@@ -714,7 +721,7 @@ def _render_unified_rank_chart(
         equip_df.to_dict("records"),
     )
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-    st.caption("Use os botões do próprio gráfico para alternar entre departamentos, grupos e equipamentos sem rerun.")
+    st.caption("Use o seletor acima do gráfico para alternar entre departamentos, grupos e equipamentos sem rerun.")
 
 
 @st.fragment
