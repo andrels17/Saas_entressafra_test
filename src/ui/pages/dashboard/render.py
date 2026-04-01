@@ -7,6 +7,7 @@ calculados em transforms.py.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import time
 
 import pandas as pd
@@ -52,6 +53,44 @@ from .transforms import (
 
 def _token_cache_key(token: str = "") -> str:
     return hashlib.md5((token or "").encode()).hexdigest()[:8]
+
+
+def _apply_filters_compat(base_df, dep_ids=None, grp_ids=None):
+    """Compatibilidade com diferentes assinaturas de apply_filters em transforms.py."""
+    try:
+        sig = inspect.signature(apply_filters)
+        names = list(sig.parameters.keys())
+        kwargs = {}
+
+        if "base" in names:
+            kwargs["base"] = base_df
+        elif names:
+            kwargs[names[0]] = base_df
+
+        if "departamento_ids" in names:
+            kwargs["departamento_ids"] = dep_ids
+        elif "dept_ids" in names:
+            kwargs["dept_ids"] = dep_ids
+        elif "departamentos" in names:
+            kwargs["departamentos"] = dep_ids
+        elif len(names) >= 2:
+            kwargs[names[1]] = dep_ids
+
+        if "grupo_ids" in names:
+            kwargs["grupo_ids"] = grp_ids
+        elif "group_ids" in names:
+            kwargs["group_ids"] = grp_ids
+        elif "grupos" in names:
+            kwargs["grupos"] = grp_ids
+        elif len(names) >= 3:
+            kwargs[names[2]] = grp_ids
+
+        return apply_filters(**kwargs)
+    except TypeError:
+        try:
+            return apply_filters(base_df, dep_ids, grp_ids)
+        except TypeError:
+            return apply_filters(base_df, dep_ids)
 
 
 def _load_revisao(sb, tenant_id: str, revisao_id: str | None = None) -> dict | None:
@@ -1224,7 +1263,7 @@ def render_dashboard() -> None:
     # era manter equipment_base sem aplicar o escopo automático do gestor,
     # fazendo a aba listar equipamentos de outros departamentos/grupos.
     if dep_scope_ids is not None or grp_scope_ids is not None:
-        equipment_base = apply_filters(base=equipment_base, departamento_ids=dep_scope_ids, grupo_ids=grp_scope_ids)
+        equipment_base = _apply_filters_compat(equipment_base, dep_scope_ids, grp_scope_ids)
         if equipment_base.empty and dep_scope_ids not in (None, []):
             # Mesmo fallback defensivo usado na base principal: se o vínculo do
             # gestor vier por departamento e a lista de grupos estiver
@@ -1261,11 +1300,11 @@ def render_dashboard() -> None:
             _grp_scope_set = {str(x) for x in grp_scope_ids}
             kpi_df = kpi_df[kpi_df["grupo_id"].isin(_grp_scope_set)]
 
-    base = apply_filters(base=base, departamento_ids=dep_scope_ids, grupo_ids=grp_scope_ids)
+    base = _apply_filters_compat(base, dep_scope_ids, grp_scope_ids)
     if base.empty and dep_scope_ids not in (None, []):
         # fallback defensivo: quando o vínculo vier por departamento e a lista de grupos
         # estiver desatualizada, mantém o filtro por departamento em vez de zerar o dashboard.
-        base = apply_filters(base=raw_base, departamento_ids=dep_scope_ids, grupo_ids=None)
+        base = _apply_filters_compat(raw_base, dep_scope_ids, None)
 
     dashboard_groups = group_progress(base)
     base_overall = overall_from_base(base)
@@ -1333,7 +1372,7 @@ def render_dashboard() -> None:
         },
     )
 
-    base_filtered = apply_filters(base=base, departamento_ids=effective_dept_ids, grupo_ids=effective_group_ids)
+    base_filtered = _apply_filters_compat(base, effective_dept_ids, effective_group_ids)
     dashboard_groups_filtered = dashboard_groups.copy()
     if use_kpi_fallback and not dashboard_groups_filtered.empty:
         if effective_dept_ids and "departamento_id" in dashboard_groups_filtered.columns:
@@ -1376,7 +1415,7 @@ def render_dashboard() -> None:
     st.divider()
 
     detailed_available = not base_filtered.empty
-    equipment_base_filtered = apply_filters(base=equipment_base, departamento_ids=effective_dept_ids, grupo_ids=effective_group_ids)
+    equipment_base_filtered = _apply_filters_compat(equipment_base, effective_dept_ids, effective_group_ids)
     equipment_detailed_available = not equipment_base_filtered.empty
 
     equipment_detail_reason = ""
