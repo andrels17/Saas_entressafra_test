@@ -933,6 +933,7 @@ def _render_export_section(base_ctx, group_ctx) -> None:
         view_agg=group_ctx.view_agg,
         sector_tables_for_export=group_ctx.sector_tables_for_export,
         data_version=st.session_state.get("data_version", "0"),
+        tarefas_servico_df=pd.DataFrame(group_ctx.tarefas or []),
     )
 
 
