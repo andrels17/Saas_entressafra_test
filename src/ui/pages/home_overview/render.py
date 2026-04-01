@@ -365,7 +365,7 @@ def _fragment_risco(
 
 
 
-_HOME_AUTO_REFRESH_EVERY = "15s"
+_HOME_AUTO_REFRESH_EVERY = "30s"
 
 @st.fragment(run_every=_HOME_AUTO_REFRESH_EVERY)
 def _fragment_home_live() -> None:
