@@ -252,6 +252,7 @@ def _load_tarefas_cached(
     df = pd.DataFrame(out)
     if not df.empty:
         df["_prio"] = df["_status"].map(_STATUS_PRIORITY).fillna(5)
+        df["_equipamento_search"] = df["Equipamento"].astype(str).str.casefold()
         df = df.sort_values(["_prio", "Grupo", "Equipamento", "Setor"]).drop(columns=["_prio"])
     return df
 
@@ -483,7 +484,7 @@ def _fragment_painel(
 
     # ── Exportação ─────────────────────────────────────────────────────────
     st.divider()
-    df_exp = df_filtered.drop(columns=["_id", "_status", "_grupo_id", "_dep_id"])
+    df_exp = df_filtered.drop(columns=["_id", "_status", "_grupo_id", "_dep_id", "_equipamento_search"], errors="ignore")
     col_csv, col_xlsx = st.columns(2)
     with col_csv:
         st.download_button(
