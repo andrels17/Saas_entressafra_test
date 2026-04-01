@@ -524,7 +524,8 @@ def build_tendencia_semanal(
     if updated is not None and updated.notna().any():
         upd = updated.dropna().dt.tz_localize(None).dt.normalize()
         if pd.notna(start):
-            observed_weeks = int((((upd - start.normalize()).dt.days).clip(lower=0) // 7) + 1).max()
+            observed_series = (((upd - start.normalize()).dt.days).clip(lower=0) // 7) + 1
+            observed_weeks = int(observed_series.max()) if not observed_series.empty else 0
         else:
             observed_weeks = int(upd.dt.isocalendar().week.max()) if not upd.empty else 0
 
