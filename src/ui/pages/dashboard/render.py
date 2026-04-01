@@ -38,8 +38,6 @@ def _sb_from_token(token: str = ""):
 
 from src.utils.ui_helpers import status_badge
 
-_DASHBOARD_AUTO_REFRESH_EVERY = "15s"
-
 from .transforms import (
     apply_filters,
     build_inteligencia,
@@ -430,7 +428,7 @@ def _fragment_kpis_globais(overall: dict) -> None:
                None,
                "off",
                "Percentual global alinhado à mesma regra da Matriz/Home."),
-              ("Concluídos",
+              ("Equipamentos concluídos",
                overall["concl"],
                None,
                "off",
@@ -440,13 +438,13 @@ def _fragment_kpis_globais(overall: dict) -> None:
                None,
                "off",
                None),
-              ("Pendentes",
-               overall["pend"],
+              ("Sem início",
+               overall["sem_inicio"],
                None,
                "off",
                None),
-              ("Travados",
-               overall["trav"],
+              ("Em atraso",
+               overall["atrasados"],
                None,
                "off",
                None),
@@ -489,7 +487,7 @@ def _fragment_previsao(previsao: dict, risco: dict) -> None:
         st.metric(
             f"{icon} Risco operacional",
             f"{risco.get('risco_score', 0):.1f}",
-            help="Score: travados × 3 + pendentes × 1.5 + em_andamento × 1.",
+            help="Score consolidado de risco operacional da revisão.",
         )
         st.caption(
             f"Ritmo: **{previsao.get('ritmo_medio_dia', 0):.2f}%/dia** | "
@@ -752,7 +750,7 @@ def _fragment_equipamentos(
     )
 
     rank_df = edf.sort_values(
-        ["% Concluído", "Concluídos", "Equipamento"],
+        ["% Concluído", "Concluído", "Equipamento"],
         ascending=[False, False, True],
     ).head(top_n)
     _render_pct_rank_chart(
@@ -768,13 +766,10 @@ def _fragment_equipamentos(
         "Frota",
         "Modelo",
         "Departamento",
-        "Total",
+        "Serviços previstos",
         "% Concluído",
-        "Pendentes",
-        "Em andamento",
-        "Travados",
-        "Não aplica",
-        "Concluídos",
+        "Status Geral",
+        "Em atraso",
     ]
     data_table(
         rank_df[cols],
@@ -937,8 +932,14 @@ def _overall_from_group_kpis(kdf: pd.DataFrame) -> dict:
         "na": 0,
     }
 
-@st.fragment(run_every=_DASHBOARD_AUTO_REFRESH_EVERY)
-def _render_dashboard_live(tenant_id: str) -> None:
+def render_dashboard() -> None:
+    page_header("Dashboard")
+
+    tenant_id = current_tenant_id()
+    if not tenant_id:
+        st.info("Selecione um tenant para ver o dashboard.")
+        return
+
     sb = sb_for_user()
     dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id, sb)
     role = st.session_state.get("current_role") or ""
@@ -965,7 +966,6 @@ def _render_dashboard_live(tenant_id: str) -> None:
     with h1:
         st.markdown(f"## {rev.get('titulo', 'Revisão')}")
         status_badge(rev.get("status"))
-        st.caption(f"Atualização automática ativa a cada {_DASHBOARD_AUTO_REFRESH_EVERY}.")
     with h2:
         if refresh_button("dash_refresh_btn", help="Recarrega os dados consolidados desta revisão."):
             bump_data_version()
@@ -1211,12 +1211,3 @@ def _render_dashboard_live(tenant_id: str) -> None:
             empty_message("Timeline detalhada indisponível no fallback consolidado desta revisão.")
         else:
             _fragment_timeline(tl)
-
-
-def render_dashboard() -> None:
-    page_header("Dashboard")
-    tenant_id = current_tenant_id()
-    if not tenant_id:
-        st.info("Selecione um tenant para ver o dashboard.")
-        return
-    _render_dashboard_live(str(tenant_id))
