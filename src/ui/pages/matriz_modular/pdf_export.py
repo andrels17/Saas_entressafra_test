@@ -151,7 +151,7 @@ def _merge_sector_tables(sector_tables):
 def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.pagesizes import A3, landscape
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import cm
     from reportlab.platypus import (
@@ -165,10 +165,10 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
     )
     from src.utils.timezone import fmt_brt as _fmt_brt
 
-    PAGE = landscape(A4)
-    LMARGIN = RMARGIN = 1.25 * cm
-    TMARGIN = 1.15 * cm
-    BMARGIN = 1.20 * cm
+    PAGE = landscape(A3)
+    LMARGIN = RMARGIN = 1.0 * cm
+    TMARGIN = 1.0 * cm
+    BMARGIN = 1.0 * cm
     pw = PAGE[0] - LMARGIN - RMARGIN
 
     sty = getSampleStyleSheet()
