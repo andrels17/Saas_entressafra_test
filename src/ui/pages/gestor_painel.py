@@ -289,6 +289,8 @@ def _mobile_cards(sb, df: pd.DataFrame, tab_status: str) -> None:
 
 # ── Fragment principal ─────────────────────────────────────────────────────────
 
+_GESTOR_AUTO_REFRESH_EVERY = "15s"
+
 @st.fragment(run_every=_GESTOR_AUTO_REFRESH_EVERY)
 def _fragment_painel(
     tenant_id: str,
@@ -407,7 +409,6 @@ def _fragment_painel(
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
-_GESTOR_AUTO_REFRESH_EVERY = "15s"
 
 
 def render_gestor_painel() -> None:
