@@ -616,6 +616,26 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
     avg_pct = int(round(rv["%"].mean())) if not rv.empty else 0
     eq_zero = int((rv["%"] <= 0).sum()) if not rv.empty else 0
     emitido = _fmt_brt("%d/%m/%Y %H:%M")
+    # 🔹 Semana baseada nos dados da revisão (prioridade)
+    semana_impressao = None
+    try:
+        if isinstance(resumo_df, pd.DataFrame):
+            for col in resumo_df.columns:
+                if "semana" in str(col).lower():
+                    val = resumo_df[col].dropna()
+                    if not val.empty:
+                        semana_impressao = int(val.iloc[0])
+                        break
+    except Exception:
+        semana_impressao = None
+
+    # fallback: semana atual
+    if not semana_impressao:
+        try:
+            _dt_emit = pd.to_datetime(emitido, dayfirst=True, errors="coerce")
+            semana_impressao = int(getattr(_dt_emit, "isocalendar")().week) if _dt_emit is not pd.NaT else None
+        except Exception:
+            semana_impressao = None
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -714,6 +734,70 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
 
     for block in _build_consolidated_blocks(merged_df, sector_groups, sector_pct):
         story.append(block)
+
+
+    story.append(Spacer(1, 0.35 * cm))
+    story.append(HRFlowable(width="100%", thickness=0.55, color=palette["line_dark"], spaceAfter=6, spaceBefore=2))
+    story.append(Paragraph("Controle de checklist impresso", section_style))
+    story.append(Spacer(1, 0.08 * cm))
+
+    checklist_info = Table(
+        [[
+            Paragraph("<b>Semana impressa:</b> " + (f"Semana {semana_impressao}" if semana_impressao else "—"), body_style),
+            Paragraph("<b>Data de emissão:</b> " + str(emitido or "—"), body_style),
+        ]],
+        colWidths=[pw * 0.50, pw * 0.50],
+    )
+    checklist_info.hAlign = "LEFT"
+    checklist_info.setStyle(TableStyle([
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    story.append(checklist_info)
+    story.append(Spacer(1, 0.10 * cm))
+
+    assinatura = Table(
+        [
+            [
+                Paragraph("Responsável pelo checklist", small_style),
+                Paragraph("Data da conferência", small_style),
+                Paragraph("Assinatura", small_style),
+            ],
+            [
+                Paragraph("<br/><br/>________________________________________", body_style),
+                Paragraph("<br/><br/>____________/____________/____________", body_style),
+                Paragraph("<br/><br/>________________________________________", body_style),
+            ],
+            [
+                Paragraph("Observações", small_style),
+                "", 
+                "",
+            ],
+            [
+                Paragraph("<br/><br/>__________________________________________________________________________________", body_style),
+                "",
+                "",
+            ],
+        ],
+        colWidths=[pw * 0.38, pw * 0.22, pw * 0.40],
+    )
+    assinatura.hAlign = "LEFT"
+    assinatura.setStyle(TableStyle([
+        ("SPAN", (0, 2), (2, 2)),
+        ("SPAN", (0, 3), (2, 3)),
+        ("BACKGROUND", (0, 0), (-1, 0), palette["panel"]),
+        ("GRID", (0, 0), (-1, -1), 0.45, palette["line_dark"]),
+        ("BOX", (0, 0), (-1, -1), 0.75, palette["line_dark"]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+    story.append(assinatura)
 
     def _footer(canvas, _doc):
         canvas.saveState()
