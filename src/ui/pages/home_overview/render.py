@@ -92,18 +92,6 @@ def _fmt_int_br(value) -> str:
         return "0"
 
 
-@st.cache_data(ttl=60, show_spinner=False)
-def _load_home_scope_cached(tenant_id: str, role: str, token_key: str = "", ver: str = "0"):
-    _ = token_key, ver
-    dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id)
-    if can_view_all_data(role):
-        if dep_scope_ids == []:
-            dep_scope_ids = None
-        if grp_scope_ids == []:
-            grp_scope_ids = None
-    return dep_scope_ids, grp_scope_ids
-
-
 # ── Fragment: KPIs principais ───────────────────────────────────────────
 
 @st.fragment
