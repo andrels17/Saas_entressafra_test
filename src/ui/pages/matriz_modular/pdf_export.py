@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import io
-from collections import defaultdict
 
 import pandas as pd
 
 from src.ui.pages.matriz_runtime import risk_color as _risk_color
+
 
 def _df_to_csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
@@ -22,13 +22,20 @@ def _compute_setor_ok_counts(eqs, setor_to_services, task_map):
         for e in eqs:
             done = sum(
                 int(bool((task_map.get((e["id"], sid)) or {}).get(f)))
-                for sid in svc_ids for f in ("etapa_d", "etapa_r", "etapa_m")
+                for sid in svc_ids
+                for f in ("etapa_d", "etapa_r", "etapa_m")
             )
             pct_sum += round((done / max(total_per, 1)) * 100)
             if done >= total_per:
                 ok_eq += 1
-        rows.append({"setor": setor, "ok_eq": ok_eq, "total_eq": len(eqs),
-                     "pct_med": round(pct_sum / max(len(eqs), 1))})
+        rows.append(
+            {
+                "setor": setor,
+                "ok_eq": ok_eq,
+                "total_eq": len(eqs),
+                "pct_med": round(pct_sum / max(len(eqs), 1)),
+            }
+        )
     rows.sort(key=lambda r: (r["ok_eq"] / max(r["total_eq"], 1), r["pct_med"]))
     return rows
 
@@ -51,14 +58,98 @@ def _reportlab_available() -> bool:
         return False
 
 
-def _build_pdf_tables(
-    *,
-    titulo,
-    grupo_nome,
-    resumo_df,
-        sector_tables) -> bytes:
+def _compute_sector_progress(sector_tables) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for setor_nome, df in sector_tables or []:
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            result[str(setor_nome)] = 0
+            continue
+
+        service_cols = [c for c in df.columns if c not in ("Equipamento", "%", "Status")]
+        total = len(df) * len(service_cols)
+        ok = int((df[service_cols] == "OK").sum().sum()) if service_cols else 0
+        result[str(setor_nome)] = int(round((ok / max(total, 1)) * 100)) if total else 0
+    return result
+
+
+def _merge_sector_tables(sector_tables):
+    if not sector_tables:
+        return pd.DataFrame(), []
+
+    frames = []
+    sector_groups = []
+    seen_columns: set[str] = set()
+
+    for setor_nome, df in sector_tables:
+        if not isinstance(df, pd.DataFrame) or df.empty or "Equipamento" not in df.columns:
+            continue
+
+        work = df.copy()
+        local_cols = ["Equipamento"]
+        service_groups = []
+        order_map = {"D": 0, "R": 1, "M": 2}
+        by_service: dict[str, dict] = {}
+        service_order: list[str] = []
+
+        for col in work.columns:
+            if col in ("Equipamento", "%", "Status"):
+                continue
+
+            raw = str(col)
+            service_name = raw
+            suffix = None
+            try:
+                left, right = raw.rsplit(" ", 1)
+                if right in order_map:
+                    service_name, suffix = left, right
+            except Exception:
+                pass
+
+            canonical = f"{setor_nome}|||{raw}"
+            idx = 2
+            while canonical in seen_columns:
+                canonical = f"{setor_nome}|||{raw}__{idx}"
+                idx += 1
+            seen_columns.add(canonical)
+
+            work = work.rename(columns={col: canonical})
+            local_cols.append(canonical)
+
+            if service_name not in by_service:
+                by_service[service_name] = {
+                    "service": service_name,
+                    "triplet": [None, None, None],
+                    "extras": [],
+                }
+                service_order.append(service_name)
+
+            if suffix is None:
+                by_service[service_name]["extras"].append(canonical)
+            else:
+                by_service[service_name]["triplet"][order_map[suffix]] = canonical
+
+        for service_name in service_order:
+            item = by_service[service_name]
+            ordered_cols = [c for c in item["triplet"] if c] or item["extras"]
+            if ordered_cols:
+                service_groups.append({"service": service_name, "columns": ordered_cols})
+
+        if service_groups:
+            sector_groups.append({"sector": str(setor_nome), "services": service_groups})
+            frames.append(work[local_cols])
+
+    if not frames:
+        return pd.DataFrame(), []
+
+    base = frames[0]
+    for frame in frames[1:]:
+        base = base.merge(frame, on="Equipamento", how="outer")
+
+    return base.fillna(""), sector_groups
+
+
+def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables) -> bytes:
     from reportlab.lib import colors
-    from src.utils.timezone import fmt_brt as _fmt_brt
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -72,6 +163,7 @@ def _build_pdf_tables(
         Table,
         TableStyle,
     )
+    from src.utils.timezone import fmt_brt as _fmt_brt
 
     PAGE = landscape(A4)
     LMARGIN = RMARGIN = 1.25 * cm
@@ -89,6 +181,7 @@ def _build_pdf_tables(
         "panel": colors.HexColor("#F8FAFC"),
         "header": colors.HexColor("#0F172A"),
         "header_2": colors.HexColor("#1E293B"),
+        "header_3": colors.HexColor("#334155"),
         "ok": colors.HexColor("#15803D"),
         "ok_fill": colors.HexColor("#DCFCE7"),
         "warn": colors.HexColor("#D97706"),
@@ -211,8 +304,8 @@ def _build_pdf_tables(
         "head_top",
         parent=small_style,
         alignment=TA_CENTER,
-        fontSize=7.7,
-        leading=8.4,
+        fontSize=7.4,
+        leading=8.0,
         textColor=colors.white,
         fontName="Helvetica-Bold",
     )
@@ -220,9 +313,18 @@ def _build_pdf_tables(
         "head_sub",
         parent=small_style,
         alignment=TA_CENTER,
-        fontSize=6.8,
-        leading=7.4,
+        fontSize=6.7,
+        leading=7.3,
         textColor=colors.HexColor("#CBD5E1"),
+        fontName="Helvetica-Bold",
+    )
+    head_stage = ParagraphStyle(
+        "head_stage",
+        parent=small_style,
+        alignment=TA_CENTER,
+        fontSize=6.3,
+        leading=6.9,
+        textColor=colors.HexColor("#E5E7EB"),
         fontName="Helvetica-Bold",
     )
     cell_left = ParagraphStyle(
@@ -236,8 +338,8 @@ def _build_pdf_tables(
     cell_center = ParagraphStyle(
         "cell_center",
         parent=body_style,
-        fontSize=7.8,
-        leading=8.6,
+        fontSize=7.6,
+        leading=8.4,
         alignment=TA_CENTER,
         textColor=palette["soft"],
     )
@@ -253,13 +355,14 @@ def _build_pdf_tables(
             ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ]
         if header_rows:
-            cmds.extend([
-                ("BACKGROUND", (0, 0), (-1, 0), palette["header"]),
-                ("TEXTCOLOR", (0, 0), (-1, header_rows - 1), colors.white),
-                ("FONTNAME", (0, 0), (-1, header_rows - 1), "Helvetica-Bold"),
-            ])
-        cmds.append(("ROWBACKGROUNDS", (0, zebra_from),
-                    (-1, -1), [colors.white, palette["panel"]]))
+            cmds.extend(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), palette["header"]),
+                    ("TEXTCOLOR", (0, 0), (-1, header_rows - 1), colors.white),
+                    ("FONTNAME", (0, 0), (-1, header_rows - 1), "Helvetica-Bold"),
+                ]
+            )
+        cmds.append(("ROWBACKGROUNDS", (0, zebra_from), (-1, -1), [colors.white, palette["panel"]]))
         return cmds
 
     def _kpi_card(title: str, value_markup: str):
@@ -268,30 +371,31 @@ def _build_pdf_tables(
             colWidths=[pw / 4.0],
             rowHeights=[0.50 * cm, 0.80 * cm],
         )
-        card.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), colors.white),
-            ("BOX", (0, 0), (-1, -1), 0.55, palette["line"]),
-            ("TOPPADDING", (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ("LEFTPADDING", (0, 0), (-1, -1), 6),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ]))
+        card.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+                    ("BOX", (0, 0), (-1, -1), 0.55, palette["line"]),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ]
+            )
+        )
         return card
 
     def _summary_table(df: pd.DataFrame):
         cols = ["Equipamento", "Concluidos", "Total", "%"]
-        if not isinstance(
-                df, pd.DataFrame) or not all(
-                c in df.columns for c in cols):
+        if not isinstance(df, pd.DataFrame) or not all(c in df.columns for c in cols):
             return Paragraph("Sem dados.", small_style)
 
         view = df[cols].copy()
         view["Concluidos"] = view["Concluidos"].map(_safe_int)
         view["Total"] = view["Total"].map(_safe_int)
         view["%"] = view["%"].map(_int_pct)
-        view = view.sort_values(["%", "Concluidos", "Equipamento"], ascending=[
-                                False, False, True]).reset_index(drop=True)
+        view = view.sort_values(["%", "Concluidos", "Equipamento"], ascending=[False, False, True]).reset_index(drop=True)
 
         rows = [[
             Paragraph("<b>Equipamento</b>", cell_left),
@@ -310,56 +414,20 @@ def _build_pdf_tables(
 
         table = Table(
             rows,
-            colWidths=[
-                pw * 0.57,
-                pw * 0.14,
-                pw * 0.11,
-                pw * 0.18],
-            repeatRows=1)
+            colWidths=[pw * 0.57, pw * 0.14, pw * 0.11, pw * 0.18],
+            repeatRows=1,
+        )
         table.hAlign = "LEFT"
-        style_cmds = _base_left_table_style(header_rows=1, zebra_from=1) + [
-            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-        ]
+        style_cmds = _base_left_table_style(header_rows=1, zebra_from=1) + [("ALIGN", (0, 0), (-1, -1), "LEFT")]
         for row_idx, pct in enumerate(view["%"].tolist(), start=1):
-            style_cmds.extend([
-                ("BACKGROUND", (3, row_idx), (3, row_idx), _pct_fill(_int_pct(pct))),
-                ("TEXTCOLOR", (3, row_idx), (3, row_idx), _pct_color(_int_pct(pct))),
-            ])
+            style_cmds.extend(
+                [
+                    ("BACKGROUND", (3, row_idx), (3, row_idx), _pct_fill(_int_pct(pct))),
+                    ("TEXTCOLOR", (3, row_idx), (3, row_idx), _pct_color(_int_pct(pct))),
+                ]
+            )
         table.setStyle(TableStyle(style_cmds))
         return table
-
-    def _split_service_columns(df: pd.DataFrame):
-        svc_cols = [
-            c for c in df.columns if c not in (
-                "Equipamento", "%", "Status")]
-        groups = []
-        order_map = {"D": 0, "R": 1, "M": 2}
-        by_service = {}
-        service_order = []
-        for col in svc_cols:
-            label = str(col)
-            service_name = label
-            suffix = None
-            try:
-                left, right = label.rsplit(" ", 1)
-                if right in order_map:
-                    service_name, suffix = left, right
-            except Exception:
-                pass
-            if service_name not in by_service:
-                by_service[service_name] = {
-                    "name": service_name, "cols": [
-                        None, None, None], "extras": []}
-                service_order.append(service_name)
-            if suffix is None:
-                by_service[service_name]["extras"].append(col)
-            else:
-                by_service[service_name]["cols"][order_map[suffix]] = col
-        for name in service_order:
-            item = by_service[name]
-            ordered = [c for c in item["cols"] if c] or item["extras"]
-            groups.append((item["name"], ordered))
-        return groups
 
     def _cell_heat_style(raw: str):
         val = str(raw or "").strip().upper()
@@ -369,116 +437,143 @@ def _build_pdf_tables(
             return palette["bad_fill"], palette["bad"], val
         return palette["empty_fill"], palette["muted"], ""
 
-    def _build_sector_block(df: pd.DataFrame):
-        groups = _split_service_columns(df)
-        if not groups:
-            return [Paragraph("Sem dados deste setor.", small_style)]
+    def _build_consolidated_blocks(df: pd.DataFrame, sector_groups, sector_pct: dict[str, int]):
+        if not isinstance(df, pd.DataFrame) or df.empty or not sector_groups:
+            return [Paragraph("Sem dados desta matriz.", small_style)]
 
-        equip_w = 5.2 * cm
-        trio_w = 0.88 * cm
-        max_groups = max(1, min(len(groups), int(
-            (pw - equip_w) // (trio_w * 3)) or 1))
-        chunks = [groups[i:i + max_groups]
-                  for i in range(0, len(groups), max_groups)]
+        equip_w = 5.0 * cm
+        stage_w = 0.72 * cm
+        max_matrix_cols = max(3, int((pw - equip_w) // stage_w))
+        if max_matrix_cols < 3:
+            max_matrix_cols = 3
+
+        chunks = []
+        current_chunk = []
+        current_cols = 0
+        for sector in sector_groups:
+            sector_chunk = {"sector": sector["sector"], "services": []}
+            for service in sector["services"]:
+                service_width = max(1, len(service["columns"]))
+                if current_cols > 0 and current_cols + service_width > max_matrix_cols:
+                    if sector_chunk["services"]:
+                        current_chunk.append(sector_chunk)
+                    if current_chunk:
+                        chunks.append(current_chunk)
+                    current_chunk = []
+                    current_cols = 0
+                    sector_chunk = {"sector": sector["sector"], "services": []}
+
+                sector_chunk["services"].append(service)
+                current_cols += service_width
+
+            if sector_chunk["services"]:
+                current_chunk.append(sector_chunk)
+
+        if current_chunk:
+            chunks.append(current_chunk)
+
         blocks = []
-
         for chunk_idx, chunk in enumerate(chunks, start=1):
             data = []
-            top = [Paragraph("<b>Equipamento</b>", head_top)]
-            sub = [""]
-            spans = [(0, 0, 0, 1)]
-            cols_meta = [("Equipamento", None)]
+            row_setor = [Paragraph("<b>Equipamento</b>", head_top)]
+            row_servico = [""]
+            row_etapa = [""]
+            cols_meta = ["Equipamento"]
+            spans = [(0, 0, 0, 2)]
             separators = []
             cur_col = 1
 
-            for service_name, ordered_cols in chunk:
-                normalized = list(ordered_cols)
-                if len(normalized) == 3:
-                    top.extend(
-                        [Paragraph(f"<b>{service_name}</b>", head_top), "", ""])
-                    sub.extend([
-                        Paragraph("<b>D</b>", head_sub),
-                        Paragraph("<b>R</b>", head_sub),
-                        Paragraph("<b>M</b>", head_sub),
-                    ])
-                    spans.append((cur_col, 0, cur_col + 2, 0))
-                    separators.append(cur_col + 2)
-                    for col_name in normalized:
-                        cols_meta.append((col_name, True))
-                    cur_col += 3
-                else:
-                    top.append(Paragraph(f"<b>{service_name}</b>", head_top))
-                    sub.append("")
-                    for col_name in normalized:
-                        cols_meta.append((col_name, True))
-                    if len(normalized) == 1:
-                        spans.append((cur_col, 0, cur_col, 1))
-                    cur_col += len(normalized)
+            for sector in chunk:
+                sector_start = cur_col
+                pct = sector_pct.get(sector["sector"], 0)
 
-            data.extend([top, sub])
-            view_cols = [name for name, _ in cols_meta]
-            view = df[view_cols].copy().fillna("")
+                for service in sector["services"]:
+                    service_cols = list(service["columns"])
+                    width = len(service_cols)
+                    row_setor.extend([""] * width)
+                    row_servico.extend([Paragraph(f"<b>{service['service']}</b>", head_sub)] + [""] * (width - 1))
+                    stage_labels = []
+                    if width == 3:
+                        stage_labels = ["D", "R", "M"]
+                    else:
+                        for idx in range(width):
+                            stage_labels.append(str(idx + 1))
+                    row_etapa.extend([Paragraph(f"<b>{lbl}</b>", head_stage) for lbl in stage_labels])
+                    cols_meta.extend(service_cols)
+                    if width > 1:
+                        spans.append((cur_col, 1, cur_col + width - 1, 1))
+                    cur_col += width
+
+                sector_end = cur_col - 1
+                if sector_end >= sector_start:
+                    row_setor[sector_start:sector_start] = [Paragraph(f"<b>{sector['sector']}</b><br/><font size='6'>{pct}%</font>", head_top)]
+                    del row_setor[sector_start + 1: sector_end + 2]
+                    spans.append((sector_start, 0, sector_end, 0))
+                    separators.append(sector_end)
+
+            data.extend([row_setor, row_servico, row_etapa])
+            view = df[cols_meta].copy().fillna("")
 
             for _, src in view.iterrows():
                 row = [Paragraph(str(src["Equipamento"]), cell_left)]
-                for col_name, _ in cols_meta[1:]:
+                for col_name in cols_meta[1:]:
                     _, _, text = _cell_heat_style(src[col_name])
                     row.append(Paragraph(text, cell_center))
                 data.append(row)
 
             remaining = pw - equip_w
             matrix_cols = len(cols_meta) - 1
-            matrix_w = max(
-                0.82 * cm, min(0.94 * cm, remaining / max(matrix_cols, 1)))
+            matrix_w = max(0.60 * cm, min(0.78 * cm, remaining / max(matrix_cols, 1)))
             col_widths = [equip_w] + [matrix_w] * matrix_cols
-            table = Table(data, colWidths=col_widths, repeatRows=2)
+            table = Table(data, colWidths=col_widths, repeatRows=3)
             table.hAlign = "LEFT"
 
-            style_cmds = _base_left_table_style(header_rows=2, zebra_from=2) + [
+            style_cmds = _base_left_table_style(header_rows=3, zebra_from=3) + [
                 ("BACKGROUND", (0, 1), (-1, 1), palette["header_2"]),
-                ("TEXTCOLOR", (0, 1), (-1, 1), colors.HexColor("#CBD5E1")),
-                ("ALIGN", (0, 0), (-1, 1), "CENTER"),
-                ("ALIGN", (0, 2), (0, -1), "LEFT"),
-                ("ALIGN", (1, 2), (-1, -1), "CENTER"),
-                ("SPAN", (0, 0), (0, 1)),
-                ("LEFTPADDING", (1, 2), (-1, -1), 0),
-                ("RIGHTPADDING", (1, 2), (-1, -1), 0),
-                ("TOPPADDING", (1, 2), (-1, -1), 1),
-                ("BOTTOMPADDING", (1, 2), (-1, -1), 1),
+                ("BACKGROUND", (0, 2), (-1, 2), palette["header_3"]),
+                ("TEXTCOLOR", (0, 1), (-1, 2), colors.HexColor("#E2E8F0")),
+                ("ALIGN", (0, 0), (-1, 2), "CENTER"),
+                ("ALIGN", (0, 3), (0, -1), "LEFT"),
+                ("ALIGN", (1, 3), (-1, -1), "CENTER"),
+                ("SPAN", (0, 0), (0, 2)),
+                ("LEFTPADDING", (1, 3), (-1, -1), 0),
+                ("RIGHTPADDING", (1, 3), (-1, -1), 0),
+                ("TOPPADDING", (1, 3), (-1, -1), 1),
+                ("BOTTOMPADDING", (1, 3), (-1, -1), 1),
             ]
             for c1, r1, c2, r2 in spans[1:]:
                 style_cmds.append(("SPAN", (c1, r1), (c2, r2)))
             for col in separators[:-1]:
-                style_cmds.append(
-                    ("LINEAFTER", (col, 0), (col, -1), 0.7, colors.HexColor("#94A3B8")))
+                style_cmds.append(("LINEAFTER", (col, 0), (col, -1), 0.8, colors.HexColor("#94A3B8")))
 
-            for row_i in range(2, len(data)):
+            for row_i in range(3, len(data)):
                 for col_i in range(1, len(cols_meta)):
-                    bg, fg, text = _cell_heat_style(
-                        view.iloc[row_i - 2, col_i])
-                    style_cmds.extend([
-                        ("BACKGROUND", (col_i, row_i), (col_i, row_i), bg),
-                        ("TEXTCOLOR", (col_i, row_i), (col_i, row_i), fg),
-                    ])
+                    bg, fg, text = _cell_heat_style(view.iloc[row_i - 3, col_i])
+                    style_cmds.extend(
+                        [
+                            ("BACKGROUND", (col_i, row_i), (col_i, row_i), bg),
+                            ("TEXTCOLOR", (col_i, row_i), (col_i, row_i), fg),
+                        ]
+                    )
                     if text:
-                        style_cmds.extend([
-                            ("FONTNAME", (col_i, row_i), (col_i, row_i), "Helvetica-Bold"),
-                            ("BOX", (col_i, row_i), (col_i, row_i), 0.35, fg),
-                        ])
+                        style_cmds.extend(
+                            [
+                                ("FONTNAME", (col_i, row_i), (col_i, row_i), "Helvetica-Bold"),
+                                ("BOX", (col_i, row_i), (col_i, row_i), 0.35, fg),
+                            ]
+                        )
 
             table.setStyle(TableStyle(style_cmds))
             if len(chunks) > 1:
-                blocks.append(
-                    Paragraph(f"Bloco {chunk_idx}/{len(chunks)}", small_style))
+                blocks.append(Paragraph(f"Bloco {chunk_idx}/{len(chunks)}", small_style))
                 blocks.append(Spacer(1, 0.10 * cm))
             blocks.append(table)
             if chunk_idx < len(chunks):
-                blocks.append(Spacer(1, 0.22 * cm))
+                blocks.append(Spacer(1, 0.24 * cm))
         return blocks
 
     resumo_cols = ["Equipamento", "Concluidos", "Total", "%"]
-    if isinstance(resumo_df, pd.DataFrame) and all(
-            c in resumo_df.columns for c in resumo_cols):
+    if isinstance(resumo_df, pd.DataFrame) and all(c in resumo_df.columns for c in resumo_cols):
         rv = resumo_df[resumo_cols].copy()
         rv["Concluidos"] = rv["Concluidos"].map(_safe_int)
         rv["Total"] = rv["Total"].map(_safe_int)
@@ -505,79 +600,68 @@ def _build_pdf_tables(
     story = []
 
     header = Table(
-        [
-            [
-                Paragraph(
-                    "Relatório Operacional — Matriz",
-                    title_style),
-                Paragraph(
-                    f'<font color="#6B7280">Data de emissão</font><br/><b>{emitido}</b>',
-                    issued_style),
-            ]],
-        colWidths=[
-            pw *
-            0.76,
-            pw *
-            0.24],
+        [[
+            Paragraph("Relatório Operacional — Matriz", title_style),
+            Paragraph(f'<font color="#6B7280">Data de emissão</font><br/><b>{emitido}</b>', issued_style),
+        ]],
+        colWidths=[pw * 0.76, pw * 0.24],
     )
     header.hAlign = "LEFT"
-    header.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-    ]))
+    header.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ]
+        )
+    )
     story.append(header)
-    story.append(
-        HRFlowable(
-            width="100%",
-            thickness=0.75,
-            color=palette["line"],
-            spaceAfter=5,
-            spaceBefore=1))
+    story.append(HRFlowable(width="100%", thickness=0.75, color=palette["line"], spaceAfter=5, spaceBefore=1))
 
     meta = Table(
-        [
-            [
-                Paragraph(
-                    "Revisão", meta_label), Paragraph(
-                    "Grupo", meta_label)], [
-                        Paragraph(
-                            titulo or "—", meta_value), Paragraph(
-                                grupo_nome or "—", meta_value)], ], colWidths=[
-                                    pw * 0.38, pw * 0.62], )
+        [[Paragraph("Revisão", meta_label), Paragraph("Grupo", meta_label)], [Paragraph(titulo or "—", meta_value), Paragraph(grupo_nome or "—", meta_value)]],
+        colWidths=[pw * 0.38, pw * 0.62],
+    )
     meta.hAlign = "LEFT"
-    meta.setStyle(TableStyle([
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 1),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ("LINEBELOW", (0, 1), (-1, 1), 0.45, palette["line"]),
-    ]))
+    meta.setStyle(
+        TableStyle(
+            [
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 1),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("LINEBELOW", (0, 1), (-1, 1), 0.45, palette["line"]),
+            ]
+        )
+    )
     story.append(meta)
     story.append(Spacer(1, 0.24 * cm))
 
-    cards = Table([[_kpi_card("Equipamentos",
-                              str(total_eq)),
-                    _kpi_card("Concluídos (100%)",
-                  f'<font color="#16A34A">{eq_100}</font>'),
-                    _kpi_card("Progresso médio",
-                  f"{avg_pct}%"),
-        _kpi_card("Sem início (0%)",
-                  f'<font color="#EF4444">{eq_zero}</font>'),
-    ]],
+    cards = Table(
+        [[
+            _kpi_card("Equipamentos", str(total_eq)),
+            _kpi_card("Concluídos (100%)", f'<font color="#16A34A">{eq_100}</font>'),
+            _kpi_card("Progresso médio", f"{avg_pct}%"),
+            _kpi_card("Sem início (0%)", f'<font color="#EF4444">{eq_zero}</font>'),
+        ]],
         colWidths=[pw / 4.0] * 4,
     )
     cards.hAlign = "LEFT"
-    cards.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-    ]))
+    cards.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
     story.append(cards)
     story.append(Spacer(1, 0.24 * cm))
 
@@ -585,44 +669,28 @@ def _build_pdf_tables(
     story.append(Spacer(1, 0.05 * cm))
     story.append(_summary_table(rv))
 
-    for sector_name, sector_df in sector_tables:
-        story.append(PageBreak())
-        service_cols = [
-            c for c in sector_df.columns if c not in (
-                "Equipamento", "%", "Status")]
-        ok_count = int(
-            (sector_df[service_cols] == "OK").sum().sum()) if service_cols else 0
-        total_cells = int(
-            len(sector_df) *
-            len(service_cols)) if service_cols else 0
-        pct_general = int(
-            round((ok_count / max(total_cells, 1)) * 100)) if total_cells else 0
+    merged_df, sector_groups = _merge_sector_tables(sector_tables)
+    sector_pct = _compute_sector_progress(sector_tables)
 
-        story.append(
-            Paragraph(
-                f"Detalhamento por setor — {sector_name}",
-                section_style))
-        story.append(
-            Paragraph(
-                f"Geral: <b>{pct_general}%</b> | Concluídos: <b>{ok_count}/{total_cells}</b>",
-                sector_meta_style))
-        story.append(Spacer(1, 0.16 * cm))
-        for block in _build_sector_block(sector_df):
-            story.append(block)
+    story.append(PageBreak())
+    story.append(Paragraph("Matriz consolidada", section_style))
+    if sector_pct:
+        ordered_pct = []
+        for sector in sector_groups:
+            nome = sector["sector"]
+            ordered_pct.append(f"{nome}: <b>{sector_pct.get(nome, 0)}%</b>")
+        story.append(Paragraph(" | ".join(ordered_pct), sector_meta_style))
+    story.append(Spacer(1, 0.16 * cm))
+
+    for block in _build_consolidated_blocks(merged_df, sector_groups, sector_pct):
+        story.append(block)
 
     def _footer(canvas, _doc):
         canvas.saveState()
         canvas.setFont("Helvetica", 8)
         canvas.setFillColor(palette["muted"])
-        canvas.drawString(
-            LMARGIN,
-            0.58 * cm,
-            "D = desmontou   R = revisou   M = montou")
-        canvas.drawRightString(
-            PAGE[0] - RMARGIN,
-            0.58 * cm,
-            f"Página {
-                canvas.getPageNumber()}")
+        canvas.drawString(LMARGIN, 0.58 * cm, "D = desmontou   R = revisou   M = montou")
+        canvas.drawRightString(PAGE[0] - RMARGIN, 0.58 * cm, f"Página {canvas.getPageNumber()}")
         canvas.restoreState()
 
     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
