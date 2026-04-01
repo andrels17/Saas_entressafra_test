@@ -1193,11 +1193,23 @@ def render_dashboard() -> None:
                    for g in grupos if g.get("id")}
 
     base = normalize_matriz_base(raw, eq_meta)
-    # Para equipamentos, preserva a base completa. A combinação híbrida entre
-    # linhas sintéticas e linhas reais de tarefa acontece dentro de
-    # _fragment_equipamentos(). Filtrar aqui apenas row_source="task" fazia
-    # equipamentos com cobertura parcial via grupo_servicos desaparecerem da aba.
+    # Para equipamentos, preservamos a base completa SOMENTE dentro do escopo do
+    # usuário. A combinação híbrida entre linhas sintéticas e linhas reais de
+    # tarefa acontece dentro de _fragment_equipamentos(). O problema anterior
+    # era manter equipment_base sem aplicar o escopo automático do gestor,
+    # fazendo a aba listar equipamentos de outros departamentos/grupos.
     equipment_base = base.copy()
+    if dep_scope_ids is not None or grp_scope_ids is not None:
+        equipment_base = apply_filters(equipment_base, dep_scope_ids, grp_scope_ids)
+        if equipment_base.empty and dep_scope_ids not in (None, []):
+            # Mesmo fallback defensivo usado na base principal: se o vínculo do
+            # gestor vier por departamento e a lista de grupos estiver
+            # desatualizada, mantém o recorte por departamento em vez de zerar.
+            equipment_base = apply_filters(
+                base=base.copy(),
+                departamento_ids=dep_scope_ids,
+                grupo_ids=None,
+            )
     if not base.empty:
         if "data_inicio" not in base.columns:
             base["data_inicio"] = pd.NaT
