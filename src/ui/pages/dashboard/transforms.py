@@ -537,9 +537,9 @@ def build_tendencia_semanal(
         current_week = max(1, int(((hoje - start.normalize()).days // 7) + 1))
 
     total_weeks = max(1, planned_weeks, observed_weeks, current_week)
+    actual_week = max(1, min(total_weeks, max(current_week, observed_weeks or 1)))
 
     rows: list[dict[str, float | int | str]] = []
-    cumulative_pct = 0.0
 
     if updated is not None and updated.notna().any():
         vt = valid.copy()
@@ -548,7 +548,6 @@ def build_tendencia_semanal(
         if pd.notna(start):
             vt["week_number"] = (((vt["updated_at"] - start.normalize()).dt.days).clip(lower=0) // 7) + 1
         else:
-            # Fallback: ordena semanas observadas em sequência
             ordered_days = sorted(vt["updated_at"].dropna().unique())
             day_to_week = {day: idx + 1 for idx, day in enumerate(ordered_days)}
             vt["week_number"] = vt["updated_at"].map(day_to_week)
@@ -564,38 +563,59 @@ def build_tendencia_semanal(
         done_map = {int(r.week_number): float(r.done_steps) for r in weekly_done.itertuples()}
 
         cumulative_done = 0.0
-        for week in range(1, total_weeks + 1):
+        real_points = {}
+        for week in range(1, actual_week + 1):
             cumulative_done += float(done_map.get(week, 0.0))
             pct_real = round(max(0.0, min(100.0, cumulative_done / expected_total * 100)), 1)
+            real_points[week] = pct_real
+
+        if real_points:
+            real_points[actual_week] = round(pct_atual, 1)
+            for week in range(1, actual_week):
+                next_value = real_points.get(week + 1, round(pct_atual, 1))
+                real_points[week] = round(min(real_points.get(week, 0.0), next_value), 1)
+
+        last_known = 0.0
+        for week in range(1, total_weeks + 1):
+            if week <= actual_week:
+                last_known = float(real_points.get(week, last_known))
+                pct_real = round(last_known, 1)
+            else:
+                pct_real = None
             pct_ideal = round(max(0.0, min(100.0, week / max(total_weeks, 1) * 100)), 1)
             rows.append({
                 "week_number": week,
                 "semana_label": f"S{week}",
                 "pct_real": pct_real,
                 "pct_ideal": pct_ideal,
-                "delta_pct": round(pct_real - pct_ideal, 1),
+                "delta_pct": round((pct_real if pct_real is not None else last_known) - pct_ideal, 1) if pct_real is not None else None,
             })
-        if rows:
-            rows[-1]["pct_real"] = round(pct_atual, 1)
-            rows[-1]["delta_pct"] = round(rows[-1]["pct_real"] - rows[-1]["pct_ideal"], 1)
     else:
-        week = max(1, min(total_weeks, current_week))
         for w in range(1, total_weeks + 1):
-            pct_real = round(pct_atual, 1) if w == week else (0.0 if w < week else round(pct_atual, 1))
+            if w < actual_week:
+                pct_real = round(pct_atual * (w / max(actual_week, 1)), 1)
+            elif w == actual_week:
+                pct_real = round(pct_atual, 1)
+            else:
+                pct_real = None
             pct_ideal = round(max(0.0, min(100.0, w / max(total_weeks, 1) * 100)), 1)
             rows.append({
                 "week_number": w,
                 "semana_label": f"S{w}",
                 "pct_real": pct_real,
                 "pct_ideal": pct_ideal,
-                "delta_pct": round(pct_real - pct_ideal, 1),
+                "delta_pct": round(pct_real - pct_ideal, 1) if pct_real is not None else None,
             })
 
     trend = pd.DataFrame(rows, columns=cols)
     if not trend.empty:
-        trend["pct_real"] = pd.to_numeric(trend["pct_real"], errors="coerce").fillna(0).clip(0, 100)
+        trend["pct_real"] = pd.to_numeric(trend["pct_real"], errors="coerce").clip(0, 100)
         trend["pct_ideal"] = pd.to_numeric(trend["pct_ideal"], errors="coerce").fillna(0).clip(0, 100)
         trend["delta_pct"] = (trend["pct_real"] - trend["pct_ideal"]).round(1)
+        non_null_real = trend["pct_real"].dropna()
+        if not non_null_real.empty:
+            trend.loc[non_null_real.index[-1], "pct_real"] = round(pct_atual, 1)
+            trend["delta_pct"] = (trend["pct_real"] - trend["pct_ideal"]).round(1)
     return trend
 
 
