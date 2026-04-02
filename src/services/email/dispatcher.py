@@ -1093,57 +1093,71 @@ def dispatch_relatorio_semanal(
                 _log(f"  ❌ {msg}")
                 continue
 
-            for rec in grp.recipients:
+            # ── Envio consolidado: um único e-mail por departamento ─────────
+            # Todos os gestores do departamento vão no mesmo To,
+            # evitando N e-mails idênticos com o mesmo PDF.
+            if grp.recipients:
+                all_emails = [rec.email for rec in grp.recipients]
+                nomes = ", ".join(rec.nome.split()[0] for rec in grp.recipients)
                 result.total_emails += 1
-                _log(f"    ↳ Enviando para {rec.email} ({rec.nome})")
+                _log(f"    ↳ Enviando e-mail consolidado para {len(all_emails)} destinatário(s): {', '.join(all_emails)}")
                 if dry_run:
                     _log("    ↳ [DRY RUN] — e-mail não enviado.")
                     result.sent += 1
-                    continue
-                try:
-                    html = build_html_body(
-                        destinatario_nome=rec.nome,
-                        departamento_nome=grp.departamento_nome,
-                        revisao_titulo=payload.revisao_titulo,
-                        semana_atual=payload.semana_atual,
-                        semanas_total=payload.semanas_total,
-                        pct_geral=payload.pct_geral,
-                        n_alertas=payload.n_alertas_total,
-                        primary_color=payload.primary_color,
-                        equipamentos=eq_list,
-                    )
-                    send_email_with_retry(EmailMessage(
-                        to=[rec.email],
-                        subject=(f"[{payload.revisao_titulo}] Relatório Semanal — "
-                                 f"{grp.departamento_nome} · Semana {payload.semana_atual}"),
-                        html_body=html,
-                        pdf_bytes=pdf_bytes,
-                        pdf_filename=pdf_name,
-                    ), cfg=smtp_cfg,
-                        on_retry=lambda attempt, exc: _log(f"    ↳ ⚠️ Retry {attempt}: {exc}"))
-                    result.sent += 1
-                    _log("    ↳ ✅ Enviado.")
-                except Exception as e:
-                    result.failed += 1
-                    msg = f"Falha ao enviar para {rec.email}: {e}"
-                    result.errors.append(msg)
-                    _log(f"    ↳ ❌ {msg}")
-                    # Enfileira na dead-letter para reprocessamento manual
+                else:
                     try:
-                        from src.services.email.dead_letter import enqueue_failed
-                        enqueue_failed(
-                            tenant_id=tenant_id,
-                            revisao_id=revisao_id,
-                            recipient=rec.email,
-                            subject=(f"[{payload.revisao_titulo}] Relatório Semanal — "
-                                     f"{grp.departamento_nome} · Semana {payload.semana_atual}"),
-                            html_body=html,
-                            pdf_bytes=pdf_bytes,
-                            pdf_filename=pdf_name,
-                            error=str(e),
+                        saudacao = nomes if len(grp.recipients) == 1 else f"equipe de {grp.departamento_nome}"
+                        html = build_html_body(
+                            destinatario_nome=saudacao,
+                            departamento_nome=grp.departamento_nome,
+                            revisao_titulo=payload.revisao_titulo,
+                            semana_atual=payload.semana_atual,
+                            semanas_total=payload.semanas_total,
+                            pct_geral=payload.pct_geral,
+                            n_alertas=payload.n_alertas_total,
+                            primary_color=payload.primary_color,
+                            equipamentos=eq_list,
+                            # Breakdown para card de alertas contextualizado
+                            n_travados=payload.n_travados,
+                            n_sem_inicio=payload.n_sem_inicio,
+                            n_parados=payload.n_parados,
+                            n_risco_prazo=payload.n_risco_prazo,
+                            total_equipamentos=payload.n_equipamentos,
                         )
-                    except Exception:
-                        pass  # ignorado — operação opcional
+                        subject = (
+                            f"[{payload.revisao_titulo}] Relatório Semanal — "
+                            f"{grp.departamento_nome} · Semana {payload.semana_atual}"
+                        )
+                        send_email_with_retry(EmailMessage(
+                            to=all_emails,
+                            subject=subject,
+                            html_body=html,
+                            attachments=[(pdf_bytes, pdf_name)],
+                        ), cfg=smtp_cfg,
+                            on_retry=lambda attempt, exc: _log(f"    ↳ ⚠️ Retry {attempt}: {exc}"))
+                        result.sent += 1
+                        _log("    ↳ ✅ Enviado.")
+                    except Exception as e:
+                        result.failed += 1
+                        msg = f"Falha ao enviar para {grp.departamento_nome}: {e}"
+                        result.errors.append(msg)
+                        _log(f"    ↳ ❌ {msg}")
+                        # Enfileira na dead-letter para reprocessamento manual
+                        try:
+                            from src.services.email.dead_letter import enqueue_failed
+                            for rec in grp.recipients:
+                                enqueue_failed(
+                                    tenant_id=tenant_id,
+                                    revisao_id=revisao_id,
+                                    recipient=rec.email,
+                                    subject=subject,
+                                    html_body=html,
+                                    pdf_bytes=pdf_bytes,
+                                    pdf_filename=pdf_name,
+                                    error=str(e),
+                                )
+                        except Exception:
+                            pass  # ignorado — operação opcional
 
         except Exception as e:
             result.failed += 1
@@ -1356,41 +1370,54 @@ def dispatch_relatorio_semanal(
                 pdf_exec = build_executive_pdf(exec_payload)
                 pdf_name_e = f"relatorio_executivo_semana{sem_atual_rev}.pdf"
 
-                for rec in exec_recs:
+                # ── Executivo: um e-mail único com todos os supervisores ──
+                if exec_recs:
                     result.total_emails += 1
-                    _log(f"    ↳ Executivo → {rec.email} ({rec.nome})")
+                    all_exec_emails = [rec.email for rec in exec_recs]
+                    _log(f"    ↳ Executivo → {len(all_exec_emails)} destinatário(s): {', '.join(all_exec_emails)}")
                     if dry_run:
                         _log("    ↳ [DRY RUN] — e-mail não enviado.")
                         result.sent += 1
-                        continue
-                    try:
-                        from src.services.email.smtp_sender import build_html_body, EmailMessage, send_email_with_retry
-                        html_e = build_html_body(
-                            destinatario_nome=rec.nome,
-                            departamento_nome="Visão geral — todos os departamentos",
-                            revisao_titulo=exec_payload.revisao_titulo,
-                            semana_atual=exec_payload.semana_atual,
-                            semanas_total=exec_payload.semanas_total,
-                            pct_geral=exec_payload.pct_global,
-                            n_alertas=exec_payload.n_alertas_total,
-                            primary_color=exec_payload.primary_color,
-                        )
-                        send_email_with_retry(EmailMessage(
-                            to=[rec.email],
-                            subject=(f"[{exec_payload.revisao_titulo}] Visão Executiva — "
-                                     f"Semana {exec_payload.semana_atual}/{exec_payload.semanas_total}"),
-                            html_body=html_e,
-                            pdf_bytes=pdf_exec,
-                            pdf_filename=pdf_name_e,
-                        ), cfg=smtp_cfg,
-                            on_retry=lambda attempt, exc: _log(f"    ↳ ⚠️ Retry {attempt}: {exc}"))
-                        result.sent += 1
-                        _log("    ↳ ✅ Executivo enviado.")
-                    except Exception as e_send:
-                        result.failed += 1
-                        msg = f"Falha ao enviar executivo para {rec.email}: {e_send}"
-                        result.errors.append(msg)
-                        _log(f"    ↳ ❌ {msg}")
+                    else:
+                        try:
+                            from src.services.email.smtp_sender import build_html_body, EmailMessage, send_email_with_retry
+                            nomes_exec = ", ".join(rec.nome.split()[0] for rec in exec_recs)
+                            saudacao_exec = nomes_exec if len(exec_recs) == 1 else "equipe de supervisão"
+                            # Calcula breakdown consolidado dos departamentos
+                            n_trav_exec = sum(getattr(d, "n_travados", 0) for d in dept_snapshots)
+                            n_sem_exec = sum(getattr(d, "n_sem_inicio", 0) for d in dept_snapshots)
+                            n_par_exec = sum(getattr(d, "n_parados", 0) for d in dept_snapshots)
+                            n_risc_exec = sum(getattr(d, "n_risco_prazo", 0) for d in dept_snapshots)
+                            html_e = build_html_body(
+                                destinatario_nome=saudacao_exec,
+                                departamento_nome="Visão geral — todos os departamentos",
+                                revisao_titulo=exec_payload.revisao_titulo,
+                                semana_atual=exec_payload.semana_atual,
+                                semanas_total=exec_payload.semanas_total,
+                                pct_geral=exec_payload.pct_global,
+                                n_alertas=exec_payload.n_alertas_total,
+                                primary_color=exec_payload.primary_color,
+                                n_travados=n_trav_exec,
+                                n_sem_inicio=n_sem_exec,
+                                n_parados=n_par_exec,
+                                n_risco_prazo=n_risc_exec,
+                                total_equipamentos=exec_payload.n_equip_total,
+                            )
+                            send_email_with_retry(EmailMessage(
+                                to=all_exec_emails,
+                                subject=(f"[{exec_payload.revisao_titulo}] Visão Executiva — "
+                                         f"Semana {exec_payload.semana_atual}/{exec_payload.semanas_total}"),
+                                html_body=html_e,
+                                attachments=[(pdf_exec, pdf_name_e)],
+                            ), cfg=smtp_cfg,
+                                on_retry=lambda attempt, exc: _log(f"    ↳ ⚠️ Retry {attempt}: {exc}"))
+                            result.sent += 1
+                            _log("    ↳ ✅ Executivo enviado.")
+                        except Exception as e_send:
+                            result.failed += 1
+                            msg = f"Falha ao enviar executivo: {e_send}"
+                            result.errors.append(msg)
+                            _log(f"    ↳ ❌ {msg}")
             else:
                 _log("    ↳ Sem dados para executivo — pulando.")
         else:
