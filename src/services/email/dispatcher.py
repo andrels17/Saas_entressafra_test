@@ -814,8 +814,14 @@ def _build_payload(
                 })
 
             esperado_pct = _pct(semana_atual, semanas_total)
-            if expected_steps > 0 and pct < max(esperado_pct - 15, 0) and pct < 100:
+            risco_prazo_eq = bool(
+                expected_steps > 0 and pct < max(esperado_pct - 15, 0) and pct < 100
+            )
+            if risco_prazo_eq:
                 n_risco_prazo += 1
+
+            sem_inicio_eq = bool(done_steps == 0 and expected_steps > 0)
+            alerta_eq = bool(any_travado or sem_inicio_eq or parado_eq or risco_prazo_eq)
 
             all_equipamentos.append({
                 "equipamento_id": eid,
@@ -832,6 +838,11 @@ def _build_payload(
                 "ultima_semana": ultima_semana,
                 "dias_sem_manut": dias_sem_manut_efetivo,
                 "grupo_pct": int(group_pct_map.get(grupo_id, pct)),
+                "flag_travado": bool(any_travado),
+                "flag_sem_inicio": sem_inicio_eq,
+                "flag_parado": bool(parado_eq),
+                "flag_risco_prazo": risco_prazo_eq,
+                "flag_alerta": alerta_eq,
             })
 
     # Topo: usa kpi_engine quando disponível; senão cai no overall do dashboard.
@@ -914,7 +925,10 @@ def _build_payload(
     )
     criticos = sorted(criticos, key=lambda x: (int(x.pct or 0), str(x.frota or "")))
 
-    n_alertas_total = n_travados + n_parados + n_risco_prazo + n_sem_inicio
+    # Total de atenção padronizado por equipamento único.
+    # Antes somávamos categorias (travado + parado + risco + sem início), o que
+    # inflava o número quando a mesma frota aparecia em mais de uma condição.
+    n_alertas_total = sum(1 for eq in all_equipamentos if bool(eq.get("flag_alerta")))
 
     payload = RelatorioDeptPayload(
         tenant_nome=tenant_nome or "AgroSafra",
@@ -1117,12 +1131,13 @@ def dispatch_relatorio_semanal(
                             n_alertas=payload.n_alertas_total,
                             primary_color=payload.primary_color,
                             equipamentos=eq_list,
-                            # Breakdown para card de alertas contextualizado
+                            # Breakdown padronizado por equipamento
                             n_travados=payload.n_travados,
                             n_sem_inicio=payload.n_sem_inicio,
                             n_parados=payload.n_parados,
                             n_risco_prazo=payload.n_risco_prazo,
                             total_equipamentos=payload.n_equipamentos,
+                            max_dias_parado=max([int(x.get("dias_parado") or 0) for x in (payload.parados_detalhe or [])] or [0]),
                         )
                         subject = (
                             f"[{payload.revisao_titulo}] Relatório Semanal — "
@@ -1266,6 +1281,7 @@ def dispatch_relatorio_semanal(
                         n_travados=p.n_travados,
                         n_sem_inicio=p.n_sem_inicio,
                         n_risco_prazo=p.n_risco_prazo,
+                        n_alertas_total=p.n_alertas_total,
                         top_criticos=top_criticos,
                         top_melhores=top_melhores,
                         maiores_evolucoes=maiores_evolucoes,
@@ -1334,11 +1350,9 @@ def dispatch_relatorio_semanal(
                 )
                 n_equip_total = sum(d.n_equipamentos for d in dept_snapshots)
                 n_equip_concl = sum(d.n_concluidos for d in dept_snapshots)
-                n_alertas_total = sum(
-                    d.n_travados +
-                    d.n_risco_prazo +
-                    d.n_parados +
-                    d.n_sem_inicio for d in dept_snapshots)
+                # Também no executivo o total representa equipamentos únicos
+                # com algum ponto de atenção dentro de cada departamento.
+                n_alertas_total = sum(getattr(d, "n_alertas_total", 0) for d in dept_snapshots)
 
                 trend_semanal = []
                 for sem in sorted(trend_acc):
@@ -1388,6 +1402,7 @@ def dispatch_relatorio_semanal(
                             n_sem_exec = sum(getattr(d, "n_sem_inicio", 0) for d in dept_snapshots)
                             n_par_exec = sum(getattr(d, "n_parados", 0) for d in dept_snapshots)
                             n_risc_exec = sum(getattr(d, "n_risco_prazo", 0) for d in dept_snapshots)
+                            max_dias_par_exec = max([int(getattr(d, "max_dias_parado", 0) or 0) for d in dept_snapshots] or [0])
                             html_e = build_html_body(
                                 destinatario_nome=saudacao_exec,
                                 departamento_nome="Visão geral — todos os departamentos",
@@ -1402,6 +1417,7 @@ def dispatch_relatorio_semanal(
                                 n_parados=n_par_exec,
                                 n_risco_prazo=n_risc_exec,
                                 total_equipamentos=exec_payload.n_equip_total,
+                                max_dias_parado=max_dias_par_exec,
                             )
                             send_email_with_retry(EmailMessage(
                                 to=all_exec_emails,
