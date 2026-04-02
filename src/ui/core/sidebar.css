@@ -274,3 +274,39 @@ section[data-testid="stSidebar"] .sb-revisao-chip {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ── App name: bloco com nome + subtítulo ───────────────────── */
+section[data-testid="stSidebar"] .sb-app-name-block {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+section[data-testid="stSidebar"] .sb-app-name {
+  font-weight: 900 !important;
+  font-size: 1.08rem !important;
+  color: rgba(255,255,255,0.98) !important;
+  letter-spacing: -0.3px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+section[data-testid="stSidebar"] .sb-app-sub {
+  font-size: 0.62rem;
+  font-weight: 500;
+  color: rgba(232,237,245,0.45);
+  letter-spacing: 0.04em;
+  margin-top: 1px;
+}
+
+/* ── Busca global inline ─────────────────────────────────────── */
+section[data-testid="stSidebar"] .sb-search-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--sb-text-muted);
+  padding: 14px 8px 5px;
+}

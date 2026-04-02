@@ -292,7 +292,10 @@ def _render_sidebar_header(app_name: str, tenant_id: str, user_id: str, role: st
               <div class="sb-approw">
                 <div class="sb-app">
                   <span class="sb-app-ico">🌾</span>
-                  <span class="sb-app-name" title="{app_name_safe}">{app_name_safe}</span>
+                  <div class="sb-app-name-block">
+                    <span class="sb-app-name" title="{app_name_safe}">{app_name_safe}</span>
+                    <span class="sb-app-sub">Sistema de Revisão</span>
+                  </div>
                 </div>
                 <span class="sb-pill">SaaS</span>
               </div>
@@ -328,11 +331,10 @@ def _render_sidebar_header(app_name: str, tenant_id: str, user_id: str, role: st
 
 
 def _render_sidebar_search(tenant_id: str) -> None:
-    """Busca global de equipamentos — ícone de lupa no topo da sidebar.
+    """Busca global de equipamentos — input inline sempre visível, compacto.
 
-    Mostra um input de texto com ícone. Ao digitar 2+ caracteres, exibe
-    resultados em tempo real. Ao clicar num resultado, navega para o
-    Dashboard do Equipamento.
+    Sem botão de lupa: o campo está sempre disponível abaixo do botão Sair.
+    Ao digitar 2+ caracteres exibe resultados em tempo real.
     """
     from src.ui.pages.equipamento_dashboard.data import search_equipamentos
     import hashlib as _hl
@@ -340,57 +342,39 @@ def _render_sidebar_search(tenant_id: str) -> None:
     token = st.session_state.get("sb_access_token", "")
     token_key = _hl.md5(token.encode()).hexdigest()[:8]
 
-    # Estado: controla se a busca está expandida
-    search_open = st.session_state.get("_search_open", False)
-
-    col_lupa, col_input = st.columns([1, 5])
-    with col_lupa:
-        if st.button("🔍", key="sb_search_toggle", help="Buscar equipamento",
-                     type="tertiary", use_container_width=True):
-            st.session_state["_search_open"] = not search_open
-            st.session_state.pop("_search_query", None)
-            st.rerun()
-
-    if not st.session_state.get("_search_open", False):
-        return
-
-    with col_input:
-        query = st.text_input(
-            "Buscar",
-            placeholder="Frota ou modelo…",
-            key="sb_search_input",
-            label_visibility="collapsed",
-        )
-        st.session_state["_search_query"] = query
+    st.markdown(
+        '<div class="sb-search-label">🔍 Buscar equipamento</div>',
+        unsafe_allow_html=True,
+    )
+    query = st.text_input(
+        "Buscar equipamento",
+        placeholder="Frota ou modelo…",
+        key="sb_search_input",
+        label_visibility="collapsed",
+    )
 
     if not query or len(query.strip()) < 2:
-        st.caption("Digite 2+ caracteres para buscar.")
         return
 
     resultados = search_equipamentos(tenant_id, query, token_key, token)
 
     if not resultados:
-        st.caption("Nenhum equipamento encontrado.")
+        st.caption("Nenhum resultado.")
         return
 
-    st.caption(f"{len(resultados)} resultado(s):")
     for eq in resultados:
-        label = f"{'🔴' if not eq['ativo'] else '🟢'} **{eq['frota']}** — {eq['modelo']}"
-        sub = f"{eq['grupo_nome']} · {eq['departamento_nome']}"
+        status_dot = "🟢" if eq["ativo"] else "🔴"
         if st.button(
-            f"{label}\n{sub}",
+            f"{status_dot} **{eq['frota']}** — {eq['modelo']}\n"
+            f"{eq['grupo_nome']} · {eq['departamento_nome']}",
             key=f"sb_search_eq_{eq['id']}",
             use_container_width=True,
             type="tertiary",
-            help=f"Grupo: {eq['grupo_nome']} | Depto: {eq['departamento_nome']}",
         ):
             st.session_state["_equip_detail_id"] = eq["id"]
-            st.session_state["_search_open"] = False
-            st.session_state.pop("_search_query", None)
+            st.session_state.pop("sb_search_input", None)
             st.session_state["__nav_to"] = PageKey.EQUIP_DASHBOARD.value
             st.rerun()
-
-    st.markdown("---")
 
 
 def _render_sidebar_logout(mobile: bool) -> None:
@@ -474,10 +458,10 @@ def _render_sidebar(pages: list[str], current_page: str, role: str, user_id: str
     with st.sidebar:
         _inject_sidebar_css()
         _render_sidebar_header(st.secrets.get("APP_NAME", "AgroSafra"), tenant_id, user_id, role)
-        _render_sidebar_search(tenant_id)
         badges = _safe_sidebar_badges(user_id, tenant_id, role)
-        _render_sidebar_logout(mobile)
         selected = _render_sidebar_navigation(pages, current_page, badges)
+        _render_sidebar_logout(mobile)
+        _render_sidebar_search(tenant_id)
     return selected
 
 
