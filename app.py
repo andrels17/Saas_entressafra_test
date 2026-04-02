@@ -391,6 +391,9 @@ def _render_sidebar_search(tenant_id: str) -> None:
             st.rerun()
 
     st.markdown("---")
+
+
+def _render_sidebar_logout(mobile: bool) -> None:
     if mobile:
         return
 
