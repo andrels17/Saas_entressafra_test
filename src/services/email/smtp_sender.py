@@ -287,6 +287,7 @@ def build_html_body(
     n_parados: int = 0,
     n_risco_prazo: int = 0,
     total_equipamentos: int = 0,
+    max_dias_parado: int = 0,
 ) -> str:
     """Gera o corpo HTML do e-mail."""
     if pct_geral >= 80:
@@ -297,26 +298,24 @@ def build_html_body(
         bar_color = "#EF4444"
     now = fmt_brt("%d/%m/%Y")
 
-    # ── Card de alertas ────────────────────────────────────────────────────
-    # A cor e a linguagem são baseadas nos travados (crítico real),
-    # não no total bruto — evita alarmar por itens de baixa severidade.
-    if n_alertas == 0:
+    # ── Card principal: equipamentos sem movimentação ─────────────────────
+    # Essa visão é mais útil ao gestor do que o bruto de alertas e evita a
+    # leitura enganosa de "X de Y equipamentos" quando X era soma de categorias.
+    if n_parados == 0:
         alerta_color = "#12B76A"
-        alerta_titulo = "Tudo em ordem"
-        alerta_subtitulo = "Nenhum ponto de atenção identificado"
-        alerta_num = "✓"
-    elif n_travados > 0:
+        alerta_titulo = "Equipamentos sem movimentação"
+        alerta_subtitulo = "Nenhum equipamento parado no período"
+        alerta_num = "0"
+    elif max_dias_parado >= 14:
         alerta_color = "#EF4444"
-        alerta_titulo = "Requer atenção"
-        alerta_subtitulo = (
-            f"{n_travados} item{'ns' if n_travados != 1 else ''} travado{'s' if n_travados != 1 else ''}"
-        )
-        alerta_num = str(n_travados)
+        alerta_titulo = "Equipamentos sem movimentação"
+        alerta_subtitulo = f"{n_parados} equipamento{'s' if n_parados != 1 else ''} parado{'s' if n_parados != 1 else ''} · até {max_dias_parado} dias"
+        alerta_num = str(n_parados)
     else:
         alerta_color = "#F59E0B"
-        alerta_titulo = "Pontos de atenção"
-        alerta_subtitulo = "Sem itens críticos travados"
-        alerta_num = str(n_alertas)
+        alerta_titulo = "Equipamentos sem movimentação"
+        alerta_subtitulo = f"{n_parados} equipamento{'s' if n_parados != 1 else ''} parado{'s' if n_parados != 1 else ''}"
+        alerta_num = str(n_parados)
 
     # Breakdown pill — só aparece se houver breakdown disponível
     breakdown_parts = []
@@ -342,11 +341,12 @@ def build_html_body(
     # Contexto de equipamentos
     context_txt = ""
     if total_equipamentos:
-        pct_afetados = round(n_alertas / total_equipamentos * 100) if n_alertas else 0
+        pct_parados = round(n_parados / total_equipamentos * 100) if n_parados else 0
         context_txt = (
             f'<div style="font-size:11px;color:#9CA3AF;margin-top:4px;">'
-            f"{pct_afetados}% dos {total_equipamentos} equipamentos do departamento"
-            f"</div>"
+            f"{n_parados} de {total_equipamentos} equipamentos sem movimentação"
+            + (f" · {pct_parados}% da frota" if n_parados else "")
+            + f"</div>"
         )
 
     return f"""<!DOCTYPE html>
@@ -391,7 +391,7 @@ def build_html_body(
               <div style="font-size:12px;color:#6B7280;margin-bottom:6px;">{alerta_titulo}</div>
               <div style="display:flex;align-items:baseline;gap:6px;">
                 <span style="font-size:28px;font-weight:700;color:{alerta_color};">{alerta_num}</span>
-                {f'<span style="font-size:12px;color:#9CA3AF;">de {total_equipamentos} equip.</span>' if total_equipamentos and n_alertas else ''}
+                {f'<span style="font-size:12px;color:#9CA3AF;">de {total_equipamentos} equip.</span>' if total_equipamentos else ''}
               </div>
               <div style="font-size:12px;color:{alerta_color};margin-top:2px;font-weight:600;">{alerta_subtitulo}</div>
               {context_txt}
