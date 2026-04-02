@@ -693,7 +693,6 @@ def _build_unified_rank_figure_cached(
                 bgcolor="#0D1B2A",
                 bordercolor="rgba(255,255,255,0.12)",
                 borderwidth=1,
-                activecolor="#1A2E42",
                 font=dict(color="#E8EDF5", size=12, family="DM Sans, sans-serif"),
                 pad=dict(t=6, r=6, b=6, l=6),
                 buttons=buttons,
