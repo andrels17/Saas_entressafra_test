@@ -458,10 +458,10 @@ def _render_sidebar(pages: list[str], current_page: str, role: str, user_id: str
     with st.sidebar:
         _inject_sidebar_css()
         _render_sidebar_header(st.secrets.get("APP_NAME", "AgroSafra"), tenant_id, user_id, role)
+        _render_sidebar_search(tenant_id)
         badges = _safe_sidebar_badges(user_id, tenant_id, role)
         selected = _render_sidebar_navigation(pages, current_page, badges)
         _render_sidebar_logout(mobile)
-        _render_sidebar_search(tenant_id)
     return selected
 
 
