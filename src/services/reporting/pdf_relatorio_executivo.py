@@ -10,7 +10,7 @@ Melhorias incluídas:
 from __future__ import annotations
 
 import io
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List
 
 from src.utils.timezone import fmt_brt
@@ -43,9 +43,10 @@ class DeptSnapshot:
     n_travados: int
     n_sem_inicio: int
     n_risco_prazo: int
-    top_criticos: list[dict]
-    top_melhores: list[dict]
-    maiores_evolucoes: list[dict]
+    n_alertas_total: int = 0
+    top_criticos: list[dict] = field(default_factory=list)
+    top_melhores: list[dict] = field(default_factory=list)
+    maiores_evolucoes: list[dict] = field(default_factory=list)
     n_parados: int = 0
     max_dias_parado: int = 0
     _done_steps: int = 0
