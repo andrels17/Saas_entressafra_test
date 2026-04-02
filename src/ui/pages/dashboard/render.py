@@ -18,6 +18,7 @@ from src.auth.scope import get_my_scope
 from src.auth.permissions import can_view_all_data
 from src.domain.kpi import calc_global_kpis, calc_dept_kpis
 from src.ui.core.empty_state import empty_state
+from src.ui.core.plotly_theme import apply_dark_theme, DARK_LAYOUT
 from src.ui.components.filters import multiselect_departamentos, multiselect_grupos
 from src.ui.components.feedback import notice_card, selection_summary
 from src.ui.components.actions import refresh_button
@@ -524,14 +525,13 @@ def _render_pct_rank_chart(
         textposition="outside",
         cliponaxis=False,
         hovertemplate="%{y}<br>% Concluído: %{x:.0f}%<extra></extra>")
+    apply_dark_theme(fig, height=max(380, 42 * len(chart_df) + 80))
     fig.update_layout(
-        height=max(380, 42 * len(chart_df) + 80),
         margin=dict(l=10, r=90, t=48, b=10),
-        xaxis=dict(range=[0, 110], title="% Concluído"),
-        yaxis=dict(title="", type="category"),
-        paper_bgcolor="#06080B",
-        plot_bgcolor="#0C111A",
-        font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=11),
+        xaxis=dict(range=[0, 110], title="% Concluído",
+                   tickfont=dict(color="#8A9BAE"), title_font=dict(color="#8A9BAE")),
+        yaxis=dict(title="", type="category",
+                   tickfont=dict(color="#8A9BAE")),
         showlegend=False,
     )
     st.plotly_chart(
@@ -687,14 +687,14 @@ def _build_unified_rank_figure_cached(
                 buttons=buttons,
             )
         ],
-        height=max(420, 42 * max_items + 120),
-        margin=dict(l=10, r=90, t=110, b=10),
-        xaxis=dict(range=[0, 110], title="% Concluído"),
-        yaxis=dict(title="", type="category"),
-        paper_bgcolor="#06080B",
-        plot_bgcolor="#0C111A",
-        font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=11),
-        showlegend=False,
+        **{**DARK_LAYOUT,
+           "height": max(420, 42 * max_items + 120),
+           "margin": dict(l=10, r=90, t=110, b=10),
+           "xaxis": dict(range=[0, 110], title="% Concluído",
+                         tickfont=dict(color="#8A9BAE"), title_font=dict(color="#8A9BAE")),
+           "yaxis": dict(title="", type="category",
+                         tickfont=dict(color="#8A9BAE")),
+           "showlegend": False},
     )
     return fig
 
@@ -941,14 +941,13 @@ def _fragment_departamentos(
         cliponaxis=False,
         hovertemplate="%{y}<br>% Concluído: %{x:.0f}%<br><i>Clique para filtrar</i><extra></extra>",
     )
+    apply_dark_theme(fig, height=max(320, 52 * len(chart_df) + 80))
     fig.update_layout(
-        height=max(320, 52 * len(chart_df) + 80),
         margin=dict(l=10, r=90, t=52, b=10),
-        xaxis=dict(range=[0, 110], title="% Concluído"),
-        yaxis=dict(title="", type="category"),
-        paper_bgcolor="#06080B",
-        plot_bgcolor="#0C111A",
-        font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=12),
+        xaxis=dict(range=[0, 110], title="% Concluído",
+                   tickfont=dict(color="#8A9BAE"), title_font=dict(color="#8A9BAE")),
+        yaxis=dict(title="", type="category",
+                   tickfont=dict(color="#8A9BAE")),
         showlegend=False,
     )
 
@@ -1165,13 +1164,8 @@ def _fragment_heatmap(heat: pd.DataFrame) -> None:
             "calor_score": "Score de risco"},
         title="Heatmap de Risco — Grupo × Setor",
     )
-    fig.update_layout(
-        height=max(300, len(heat["grupo"].unique()) * 40 + 80),
-        margin=dict(l=10, r=10, t=40, b=10),
-        paper_bgcolor="#06080B",
-        plot_bgcolor="#0C111A",
-        font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=11),
-    )
+    apply_dark_theme(fig, height=max(300, len(heat["grupo"].unique()) * 40 + 80))
+    fig.update_layout(margin=dict(l=10, r=10, t=40, b=10))
     st.plotly_chart(
         fig, use_container_width=True, config={
             "displayModeBar": False})
@@ -1258,15 +1252,11 @@ def _fragment_tendencia(trend: pd.DataFrame) -> None:
         line_dash_map={"Real": "solid", "Ideal": "dash"},
     )
     fig.update_traces(hovertemplate="%{x}<br>%{fullData.name}: %{y:.1f}%<extra></extra>")
+    apply_dark_theme(fig, height=360, xaxis_title="Semana", yaxis_title="% Concluído")
     fig.update_layout(
-        height=360,
         margin=dict(l=10, r=10, t=48, b=10),
-        xaxis_title="Semana",
-        yaxis_title="% Concluído",
-        yaxis=dict(range=[0, 100]),
-        paper_bgcolor="#06080B",
-        plot_bgcolor="#0C111A",
-        font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=11),
+        yaxis=dict(range=[0, 100], tickfont=dict(color="#8A9BAE"),
+                   title_font=dict(color="#8A9BAE")),
         legend_title_text="",
     )
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
