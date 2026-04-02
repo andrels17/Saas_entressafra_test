@@ -464,3 +464,24 @@ section[data-testid="stSidebar"] .nav-btn-active > div > button {
         min-width: 120px !important;
     }
 }
+
+/* ── Plotly updatemenu dropdown (Departamentos/Grupos/Equipamentos) ── */
+/* Força fundo escuro nos itens da lista aberta do dropdown nativo Plotly */
+.js-plotly-plot .plotly g.updatemenu-container g.updatemenu-dropdown-button rect {
+    fill: #0D1B2A !important;
+}
+.js-plotly-plot .plotly g.updatemenu-container g.updatemenu-dropdown-button:hover rect {
+    fill: #1A2E42 !important;
+}
+.js-plotly-plot .plotly g.updatemenu-header rect {
+    fill: #0D1B2A !important;
+    stroke: rgba(255,255,255,0.12) !important;
+}
+.js-plotly-plot .plotly g.updatemenu-header text,
+.js-plotly-plot .plotly g.updatemenu-dropdown-button text {
+    fill: #E8EDF5 !important;
+}
+/* Seta do dropdown */
+.js-plotly-plot .plotly g.updatemenu-header path {
+    fill: #8A9BAE !important;
+}
