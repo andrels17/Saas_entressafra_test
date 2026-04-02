@@ -73,6 +73,9 @@ class EmailMessage:
     pdf_bytes: bytes | None = None
     pdf_filename: str = "relatorio.pdf"
     cc: List[str] = field(default_factory=list)
+    # Suporte a múltiplos PDFs: lista de (bytes, filename).
+    # Se preenchido, substitui pdf_bytes/pdf_filename para envio consolidado.
+    attachments: List[tuple] = field(default_factory=list)
 
 
 def _load_config_from_secrets() -> SmtpConfig:
@@ -134,7 +137,13 @@ def _build_mime(msg: EmailMessage, cfg: SmtpConfig) -> MIMEMultipart:
     alt.attach(MIMEText(msg.html_body, "html", "utf-8"))
     mime.attach(alt)
 
-    if msg.pdf_bytes:
+    # Múltiplos anexos (envio consolidado)
+    if msg.attachments:
+        for pdf_b, pdf_name in msg.attachments:
+            part = MIMEApplication(pdf_b, _subtype="pdf")
+            part.add_header("Content-Disposition", "attachment", filename=pdf_name)
+            mime.attach(part)
+    elif msg.pdf_bytes:
         part = MIMEApplication(msg.pdf_bytes, _subtype="pdf")
         part.add_header(
             "Content-Disposition",
@@ -272,6 +281,12 @@ def build_html_body(
     n_alertas: int,
     primary_color: str = "#FFD100",
     equipamentos: list | None = None,
+    # Breakdown por categoria — opcional, enriquece o card de alertas
+    n_travados: int = 0,
+    n_sem_inicio: int = 0,
+    n_parados: int = 0,
+    n_risco_prazo: int = 0,
+    total_equipamentos: int = 0,
 ) -> str:
     """Gera o corpo HTML do e-mail."""
     if pct_geral >= 80:
@@ -281,9 +296,58 @@ def build_html_body(
     else:
         bar_color = "#EF4444"
     now = fmt_brt("%d/%m/%Y")
-    alerta_txt = (
-        f"{n_alertas} alerta{'s' if n_alertas != 1 else ''} " f"ativo{'s' if n_alertas != 1 else ''}") if n_alertas else "sem alertas"
-    alerta_color = "#EF4444" if n_alertas else "#12B76A"
+
+    # ── Card de alertas ────────────────────────────────────────────────────
+    # A cor e a linguagem são baseadas nos travados (crítico real),
+    # não no total bruto — evita alarmar por itens de baixa severidade.
+    if n_alertas == 0:
+        alerta_color = "#12B76A"
+        alerta_titulo = "Tudo em ordem"
+        alerta_subtitulo = "Nenhum ponto de atenção identificado"
+        alerta_num = "✓"
+    elif n_travados > 0:
+        alerta_color = "#EF4444"
+        alerta_titulo = "Requer atenção"
+        alerta_subtitulo = (
+            f"{n_travados} item{'ns' if n_travados != 1 else ''} travado{'s' if n_travados != 1 else ''}"
+        )
+        alerta_num = str(n_travados)
+    else:
+        alerta_color = "#F59E0B"
+        alerta_titulo = "Pontos de atenção"
+        alerta_subtitulo = "Sem itens críticos travados"
+        alerta_num = str(n_alertas)
+
+    # Breakdown pill — só aparece se houver breakdown disponível
+    breakdown_parts = []
+    if n_travados:
+        breakdown_parts.append(f"🔴 Travados: <b>{n_travados}</b>")
+    if n_parados:
+        breakdown_parts.append(f"⏸ Parados: <b>{n_parados}</b>")
+    if n_sem_inicio:
+        breakdown_parts.append(f"🟡 Sem início: <b>{n_sem_inicio}</b>")
+    if n_risco_prazo:
+        breakdown_parts.append(f"📅 Risco prazo: <b>{n_risco_prazo}</b>")
+
+    breakdown_html = ""
+    if breakdown_parts:
+        breakdown_html = (
+            f'<div style="font-size:11px;color:#6B7280;margin-top:10px;line-height:1.8;">'
+            + " &nbsp;·&nbsp; ".join(breakdown_parts)
+            + "</div>"
+        )
+    elif n_alertas == 0:
+        breakdown_html = ""
+
+    # Contexto de equipamentos
+    context_txt = ""
+    if total_equipamentos:
+        pct_afetados = round(n_alertas / total_equipamentos * 100) if n_alertas else 0
+        context_txt = (
+            f'<div style="font-size:11px;color:#9CA3AF;margin-top:4px;">'
+            f"{pct_afetados}% dos {total_equipamentos} equipamentos do departamento"
+            f"</div>"
+        )
 
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
@@ -313,6 +377,7 @@ def build_html_body(
       <tr><td style="padding:24px 32px 28px;">
         <table width="100%" cellpadding="0" cellspacing="0" style="background:#F9FAFB;border-radius:10px;border:1px solid #E5E7EB;">
           <tr>
+            <!-- Progresso -->
             <td style="padding:20px 24px;" width="50%">
               <div style="font-size:12px;color:#6B7280;margin-bottom:4px;">Progresso geral</div>
               <div style="font-size:32px;font-weight:700;color:{bar_color};">{pct_geral}%</div>
@@ -321,11 +386,17 @@ def build_html_body(
               </div>
               <div style="font-size:11px;color:#9CA3AF;margin-top:6px;">Semana {semana_atual} de {semanas_total}</div>
             </td>
+            <!-- Alertas — redesenhado para ser menos alarmante -->
             <td style="padding:20px 24px;border-left:1px solid #E5E7EB;" width="50%">
-              <div style="font-size:12px;color:#6B7280;margin-bottom:4px;">Alertas ativos</div>
-              <div style="font-size:32px;font-weight:700;color:{alerta_color};">{n_alertas if n_alertas else "✓"}</div>
-              <div style="font-size:13px;color:{alerta_color};margin-top:4px;font-weight:600;">{alerta_txt}</div>
-              <div style="font-size:11px;color:#9CA3AF;margin-top:6px;">Veja detalhes no PDF anexo</div>
+              <div style="font-size:12px;color:#6B7280;margin-bottom:6px;">{alerta_titulo}</div>
+              <div style="display:flex;align-items:baseline;gap:6px;">
+                <span style="font-size:28px;font-weight:700;color:{alerta_color};">{alerta_num}</span>
+                {f'<span style="font-size:12px;color:#9CA3AF;">de {total_equipamentos} equip.</span>' if total_equipamentos and n_alertas else ''}
+              </div>
+              <div style="font-size:12px;color:{alerta_color};margin-top:2px;font-weight:600;">{alerta_subtitulo}</div>
+              {context_txt}
+              {breakdown_html}
+              <div style="font-size:11px;color:#9CA3AF;margin-top:8px;">Detalhes completos no PDF anexo</div>
             </td>
           </tr>
         </table>
