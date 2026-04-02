@@ -116,6 +116,18 @@ def _build_tarefas_df(tarefas: list[dict]) -> pd.DataFrame:
         svc = t.get("servicos") or {}
         setor = (svc.get("setores") or {}).get("nome") or "—"
         status_raw = t.get("status") or "pendente"
+        semana_val = t.get("semana")
+        concluido = status_raw in ("concluido", "concluído", "nao_aplica")
+        semana_display = semana_val if semana_val else ("—" if concluido else "Aguardando")
+
+        color = _STATUS_COLOR.get(status_raw, "#8A9BAE")
+        bg = f"{color}22"
+        status_html = (
+            f'<span style="display:inline-block;padding:2px 9px;border-radius:6px;'
+            f'font-size:0.72rem;font-weight:600;background:{bg};color:{color};'
+            f'border:1px solid {color}44">'
+            f'{_STATUS_LABEL.get(status_raw, status_raw)}</span>'
+        )
         rows.append({
             "Serviço": svc.get("nome") or "—",
             "Setor": setor,
@@ -123,7 +135,7 @@ def _build_tarefas_df(tarefas: list[dict]) -> pd.DataFrame:
             "D": "●" if t.get("etapa_d") else "○",
             "R": "●" if t.get("etapa_r") else "○",
             "M": "●" if t.get("etapa_m") else "○",
-            "Semana": t.get("semana"),
+            "Semana": semana_display,
             "Observação": t.get("observacao") or "",
             "_order": {"travado": 0, "pendente": 1, "em_andamento": 2,
                        "concluido": 3, "nao_aplica": 4}.get(status_raw, 9),
@@ -231,7 +243,7 @@ def render_equipamento_dashboard() -> None:
                         "D": st.column_config.TextColumn("D", width="small", help="Diagnóstico"),
                         "R": st.column_config.TextColumn("R", width="small", help="Reparo"),
                         "M": st.column_config.TextColumn("M", width="small", help="Manutenção"),
-                        "Semana": st.column_config.NumberColumn("Semana", width="small"),
+                        "Semana": st.column_config.TextColumn("Semana", width="small"),
                         "Observação": st.column_config.TextColumn("Observação", width="large"),
                     },
                 )
