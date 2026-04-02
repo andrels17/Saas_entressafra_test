@@ -71,6 +71,7 @@ class RelatorioExecutivoPayload:
     heatmap_semanal: list[dict] | None = None
     # {atencao, critico, urgente}
     alertas_parados: dict | None = None
+    top_parados: list[dict] | None = None
 
 
 def _risk_color(pct: int) -> colors.Color:
@@ -276,7 +277,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         ('Departamentos', str(n_deptos), DARK),
         ('Equipamentos', str(payload.n_equip_total), DARK),
         ('Concluídos', str(payload.n_equip_concluidos), GREEN),
-        ('Alertas', str(payload.n_alertas_total), RED if payload.n_alertas_total else GREEN),
+        ('Equip. atenção', str(payload.n_alertas_total), RED if payload.n_alertas_total else GREEN),
     ])
 
     badge_data = [
@@ -545,6 +546,58 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         c.setLineWidth(0.3)
         c.line(16 * mm, y - row_h, w - 16 * mm, y - row_h)
         y -= row_h
+
+    ranking_parados = list(payload.top_parados or [])[:10]
+    if ranking_parados:
+        if y < 70 * mm:
+            footer()
+            c.showPage()
+            page_header('Equipamentos sem movimentação (Top 10)')
+            y = h - 20 * mm
+        c.setFillColor(FG)
+        c.setFont('Helvetica-Bold', 9)
+        c.drawString(16 * mm, y - 2 * mm, 'Top 10 equipamentos com maior tempo parado')
+        y -= 8 * mm
+        c.setFillColor(DARK)
+        c.rect(16 * mm, y - 7 * mm, w - 32 * mm, 7 * mm, fill=1, stroke=0)
+        c.setFillColor(colors.Color(0.6, 0.65, 0.7))
+        c.setFont('Helvetica-Bold', 7.5)
+        c.drawString(20 * mm, y - 5 * mm, '#')
+        c.drawString(28 * mm, y - 5 * mm, 'Equipamento')
+        c.drawString(104 * mm, y - 5 * mm, 'Departamento')
+        c.drawString(145 * mm, y - 5 * mm, 'Últ. semana')
+        c.drawRightString(w - 32 * mm, y - 5 * mm, 'Dias')
+        c.drawRightString(w - 18 * mm, y - 5 * mm, 'Prog.')
+        y -= 7 * mm
+        row_h = 8.5 * mm
+        for i, item in enumerate(ranking_parados, start=1):
+            if y - row_h < 18 * mm:
+                footer()
+                c.showPage()
+                page_header('Equipamentos sem movimentação (Top 10 cont.)')
+                y = h - 20 * mm
+            dias = int(item.get('dias_parado') or 0)
+            col = _stoppage_color(dias)
+            c.setFillColor(SURFACE if i % 2 == 1 else WHITE)
+            c.rect(16 * mm, y - row_h, w - 32 * mm, row_h, fill=1, stroke=0)
+            c.setFillColor(col)
+            c.rect(16 * mm, y - row_h, 3, row_h, fill=1, stroke=0)
+            c.setFillColor(FG)
+            c.setFont('Helvetica-Bold', 8)
+            c.drawString(20 * mm, y - row_h * 0.55, f'#{i}')
+            c.drawString(28 * mm, y - row_h * 0.55, str(item.get('frota') or '—')[:18])
+            c.setFont('Helvetica', 7.2)
+            c.setFillColor(MUTED)
+            c.drawString(45 * mm, y - row_h * 0.55, str(item.get('grupo') or '—')[:20])
+            c.drawString(104 * mm, y - row_h * 0.55, str(item.get('departamento') or item.get('grupo') or '—')[:22])
+            ult_sem = item.get('ultima_semana')
+            c.drawString(145 * mm, y - row_h * 0.55, f"Sem. {ult_sem}" if ult_sem else 'Sem registro')
+            c.setFillColor(col)
+            c.setFont('Helvetica-Bold', 8)
+            c.drawRightString(w - 32 * mm, y - row_h * 0.55, f'{dias}d')
+            c.setFillColor(FG)
+            c.drawRightString(w - 18 * mm, y - row_h * 0.55, f"{int(item.get('progresso') or 0)}%")
+            y -= row_h
 
     footer()
     c.showPage()

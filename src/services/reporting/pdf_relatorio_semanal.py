@@ -315,9 +315,9 @@ def build_weekly_pdf(payload: RelatorioDeptPayload) -> bytes:
 
         y -= 2 * (card_h_a + gap_a) + 6 * mm
         if payload.parados_detalhe:
-            y = section_title("Equipamentos sem movimentação", y)
-            rows = [["Frota", "Grupo", "Últ. semana", "Dias", "Progresso"]]
-            for item in payload.parados_detalhe[:12]:
+            y = section_title("Top 10 equipamentos com maior tempo parado", y)
+            rows = [["Frota", "Grupo", "Últ. semana", "Dias parado", "Progresso"]]
+            for item in payload.parados_detalhe[:10]:
                 rows.append([
                     str(item.get("frota") or "—"),
                     str(item.get("grupo") or "—")[:24],
