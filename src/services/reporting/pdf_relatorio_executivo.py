@@ -197,12 +197,11 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     n_amarelo = sum(1 for d in deptos if 50 <= real_pct_dept(d) < 80)
     n_vermelho = sum(1 for d in deptos if real_pct_dept(d) < 50)
     total_parados = sum(int(getattr(d, 'n_parados', 0) or 0) for d in deptos)
+    total_sem_mov = sum(int(getattr(d, 'n_sem_inicio', 0) or 0) for d in deptos)
     deptos_com_parados = [
-        d for d in deptos if int(
-            getattr(
-                d,
-                'n_parados',
-                0) or 0) > 0]
+        d for d in deptos if int(getattr(d, 'n_parados', 0) or 0) > 0]
+    deptos_com_sem_mov = [
+        d for d in deptos if int(getattr(d, 'n_sem_inicio', 0) or 0) > 0]
     maior_dias = max([int(getattr(d, 'max_dias_parado', 0) or 0)
                      for d in deptos] or [0])
     top_atrasados = sorted(deptos, key=lambda d: (
@@ -467,16 +466,16 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     footer()
     c.showPage()
 
-    # Página 3 - sem movimentação com alertas inteligentes
+    # Página 3 - sem movimentação (sem apontamento) + estagnação
     page_header('Equipamentos sem movimentação')
     y = h - 20 * mm
     y = mini_kpi_row(y,
-                     [('Equipamentos parados',
-                       str(total_parados),
-                         YELLOW if total_parados else GREEN),
+                     [('Sem movimentação',
+                       str(total_sem_mov),
+                         YELLOW if total_sem_mov else GREEN),
                          ('Departamentos afetados',
-                          str(len(deptos_com_parados)),
-                          RED if deptos_com_parados else GREEN),
+                          str(len(deptos_com_sem_mov)),
+                          RED if deptos_com_sem_mov else GREEN),
                          ('Maior tempo parado',
                           f"{maior_dias}d" if maior_dias else '0d',
                           _stoppage_color(maior_dias)),
@@ -498,17 +497,17 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     c.setFillColor(colors.Color(0.6, 0.65, 0.7))
     c.setFont('Helvetica-Bold', 7.5)
     c.drawString(20 * mm, y - 5 * mm, 'Departamento')
-    c.drawString(103 * mm, y - 5 * mm, 'Parados')
+    c.drawString(103 * mm, y - 5 * mm, 'Sem mov.')
     c.drawString(125 * mm, y - 5 * mm, 'Maior tempo')
     c.drawString(147 * mm, y - 5 * mm, 'Status')
     c.drawRightString(w - 18 * mm, y - 5 * mm, 'Impacto')
     y -= 7 * mm
-    linhas = deptos_com_parados or deptos
-    max_parados = max([int(getattr(d, 'n_parados', 0) or 0)
+    linhas = deptos_com_sem_mov or deptos
+    max_sem_mov = max([int(getattr(d, 'n_sem_inicio', 0) or 0)
                       for d in linhas] or [1])
     row_h = 10 * mm
     for i, dept in enumerate(sorted(linhas, key=lambda d: (-int(getattr(
-            d, 'n_parados', 0) or 0), -int(getattr(d, 'max_dias_parado', 0) or 0), d.nome))):
+            d, 'n_sem_inicio', 0) or 0), -int(getattr(d, 'max_dias_parado', 0) or 0), d.nome))):
         if y - row_h < 18 * mm:
             footer()
             c.showPage()
@@ -531,14 +530,15 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
                      f"{dept.n_equipamentos} equipamentos monitorados")
         c.setFillColor(FG)
         c.setFont('Helvetica-Bold', 8.5)
-        c.drawString(103 * mm, y - row_h * 0.5, str(n_par))
+        n_sem_mov = int(getattr(dept, 'n_sem_inicio', 0) or 0)
+        c.drawString(103 * mm, y - row_h * 0.5, str(n_sem_mov))
         c.drawString(125 * mm, y - row_h * 0.5, f"{max_d}d" if max_d else '—')
         c.setFillColor(bar_col)
         c.setFont('Helvetica-Bold', 7.2)
         c.drawString(147 * mm, y - row_h * 0.5, label)
         pbar(164 * mm, y - row_h + 2.4 * mm, 23 * mm, 5 * mm,
-             round((n_par / max(max_parados, 1)) * 100), color=bar_col)
-        impacto = f"{round((n_par / max(dept.n_equipamentos, 1)) * 100)}%" if dept.n_equipamentos else '0%'
+             round((n_sem_mov / max(max_sem_mov, 1)) * 100), color=bar_col)
+        impacto = f"{round((n_sem_mov / max(dept.n_equipamentos, 1)) * 100)}%" if dept.n_equipamentos else '0%'
         c.setFillColor(bar_col)
         c.setFont('Helvetica-Bold', 8.5)
         c.drawRightString(w - 18 * mm, y - row_h * 0.38, impacto)
@@ -549,7 +549,8 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
 
     ranking_parados = list(payload.top_parados or [])[:10]
     if ranking_parados:
-        if y < 70 * mm:
+        y -= 4 * mm
+        if y < 80 * mm:
             footer()
             c.showPage()
             page_header('Equipamentos sem movimentação (Top 10)')
