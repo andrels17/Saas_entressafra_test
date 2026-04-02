@@ -668,8 +668,19 @@ def _build_unified_rank_figure_cached(
 
     max_items = max([len(dept_records or []), len(group_records or []), len(equip_records or []), 1])
 
+    # Separado em dois update_layout para evitar conflito entre updatemenus (array prop)
+    # e o unpacking de DARK_LAYOUT — o Plotly não aceita misturá-los na mesma chamada.
+    apply_dark_theme(fig, height=max(420, 42 * max_items + 120))
     fig.update_layout(
         title="Visão consolidada — Departamentos",
+        margin=dict(l=10, r=90, t=110, b=10),
+        xaxis=dict(range=[0, 110], title="% Concluído",
+                   tickfont=dict(color="#8A9BAE"), title_font=dict(color="#8A9BAE")),
+        yaxis=dict(title="", type="category",
+                   tickfont=dict(color="#8A9BAE")),
+        showlegend=False,
+    )
+    fig.update_layout(
         updatemenus=[
             dict(
                 type="dropdown",
@@ -688,14 +699,6 @@ def _build_unified_rank_figure_cached(
                 buttons=buttons,
             )
         ],
-        **{**DARK_LAYOUT,
-           "height": max(420, 42 * max_items + 120),
-           "margin": dict(l=10, r=90, t=110, b=10),
-           "xaxis": dict(range=[0, 110], title="% Concluído",
-                         tickfont=dict(color="#8A9BAE"), title_font=dict(color="#8A9BAE")),
-           "yaxis": dict(title="", type="category",
-                         tickfont=dict(color="#8A9BAE")),
-           "showlegend": False},
     )
     return fig
 
