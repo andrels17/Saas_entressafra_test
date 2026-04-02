@@ -672,18 +672,18 @@ def _build_unified_rank_figure_cached(
         title="Visão consolidada — Departamentos",
         updatemenus=[
             dict(
-                type="buttons",
-                direction="right",
-                x=0.5,
-                xanchor="center",
+                type="dropdown",
+                direction="down",
+                x=1.0,
+                xanchor="right",
                 y=1.16,
                 yanchor="top",
                 showactive=True,
                 bgcolor="rgba(15, 23, 42, 0.98)",
-                bordercolor="rgba(148, 163, 184, 0.28)",
+                bordercolor="rgba(148, 163, 184, 0.22)",
                 borderwidth=1,
                 font=dict(color="#E8EDF5", size=12, family="DM Sans, sans-serif"),
-                pad=dict(t=8, r=8, b=8, l=8),
+                pad=dict(t=6, r=6, b=6, l=6),
                 buttons=buttons,
             )
         ],
@@ -721,7 +721,7 @@ def _render_unified_rank_chart(
         equip_df.to_dict("records"),
     )
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-    st.caption("Use o seletor acima do gráfico para alternar entre departamentos, grupos e equipamentos sem rerun.")
+    st.caption("Use o seletor no canto superior direito para alternar entre departamentos, grupos e equipamentos sem rerun.")
 
 
 @st.fragment
