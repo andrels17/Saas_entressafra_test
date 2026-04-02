@@ -18,6 +18,7 @@ import streamlit as st
 
 from src.auth.scope import get_my_scope
 from src.auth.permissions import can_view_all_data
+from src.ui.core.plotly_theme import apply_dark_theme
 from src.domain.kpi import calc_global_kpis, calc_dept_kpis
 from src.ui.core.styles import page_header
 from src.ui.components.feedback import selection_summary
@@ -345,12 +346,11 @@ def _fragment_tendencia(
         texttemplate="%{text:.0f}%", textposition="top center",
         hovertemplate="Semana %{x}<br>%{y:.0f}%<extra></extra>",
     )
+    apply_dark_theme(fig_t, height=340, xaxis_title="Semana", yaxis_title="% concluído")
     fig_t.update_layout(
-        height=340, margin=dict(l=12, r=12, t=10, b=10),
-        paper_bgcolor="#06080B", plot_bgcolor="#0C111A",
-        xaxis=dict(title="Semana", gridcolor="rgba(255,255,255,0.06)"),
-        yaxis=dict(title="% concluído", range=[0, 105], gridcolor="rgba(255,255,255,0.06)"),
-        font=dict(color="#E8EDF5", family="DM Sans, sans-serif", size=12),
+        margin=dict(l=12, r=12, t=10, b=10),
+        yaxis=dict(range=[0, 105], tickfont=dict(color="#8A9BAE"),
+                   title_font=dict(color="#8A9BAE")),
     )
     st.plotly_chart(fig_t, use_container_width=True,
                     config={"displayModeBar": False})
