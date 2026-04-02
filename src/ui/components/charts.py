@@ -2,6 +2,8 @@
 import plotly.express as px
 import pandas as pd
 
+from src.ui.core.plotly_theme import apply_dark_theme
+
 
 def horizontal_progress_bar(
         df: pd.DataFrame,
@@ -15,28 +17,13 @@ def horizontal_progress_bar(
         texttemplate="%{text:.1f}%" if (
             text or x) == x else "%{text}",
         textposition="outside",
+        textfont=dict(color="#F5F5F5"),
         cliponaxis=False)
-    fig.update_layout(
-        height=height,
-        margin=dict(
-            l=6,
-            r=50,
-            t=10,
-            b=10),
-        paper_bgcolor="#06080B",
-        plot_bgcolor="#0C111A")
+    apply_dark_theme(fig, height=height)
     return fig
 
 
 def line_timeline(df: pd.DataFrame, x: str, y: str, height: int = 280):
     fig = px.line(df, x=x, y=y, markers=True)
-    fig.update_layout(
-        height=height,
-        margin=dict(
-            l=6,
-            r=6,
-            t=10,
-            b=10),
-        paper_bgcolor="#06080B",
-        plot_bgcolor="#0C111A")
+    apply_dark_theme(fig, height=height)
     return fig
