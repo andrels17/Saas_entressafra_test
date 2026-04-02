@@ -301,23 +301,25 @@ def build_html_body(
     now = fmt_brt("%d/%m/%Y")
 
     # ── Card principal: equipamentos sem movimentação ─────────────────────
-    # Essa visão é mais útil ao gestor do que o bruto de alertas e evita a
-    # leitura enganosa de "X de Y equipamentos" quando X era soma de categorias.
-    if n_parados == 0:
+    # "Sem movimentação" aqui significa: sem nenhum apontamento realizado na
+    # revisão. "Parados" continua existindo no breakdown/ranking como métrica
+    # de estagnação por dias desde a última atividade.
+    sem_mov = int(n_sem_inicio or 0)
+    if sem_mov == 0:
         alerta_color = "#12B76A"
         alerta_titulo = "Equipamentos sem movimentação"
-        alerta_subtitulo = "Nenhum equipamento parado no período"
+        alerta_subtitulo = "Nenhum equipamento sem apontamento"
         alerta_num = "0"
-    elif max_dias_parado >= 14:
+    elif sem_mov == total_equipamentos and total_equipamentos:
         alerta_color = "#EF4444"
         alerta_titulo = "Equipamentos sem movimentação"
-        alerta_subtitulo = f"{n_parados} equipamento{'s' if n_parados != 1 else ''} parado{'s' if n_parados != 1 else ''} · até {max_dias_parado} dias"
-        alerta_num = str(n_parados)
+        alerta_subtitulo = "Toda a frota ainda sem apontamento"
+        alerta_num = str(sem_mov)
     else:
         alerta_color = "#F59E0B"
         alerta_titulo = "Equipamentos sem movimentação"
-        alerta_subtitulo = f"{n_parados} equipamento{'s' if n_parados != 1 else ''} parado{'s' if n_parados != 1 else ''}"
-        alerta_num = str(n_parados)
+        alerta_subtitulo = f"{sem_mov} equipamento{'s' if sem_mov != 1 else ''} sem apontamento"
+        alerta_num = str(sem_mov)
 
     # Breakdown pill — só aparece se houver breakdown disponível
     breakdown_parts = []
@@ -343,11 +345,11 @@ def build_html_body(
     # Contexto de equipamentos
     context_txt = ""
     if total_equipamentos:
-        pct_parados = round(n_parados / total_equipamentos * 100) if n_parados else 0
+        pct_sem_mov = round(sem_mov / total_equipamentos * 100) if sem_mov else 0
         context_txt = (
             f'<div style="font-size:11px;color:#9CA3AF;margin-top:4px;">'
-            f"{n_parados} de {total_equipamentos} equipamentos sem movimentação"
-            + (f" · {pct_parados}% da frota" if n_parados else "")
+            f"{sem_mov} de {total_equipamentos} equipamentos sem movimentação"
+            + (f" · {pct_sem_mov}% da frota" if sem_mov else "")
             + f"</div>"
         )
 
