@@ -35,9 +35,31 @@
     padding-bottom: 2rem !important;
     max-width: 1380px !important;
 }
-header[data-testid="stHeader"] { background: transparent !important; box-shadow: none !important; }
-#MainMenu, footer, .stDeployButton { visibility: hidden !important; display: none !important; }
+/* ── Ocultar chrome nativo do Streamlit ─────────────────────────── */
+/* Topbar: esconder completamente (Share, estrela, lápis, GitHub, Deploy) */
+header[data-testid="stHeader"] { display: none !important; }
+
+/* Menu hambúrguer, footer "Made with Streamlit", botão Deploy */
+#MainMenu,
+footer,
+.stDeployButton { visibility: hidden !important; display: none !important; }
+
+/* Barra de decoração (linha colorida no topo) */
 div[data-testid="stDecoration"] { display: none !important; }
+
+/* Toolbar de ações flutuantes (Share, editar, GitHub, Deploy) */
+div[data-testid="stToolbar"],
+div[data-testid="stActionButton"],
+button[data-testid="baseButton-headerNoPadding"],
+div[class*="StatusWidget"] { display: none !important; }
+
+/* Badge "Manage app" no canto inferior direito */
+div[data-testid="manage-app-button"],
+.viewerBadge_container__r5tak,
+[class*="viewerBadge"] { display: none !important; }
+
+/* Compensa o espaço que o header ocupava */
+.block-container { padding-top: 1rem !important; }
 
 /* ── Sidebar ────────────────────────────────────────────────────── */
 section[data-testid="stSidebar"] {
