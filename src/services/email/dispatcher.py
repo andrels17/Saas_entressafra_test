@@ -806,6 +806,7 @@ def _build_payload(
                     "frota": frota,
                     "modelo": modelo,
                     "grupo": grupo_nome,
+                    "departamento": departamento_nome,
                     "ultima_semana": ultima_semana,
                     "dias_parado": dias_sem_manut_efetivo,
                     "ultima_mov": ultima_mov,
@@ -1138,6 +1139,7 @@ def dispatch_relatorio_semanal(
                             n_risco_prazo=payload.n_risco_prazo,
                             total_equipamentos=payload.n_equipamentos,
                             max_dias_parado=max([int(x.get("dias_parado") or 0) for x in (payload.parados_detalhe or [])] or [0]),
+                            top_parados=(payload.parados_detalhe or [])[:10],
                         )
                         subject = (
                             f"[{payload.revisao_titulo}] Relatório Semanal — "
@@ -1193,6 +1195,7 @@ def dispatch_relatorio_semanal(
             # Constrói DeptSnapshot para cada grupo de departamento já
             # processado
             dept_snapshots: list[DeptSnapshot] = []
+            payloads_por_departamento: list[RelatorioDeptPayload] = []
             sem_atual_rev = _semana_atual(
                 revisao.get("data_inicio"), int(
                     revisao.get("semanas_total") or 1))
@@ -1271,6 +1274,8 @@ def dispatch_relatorio_semanal(
                             str(e.get("frota") or "")
                         )
                     )[:3]
+
+                    payloads_por_departamento.append(p)
 
                     dept_snapshots.append(DeptSnapshot(
                         nome=grp.departamento_nome,
@@ -1380,6 +1385,11 @@ def dispatch_relatorio_semanal(
                     trend_semanal=trend_semanal,
                     heatmap_semanal=heatmap_semanal,
                     alertas_parados=alertas_parados,
+                    top_parados=sorted([
+                        item
+                        for p in payloads_por_departamento
+                        for item in (p.parados_detalhe or [])
+                    ], key=lambda x: (-(int(x.get("dias_parado") or 0)), str(x.get("frota") or "")))[:10],
                 )
                 pdf_exec = build_executive_pdf(exec_payload)
                 pdf_name_e = f"relatorio_executivo_semana{sem_atual_rev}.pdf"
@@ -1418,6 +1428,11 @@ def dispatch_relatorio_semanal(
                                 n_risco_prazo=n_risc_exec,
                                 total_equipamentos=exec_payload.n_equip_total,
                                 max_dias_parado=max_dias_par_exec,
+                                top_parados=sorted([
+                                    item
+                                    for p in payloads_por_departamento
+                                    for item in (p.parados_detalhe or [])
+                                ], key=lambda x: (-(int(x.get("dias_parado") or 0)), str(x.get("frota") or "")))[:10],
                             )
                             send_email_with_retry(EmailMessage(
                                 to=all_exec_emails,

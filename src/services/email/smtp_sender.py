@@ -20,6 +20,7 @@ Configuração via st.secrets (ou variáveis de ambiente):
 from __future__ import annotations
 
 import logging
+from html import escape
 import smtplib
 import ssl
 import time
@@ -288,6 +289,7 @@ def build_html_body(
     n_risco_prazo: int = 0,
     total_equipamentos: int = 0,
     max_dias_parado: int = 0,
+    top_parados: list[dict] | None = None,
 ) -> str:
     """Gera o corpo HTML do e-mail."""
     if pct_geral >= 80:
@@ -349,6 +351,43 @@ def build_html_body(
             + f"</div>"
         )
 
+    ranking_parados_html = ""
+    ranking = list(top_parados or [])[:10]
+    if ranking:
+        rows = []
+        for idx, item in enumerate(ranking, start=1):
+            frota = escape(str(item.get("frota") or "—"))
+            grupo = escape(str(item.get("grupo") or "—"))
+            dias = int(item.get("dias_parado") or 0)
+            progresso = int(item.get("progresso") or 0)
+            ultima_semana = item.get("ultima_semana")
+            ultima_txt = f"Sem. {ultima_semana}" if ultima_semana else "Sem registro"
+            rows.append(
+                f'<tr>'
+                f'<td style="padding:10px 12px;border-top:1px solid #E5E7EB;font-size:12px;color:#111827;"><b>#{idx}</b></td>'
+                f'<td style="padding:10px 12px;border-top:1px solid #E5E7EB;font-size:12px;color:#111827;"><b>{frota}</b><div style="font-size:11px;color:#6B7280;margin-top:2px;">{grupo}</div></td>'
+                f'<td style="padding:10px 12px;border-top:1px solid #E5E7EB;font-size:12px;color:#B42318;font-weight:700;text-align:center;">{dias}d</td>'
+                f'<td style="padding:10px 12px;border-top:1px solid #E5E7EB;font-size:12px;color:#6B7280;text-align:center;">{ultima_txt}</td>'
+                f'<td style="padding:10px 12px;border-top:1px solid #E5E7EB;font-size:12px;color:#111827;text-align:center;">{progresso}%</td>'
+                f'</tr>'
+            )
+        ranking_parados_html = (
+            '<tr><td style="padding:0 32px 28px;">'
+            '<div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:10px;">Top 10 equipamentos com maior tempo parado</div>'
+            '<div style="font-size:12px;color:#6B7280;margin-bottom:12px;">Priorize estas frotas no follow-up operacional.</div>'
+            '<table width="100%" cellpadding="0" cellspacing="0" style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;overflow:hidden;">'
+            '<tr style="background:#F9FAFB;">'
+            '<td style="padding:10px 12px;font-size:11px;color:#6B7280;font-weight:700;">#</td>'
+            '<td style="padding:10px 12px;font-size:11px;color:#6B7280;font-weight:700;">Equipamento</td>'
+            '<td style="padding:10px 12px;font-size:11px;color:#6B7280;font-weight:700;text-align:center;">Dias</td>'
+            '<td style="padding:10px 12px;font-size:11px;color:#6B7280;font-weight:700;text-align:center;">Últ. sem.</td>'
+            '<td style="padding:10px 12px;font-size:11px;color:#6B7280;font-weight:700;text-align:center;">Progresso</td>'
+            '</tr>'
+            + ''.join(rows) +
+            '</table>'
+            '</td></tr>'
+        )
+
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -401,6 +440,8 @@ def build_html_body(
           </tr>
         </table>
       </td></tr>
+
+      {ranking_parados_html}
 
       <!-- Footer -->
       <tr><td style="background:#F9FAFB;padding:16px 32px;border-top:1px solid #E5E7EB;">
