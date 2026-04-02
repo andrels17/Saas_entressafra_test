@@ -36,6 +36,8 @@ class PageKey(str, Enum):
     ADM_TEMPLATES = "Admin - Templates"
     ADM_REVISOES = "Admin - Revisões"
     ADM_BRANDING = "Admin - Branding & Relatórios"
+    # Página de detalhe — não aparece no menu, acessada via busca global
+    EQUIP_DASHBOARD = "Equipamento"
 
 
 @dataclass(frozen=True)
@@ -77,6 +79,8 @@ _PAGE_DEFS: list[tuple[PageKey, str, str, str, frozenset[Role]]] = [
     (PageKey.ADM_TEMPLATES, "◪", "Templates", "admin", Role.ADMIN_ROLES),
     (PageKey.ADM_REVISOES, "◑", "Revisões", "admin", Role.ADMIN_ROLES),
     (PageKey.ADM_BRANDING, "◒", "Branding", "admin", Role.ADMIN_ROLES),
+    # Páginas de detalhe — group="detail" → ficam fora do menu (hidden route)
+    (PageKey.EQUIP_DASHBOARD, "◫", "Equipamento", "detail", frozenset()),
 ]
 
 PAGES: dict[PageKey, PageConfig] = {
