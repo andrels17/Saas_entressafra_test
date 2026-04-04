@@ -139,13 +139,24 @@ def build_alertas(
             if status == "travado" and (dias is None or dias >= dias_travado):
                 travados.append({**row, "Dias travado": dias if dias is not None else "?"})
 
-            if not t.get("etapa_d") and not t.get("etapa_r") and not t.get("etapa_m"):
-                if dias is None or dias >= dias_sem_update:
-                    sem_inicio.append({**row, "Dias sem update": dias if dias is not None else "?"})
+            # sem_inicio: nenhuma etapa marcada.
+            # Usa dt_etapa para nao confundir com updated_at de criacao da tarefa.
+            # So alerta se a revisao ja tem pelo menos dias_sem_update dias corridos.
+            nenhuma_etapa = (
+                not t.get("etapa_d") and not t.get("etapa_r") and not t.get("etapa_m")
+            )
+            dt_real = (t.get("dt_etapa_m") or t.get("dt_etapa_r") or t.get("dt_etapa_d"))
+            dias_real = dias_desde(dt_real)
+            dias_revisao = dias_desde(revisao.get("data_inicio"))
 
-            if status not in ("concluido", "nao_aplica", "travado"):
-                if dias is not None and dias >= dias_sem_update:
-                    sem_update.append({**row, "Dias parado": dias})
+            if nenhuma_etapa and status not in ("concluido", "nao_aplica"):
+                if dias_revisao is not None and dias_revisao >= dias_sem_update:
+                    sem_inicio.append({**row, "Dias sem update": dias_revisao})
+
+            # sem_update: teve apontamento real mas parou.
+            if status not in ("concluido", "nao_aplica", "travado") and not nenhuma_etapa:
+                if dias_real is not None and dias_real >= dias_sem_update:
+                    sem_update.append({**row, "Dias parado": dias_real})
 
         if pct < esperado_pct - 15 and pct < 100:
             atraso = esperado_pct - pct

@@ -1,4 +1,4 @@
-"""Página de notificações — ponto de entrada público."""
+"""Página de notificações — Feed in-app + Exportar + E-mail."""
 from __future__ import annotations
 
 import streamlit as st
@@ -15,20 +15,17 @@ from src.utils.nav import get_current_revisao
 
 from .data import load_data, build_alertas
 from .fragments import (
-    fragment_travados, fragment_sem_inicio,
-    fragment_parados, fragment_risco_prazo, fragment_resumo_grupos,
-    fragment_disparo_manual, fragment_configurar_agendamento,
+    fragment_disparo_manual,
+    fragment_configurar_agendamento,
 )
 
-
-# ── Cores e helpers visuais ──────────────────────────────────────────────────
-
-_CAT_META = {
-    "travados":    {"icon": "⛔", "label": "Travados",      "color": "#C53030", "bg": "rgba(197,48,48,0.12)"},
-    "sem_inicio":  {"icon": "⬜", "label": "Sem início",    "color": "#718096", "bg": "rgba(113,128,150,0.12)"},
-    "sem_update":  {"icon": "⏸",  "label": "Parados",       "color": "#D69E2E", "bg": "rgba(214,158,46,0.12)"},
-    "risco_prazo": {"icon": "⚠️", "label": "Risco de prazo","color": "#D69E2E", "bg": "rgba(214,158,46,0.12)"},
-}
+# ── Metadados visuais por categoria ─────────────────────────────────────────
+_CATS = [
+    ("travados",    "⛔", "Travados",       "#C53030", "rgba(197,48,48,0.12)"),
+    ("sem_update",  "⏸",  "Parados",        "#D69E2E", "rgba(214,158,46,0.12)"),
+    ("risco_prazo", "⚠️", "Risco de prazo", "#D69E2E", "rgba(214,158,46,0.10)"),
+    ("sem_inicio",  "⬜", "Sem início",      "#718096", "rgba(113,128,150,0.10)"),
+]
 
 
 def _lidos_key(revisao_id: str) -> str:
@@ -46,65 +43,14 @@ def _is_lido(revisao_id: str, cat: str) -> bool:
     return cat in st.session_state.get(_lidos_key(revisao_id), set())
 
 
-def _render_feed_card(cat: str, df, revisao_id: str) -> None:
-    """Renderiza um card de alerta no feed com marcação de lido."""
-    meta = _CAT_META[cat]
-    lido = _is_lido(revisao_id, cat)
-    n = len(df)
-
-    border_color = "rgba(255,255,255,0.06)" if lido else meta["color"] + "55"
-    opacity = "0.55" if lido else "1"
-    lido_badge = (
-        '<span style="font-size:0.68rem;color:#38A169;font-weight:600;'
-        'background:rgba(56,161,105,0.12);padding:2px 8px;border-radius:999px;'
-        'border:1px solid rgba(56,161,105,0.3)">✓ Visto</span>'
-        if lido else ""
-    )
-
-    st.markdown(
-        f"""
-        <div style="
-            border:1px solid {border_color};
-            border-left: 3px solid {meta['color'] if not lido else 'rgba(255,255,255,0.1)'};
-            border-radius:10px;
-            padding:14px 16px;
-            margin-bottom:10px;
-            background:{meta['bg'] if not lido else 'rgba(255,255,255,0.02)'};
-            opacity:{opacity};
-        ">
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-                <div style="display:flex;align-items:center;gap:10px">
-                    <span style="font-size:1.3rem">{meta['icon']}</span>
-                    <div>
-                        <div style="font-weight:700;font-size:0.9rem;color:#E8EDF5">
-                            {meta['label']}
-                        </div>
-                        <div style="font-size:0.78rem;color:#8A9BAE;margin-top:1px">
-                            {'Nenhuma ocorrência' if n == 0 else f'{n} ocorrência{"s" if n > 1 else ""}'}
-                        </div>
-                    </div>
-                </div>
-                {lido_badge}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def _render_resumo_header(alertas: dict, revisao: dict) -> None:
-    """Card de resumo visual no topo da página."""
-    sem = alertas["semana_atual"]
-    tot = alertas["semanas_total"]
+def _render_header_card(alertas: dict, revisao: dict) -> None:
+    """Card de resumo no topo com status geral e métricas."""
     n_trav = len(alertas["travados"])
     n_sem  = len(alertas["sem_inicio"])
     n_par  = len(alertas["sem_update"])
     n_risc = len(alertas["risco_prazo"])
     total  = n_trav + n_sem + n_par + n_risc
 
-    rev_titulo = revisao.get("titulo", "—")
-
-    # Cor geral: vermelho se travados, amarelo se outros alertas, verde se tudo ok
     if n_trav > 0:
         bar_color, status_txt = "#C53030", "Atenção crítica"
     elif (n_par + n_risc) > 0:
@@ -112,46 +58,118 @@ def _render_resumo_header(alertas: dict, revisao: dict) -> None:
     else:
         bar_color, status_txt = "#38A169", "Tudo em ordem"
 
-    st.markdown(
-        f"""
-        <div style="
-            background:linear-gradient(135deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02));
-            border:1px solid rgba(255,255,255,0.08);
-            border-left:3px solid {bar_color};
-            border-radius:12px;padding:16px 20px;margin-bottom:20px
-        ">
-            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-                <div>
-                    <div style="font-size:0.68rem;font-weight:600;color:#8A9BAE;
-                                letter-spacing:0.08em;text-transform:uppercase;margin-bottom:3px">
-                        Revisão ativa
-                    </div>
-                    <div style="font-size:1rem;font-weight:700;color:#E8EDF5">{rev_titulo}</div>
-                    <div style="font-size:0.78rem;color:#8A9BAE;margin-top:2px">
-                        Semana <b style="color:#E8EDF5">{sem}</b> de <b style="color:#E8EDF5">{tot}</b>
-                    </div>
-                </div>
-                <div style="text-align:right">
-                    <div style="font-size:1.4rem;font-weight:800;color:{bar_color}">{total}</div>
-                    <div style="font-size:0.72rem;color:#8A9BAE">alerta{"s" if total != 1 else ""} ativos</div>
-                    <div style="font-size:0.72rem;color:{bar_color};font-weight:600;margin-top:2px">{status_txt}</div>
-                </div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    sem     = alertas["semana_atual"]
+    tot_sem = alertas["semanas_total"]
+    titulo  = revisao.get("titulo", "—")
 
-    # Métricas rápidas
+    col_info, col_num = st.columns([3, 1])
+    with col_info:
+        st.markdown(
+            f'<div style="font-size:0.68rem;font-weight:600;color:#8A9BAE;'
+            f'letter-spacing:0.08em;text-transform:uppercase;margin-bottom:3px">'
+            f'Revisão ativa</div>'
+            f'<div style="font-size:1.05rem;font-weight:700;color:#E8EDF5;margin-bottom:2px">'
+            f'{titulo}</div>'
+            f'<div style="font-size:0.78rem;color:#8A9BAE">'
+            f'Semana <b style="color:#E8EDF5">{sem}</b> de '
+            f'<b style="color:#E8EDF5">{tot_sem}</b></div>',
+            unsafe_allow_html=True,
+        )
+    with col_num:
+        st.metric(
+            "Alertas ativos",
+            total,
+            delta=status_txt,
+            delta_color="inverse" if total > 0 else "off",
+        )
+
+    st.divider()
+
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("⛔ Travados",      n_trav, delta_color="inverse" if n_trav else "off",
+    c1.metric("⛔ Travados",       n_trav, delta_color="inverse" if n_trav else "off",
               delta="crítico" if n_trav else "ok")
-    c2.metric("⬜ Sem início",    n_sem,  delta_color="inverse" if n_sem  else "off",
-              delta="atenção" if n_sem else "ok")
-    c3.metric("⏸ Parados",        n_par,  delta_color="inverse" if n_par  else "off",
-              delta="atenção" if n_par else "ok")
+    c2.metric("⬜ Sem início",     n_sem,  delta_color="inverse" if n_sem  else "off",
+              delta="atenção" if n_sem  else "ok")
+    c3.metric("⏸ Parados",         n_par,  delta_color="inverse" if n_par  else "off",
+              delta="atenção" if n_par  else "ok")
     c4.metric("⚠️ Risco de prazo", n_risc, delta_color="inverse" if n_risc else "off",
-              delta="atraso" if n_risc else "no prazo")
+              delta="atraso"  if n_risc else "no prazo")
+
+
+def _render_alert_card(cat: str, icon: str, label: str, color: str, bg: str,
+                       df, revisao_id: str) -> None:
+    """Card individual de alerta com detalhes inline expansíveis."""
+    lido = _is_lido(revisao_id, cat)
+    n = len(df)
+
+    if n == 0 and cat != "travados":
+        return  # oculta categorias vazias exceto travados
+
+    border = f"rgba(255,255,255,0.06)" if lido else f"{color}55"
+    left_border = "rgba(255,255,255,0.10)" if lido else color
+    card_bg = "rgba(255,255,255,0.02)" if lido else bg
+    text_opacity = "0.5" if lido else "1"
+
+    # ── Card header ──
+    with st.container():
+        col_icon, col_text, col_badge = st.columns([0.08, 0.7, 0.22])
+        with col_icon:
+            st.markdown(
+                f'<div style="font-size:1.4rem;line-height:1;padding-top:4px;'
+                f'opacity:{text_opacity}">{icon}</div>',
+                unsafe_allow_html=True,
+            )
+        with col_text:
+            ocorrencias = "Nenhuma ocorrência" if n == 0 else f"{n} ocorrência{'s' if n > 1 else ''}"
+            st.markdown(
+                f'<div style="opacity:{text_opacity}">'
+                f'<b style="font-size:0.92rem;color:#E8EDF5">{label}</b><br>'
+                f'<span style="font-size:0.75rem;color:#8A9BAE">{ocorrencias}</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        with col_badge:
+            if lido:
+                st.markdown(
+                    '<div style="text-align:right;padding-top:4px">'
+                    '<span style="font-size:0.68rem;color:#38A169;font-weight:600;'
+                    'background:rgba(56,161,105,0.12);padding:3px 10px;border-radius:999px;'
+                    'border:1px solid rgba(56,161,105,0.3)">✓ Visto</span></div>',
+                    unsafe_allow_html=True,
+                )
+            elif n > 0:
+                if st.button(
+                    "Marcar como visto",
+                    key=f"ntf_lido_{cat}",
+                    type="tertiary",
+                    use_container_width=True,
+                ):
+                    _marcar_lido(revisao_id, cat)
+                    st.rerun()
+
+        # Linha colorida abaixo do card
+        st.markdown(
+            f'<div style="height:2px;background:linear-gradient('
+            f'90deg,{left_border},transparent);border-radius:999px;margin:4px 0 10px"></div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── Detalhes inline (expander) ──
+    if n > 0 and not lido:
+        with st.expander(f"Ver {n} ocorrência{'s' if n > 1 else ''}", expanded=False):
+            cols_priority = {
+                "travados":    ["Frota", "Modelo", "Grupo", "Setor", "Serviço", "Dias travado", "Obs."],
+                "sem_update":  ["Frota", "Modelo", "Grupo", "Setor", "Serviço", "Dias parado"],
+                "risco_prazo": ["Frota", "Modelo", "Grupo", "% Atual", "% Esperado", "Atraso (p.p.)"],
+                "sem_inicio":  ["Frota", "Modelo", "Grupo", "Setor", "Serviço", "Dias sem update"],
+            }
+            cols_show = [c for c in cols_priority.get(cat, df.columns.tolist())
+                         if c in df.columns]
+            sort_col = {"travados": "Dias travado", "sem_update": "Dias parado",
+                        "risco_prazo": "Atraso (p.p.)", "sem_inicio": "Dias sem update"}.get(cat)
+            df_show = df[cols_show].sort_values(sort_col, ascending=False) \
+                if sort_col and sort_col in df.columns else df[cols_show]
+            st.dataframe(df_show, use_container_width=True, hide_index=True)
 
 
 def render_notificacoes() -> None:
@@ -172,19 +190,19 @@ def render_notificacoes() -> None:
         )
         return
 
-    # ── Thresholds (colapsado por padrão) ────────────────────────────────────
+    # ── Thresholds ────────────────────────────────────────────────────────────
     with st.expander("⚙️ Configurar thresholds", expanded=False):
         tc1, tc2 = st.columns(2)
         with tc1:
             dias_travado = st.number_input(
                 "Alertar travado há (dias)", min_value=1, max_value=30, value=2, step=1,
-                key="ntf_dias_trav", help="Tarefas com status 'travado' há pelo menos X dias.")
+                key="ntf_dias_trav")
         with tc2:
             dias_sem_update = st.number_input(
                 "Alertar parado há (dias)", min_value=1, max_value=30, value=5, step=1,
-                key="ntf_dias_upd", help="Tarefas não concluídas sem atualização há X dias.")
+                key="ntf_dias_upd")
 
-    # ── Carregamento ──────────────────────────────────────────────────────────
+    # ── Dados ─────────────────────────────────────────────────────────────────
     with st.spinner("", show_time=False):
         raw = load_data(tenant_id, revisao_id, ver, st.session_state.get("sb_access_token", ""))
 
@@ -197,7 +215,7 @@ def render_notificacoes() -> None:
                     tone="warning")
         return
 
-    # ── Filtro de escopo ──────────────────────────────────────────────────────
+    # ── Escopo ────────────────────────────────────────────────────────────────
     role = current_role()
     is_admin = Role.is_admin(role)
     dep_ids, grp_ids = get_my_scope(tenant_id)
@@ -211,102 +229,64 @@ def render_notificacoes() -> None:
 
     alertas = build_alertas(tarefas, revisao, int(dias_travado), int(dias_sem_update))
 
-    # ── Abas principais ───────────────────────────────────────────────────────
-    tab_feed, tab_trav, tab_sem, tab_par, tab_risc, tab_grupos, tab_export, tab_email = st.tabs([
-        "🔔 Feed",
-        f"⛔ Travados ({len(alertas['travados'])})",
-        f"⬜ Sem início ({len(alertas['sem_inicio'])})",
-        f"⏸ Parados ({len(alertas['sem_update'])})",
-        f"⚠️ Risco ({len(alertas['risco_prazo'])})",
-        "📊 Por grupo",
-        "⬇️ Exportar",
-        "📧 E-mail",
-    ])
+    # ── Abas: Feed | Exportar | E-mail ────────────────────────────────────────
+    tab_feed, tab_export, tab_email = st.tabs(["🔔 Feed", "⬇️ Exportar", "📧 E-mail"])
 
-    # ── Feed (nova aba principal) ─────────────────────────────────────────────
+    # ── Feed ──────────────────────────────────────────────────────────────────
     with tab_feed:
-        _render_resumo_header(alertas, revisao)
-        st.divider()
+        _render_header_card(alertas, revisao)
 
-        total_alertas = (len(alertas["travados"]) + len(alertas["sem_inicio"])
-                         + len(alertas["sem_update"]) + len(alertas["risco_prazo"]))
+        total_alertas = sum(len(alertas[c]) for c in
+                            ["travados", "sem_inicio", "sem_update", "risco_prazo"])
 
         if total_alertas == 0:
+            st.divider()
             notice_card(
-                "Nenhum alerta crítico ✅",
-                "Com os parâmetros atuais, a revisão não possui ocorrências em alerta.",
+                "Tudo em ordem ✅",
+                "Nenhuma ocorrência encontrada com os parâmetros configurados.",
                 tone="success",
             )
         else:
-            col_feed, col_acoes = st.columns([3, 1])
-            with col_acoes:
-                st.caption("Ações")
+            # Ações rápidas
+            col_mark, col_clear, _ = st.columns([1.4, 1.2, 2])
+            with col_mark:
                 if st.button("✓ Marcar tudo como visto", key="ntf_mark_all",
                              use_container_width=True, type="tertiary"):
-                    for cat in ["travados", "sem_inicio", "sem_update", "risco_prazo"]:
+                    for cat, *_ in _CATS:
                         _marcar_lido(revisao_id, cat)
                     st.rerun()
+            with col_clear:
                 if st.button("↺ Limpar marcações", key="ntf_clear_lidos",
                              use_container_width=True, type="tertiary"):
                     st.session_state.pop(_lidos_key(revisao_id), None)
                     st.rerun()
 
-            with col_feed:
-                st.caption("Clique em uma categoria para ver os detalhes nas abas.")
-                for cat, df in [
-                    ("travados",    alertas["travados"]),
-                    ("sem_update",  alertas["sem_update"]),
-                    ("risco_prazo", alertas["risco_prazo"]),
-                    ("sem_inicio",  alertas["sem_inicio"]),
-                ]:
-                    if len(df) > 0 or cat == "travados":
-                        _render_feed_card(cat, df, revisao_id)
-                        if len(df) > 0 and not _is_lido(revisao_id, cat):
-                            if st.button(
-                                f"Marcar '{_CAT_META[cat]['label']}' como visto",
-                                key=f"ntf_lido_{cat}",
-                                type="tertiary",
-                            ):
-                                _marcar_lido(revisao_id, cat)
-                                st.rerun()
+            st.divider()
 
-    # ── Abas de detalhe ───────────────────────────────────────────────────────
-    with tab_trav:
-        fragment_travados(alertas["travados"])
+            # Cards de alerta
+            for cat, icon, label, color, bg in _CATS:
+                _render_alert_card(cat, icon, label, color, bg,
+                                   alertas[cat], revisao_id)
 
-    with tab_sem:
-        fragment_sem_inicio(alertas["sem_inicio"])
-
-    with tab_par:
-        fragment_parados(alertas["sem_update"])
-
-    with tab_risc:
-        fragment_risco_prazo(alertas["risco_prazo"])
-
-    with tab_grupos:
-        fragment_resumo_grupos(alertas)
-
+    # ── Exportar ──────────────────────────────────────────────────────────────
     with tab_export:
         from .pdf import build_pdf_alertas
         from src.ui.components.actions import download_action
+
         st.markdown("### ⬇️ Exportações")
         st.caption("Baixe os alertas em formato CSV por categoria ou PDF consolidado.")
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("**CSV por categoria**")
-            for df, label, fname in [
-                (alertas["travados"],    "Travados",    "alertas_travados.csv"),
-                (alertas["sem_inicio"],  "Sem início",  "alertas_sem_inicio.csv"),
-                (alertas["sem_update"],  "Parados",     "alertas_parados.csv"),
-                (alertas["risco_prazo"], "Risco prazo", "alertas_risco_prazo.csv"),
-            ]:
+            for cat_key, _, cat_label, _, _ in _CATS:
+                df = alertas[cat_key]
                 if not df.empty:
                     cols_pub = [c for c in df.columns if c != "dept_id"]
                     st.download_button(
-                        f"⬇️ {label}",
+                        f"⬇️ {cat_label}",
                         data=df[cols_pub].to_csv(index=False).encode("utf-8"),
-                        file_name=fname, mime="text/csv",
-                        use_container_width=True, key=f"dl_exp_{fname}",
+                        file_name=f"alertas_{cat_key}.csv", mime="text/csv",
+                        use_container_width=True, key=f"dl_exp_{cat_key}",
                     )
         with col2:
             st.markdown("**PDF consolidado**")
@@ -332,9 +312,9 @@ def render_notificacoes() -> None:
         st.divider()
         fragment_configurar_agendamento(tenant_id, is_admin)
 
-    # ── Botão atualizar ───────────────────────────────────────────────────────
+    # ── Atualizar ─────────────────────────────────────────────────────────────
     if refresh_button("ntf_refresh", label="Atualizar alertas",
-                      help="Reprocessa os alertas com base nos dados atuais."):
+                      help="Reprocessa os alertas com os dados atuais."):
         bump_data_version()
         clear_cached_functions(load_data)
         st.rerun()
