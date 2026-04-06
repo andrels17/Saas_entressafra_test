@@ -397,130 +397,92 @@ def load_manager_print_options(tid: str, ver: str = "0", _token: str = "") -> li
     return sorted(gestores, key=lambda x: str(x.get("gestor_nome") or "").lower())
 
 
-def _load_group_tasks(tid: str, revisao_id: str, grupo_id: str, token: str = "") -> list[dict]:
-    sb = get_supabase_anon()
-    if token:
-        sb.postgrest.auth(token)
+def _extract_semana_revisao(*dfs):
+    """Retorna ultima semana encontrada + 1, usando a mesma heurística da Matriz."""
+    for df in dfs:
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            continue
+        for col in df.columns:
+            if "semana" not in str(col).lower():
+                continue
+            try:
+                vals = df[col].astype(str).str.extract(r"(\d+)", expand=False)
+                nums = pd.to_numeric(vals, errors="coerce").dropna()
+                if not nums.empty:
+                    return int(nums.max()) + 1
+            except Exception:
+                continue
+    return None
+
+
+def _build_group_pdf_same_as_matriz(
+    tid: str,
+    revisao_id: str,
+    grupo_id: str,
+    grupo_nome: str,
+    revisao: dict,
+    token: str = "",
+) -> bytes | None:
+    """Gera exatamente o mesmo PDF da aba Matriz -> Exportações para um grupo."""
     try:
-        return (
-            sb.table("tarefas_servico")
-            .select(
-                "id,status,observacao,semana,etapa_d,etapa_r,etapa_m,updated_at,"
-                "servicos(id,nome,setor_id,setores(nome)),"
-                "equipamentos(id,frota,modelo,grupo_id,equip_grupos(id,nome,departamento_id))"
-            )
-            .eq("tenant_id", tid)
-            .eq("revisao_id", revisao_id)
-            .eq("equipamentos.grupo_id", grupo_id)
-            .order("updated_at", desc=True)
-            .execute()
-            .data
-        ) or []
+        from src.ui.pages.matriz_modular.data import _load_payload
+        from src.ui.pages.matriz_modular.context import (
+            _build_eq_labels,
+            _build_resumo_df,
+            _build_sector_tables_for_export,
+            _build_view_agg,
+        )
+        from src.ui.pages.matriz_modular.pdf_export import _build_pdf_tables
     except Exception:
-        return []
+        return None
 
+    payload = _load_payload(
+        tid,
+        grupo_id,
+        revisao_id,
+        10000,
+        st.session_state.get("data_version", "0"),
+        token,
+    ) or {}
 
-def _group_rows_to_dataframe(rows: list[dict]) -> pd.DataFrame:
-    items = []
-    for t in rows or []:
-        eq = t.get("equipamentos") or {}
-        svc = t.get("servicos") or {}
-        setor = (svc.get("setores") or {}).get("nome") or "—"
-        items.append({
-            "Equipamento": eq.get("frota") or eq.get("id") or "—",
-            "Modelo": eq.get("modelo") or "—",
-            "Setor": setor,
-            "Serviço": svc.get("nome") or "—",
-            "D": "OK" if t.get("etapa_d") else "",
-            "R": "OK" if t.get("etapa_r") else "",
-            "M": "OK" if t.get("etapa_m") else "",
-            "Status": t.get("status") or "pendente",
-            "Obs.": t.get("observacao") or "",
-        })
-    if not items:
-        return pd.DataFrame(columns=["Equipamento", "Modelo", "Setor", "Serviço", "D", "R", "M", "Status", "Obs."])
-    df = pd.DataFrame(items)
-    return df.sort_values(["Setor", "Equipamento", "Serviço"], kind="stable").reset_index(drop=True)
+    eqs = payload.get("eqs") or []
+    all_services = payload.get("all_s") or []
+    setor_to_services = payload.get("s2s") or {}
+    tarefas = payload.get("tarefas") or []
+    if not eqs or not all_services or not setor_to_services:
+        return None
 
-
-def _build_group_pdf(*, revisao_titulo: str, semana_atual: int, gestor_nome: str, grupo_nome: str, departamento_nome: str, df: pd.DataFrame) -> bytes:
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4, landscape
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import cm
-    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-
-    mem = io.BytesIO()
-    doc = SimpleDocTemplate(
-        mem,
-        pagesize=landscape(A4),
-        leftMargin=0.7 * cm,
-        rightMargin=0.7 * cm,
-        topMargin=0.8 * cm,
-        bottomMargin=0.8 * cm,
-    )
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "ntf_zip_title",
-        parent=styles["Heading1"],
-        fontName="Helvetica-Bold",
-        fontSize=14,
-        leading=16,
-        textColor=colors.HexColor("#111827"),
-        spaceAfter=4,
-    )
-    meta_style = ParagraphStyle(
-        "ntf_zip_meta",
-        parent=styles["BodyText"],
-        fontName="Helvetica",
-        fontSize=9,
-        leading=11,
-        textColor=colors.HexColor("#475569"),
-        spaceAfter=2,
-    )
-
-    cols = [c for c in ["Equipamento", "Modelo", "Setor", "Serviço", "D", "R", "M", "Status", "Obs."] if c in df.columns]
-    data_tbl = [cols] + df[cols].fillna("").astype(str).values.tolist()
-    usable = landscape(A4)[0] - (1.4 * cm)
-    widths = {
-        "Equipamento": 2.5 * cm,
-        "Modelo": 3.2 * cm,
-        "Setor": 3.0 * cm,
-        "Serviço": 7.0 * cm,
-        "D": 0.9 * cm,
-        "R": 0.9 * cm,
-        "M": 0.9 * cm,
-        "Status": 2.0 * cm,
-        "Obs.": 6.0 * cm,
+    task_map = {
+        (str(t.get("equipamento_id") or ""), str(t.get("servico_id") or "")): t
+        for t in tarefas
+        if t.get("equipamento_id") and t.get("servico_id")
     }
-    col_widths = [widths.get(c, usable / max(len(cols), 1)) for c in cols]
+    eq_label, eq_label_short = _build_eq_labels(eqs, set())
+    resumo_df, _, _, _ = _build_resumo_df(eqs, all_services, task_map, eq_label)
+    sector_tables_for_export = _build_sector_tables_for_export(eqs, setor_to_services, task_map, eq_label_short)
+    view_agg = _build_view_agg(eqs, all_services, task_map, eq_label)
+    tarefas_df = pd.DataFrame(tarefas) if tarefas else pd.DataFrame()
 
-    tbl = Table(data_tbl, repeatRows=1, colWidths=col_widths)
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F172A")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("LEADING", (0, 0), (-1, -1), 9),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#CBD5E1")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("ALIGN", (4, 1), (6, -1), "CENTER"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 4),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ]))
+    semana_revisao = _extract_semana_revisao(
+        resumo_df,
+        view_agg if isinstance(view_agg, pd.DataFrame) else pd.DataFrame(),
+        pd.concat(
+            [df for _, df in sector_tables_for_export if isinstance(df, pd.DataFrame)],
+            ignore_index=True,
+            sort=False,
+        ) if sector_tables_for_export else pd.DataFrame(),
+        tarefas_df,
+    )
 
-    story = [
-        Paragraph(f"Matriz para impressão · {grupo_nome}", title_style),
-        Paragraph(f"Revisão: <b>{revisao_titulo}</b>", meta_style),
-        Paragraph(f"Semana: <b>{int(semana_atual or 1)}</b> · Departamento: <b>{departamento_nome}</b> · Gestor: <b>{gestor_nome}</b>", meta_style),
-        Spacer(1, 0.25 * cm),
-        tbl,
-    ]
-    doc.build(story)
-    return mem.getvalue()
+    return _build_pdf_tables(
+        titulo=revisao.get("titulo") or "Revisão",
+        grupo_nome=grupo_nome,
+        resumo_df=resumo_df.copy() if isinstance(resumo_df, pd.DataFrame) else pd.DataFrame(),
+        sector_tables=[(setor_nome, setor_df.copy()) for setor_nome, setor_df in (sector_tables_for_export or [])],
+        semana_revisao=semana_revisao,
+        tarefas_servico_df=tarefas_df.copy() if isinstance(tarefas_df, pd.DataFrame) else None,
+        revisao_id=revisao_id,
+    )
 
 
 def build_manager_print_zip(
@@ -531,37 +493,34 @@ def build_manager_print_zip(
     semana_atual: int,
     _token: str = "",
 ) -> bytes:
-    """Gera ZIP com um PDF por grupo selecionado."""
+    """Gera ZIP com 1 PDF por grupo, usando exatamente o layout da Matriz."""
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
         for item in selections or []:
             gid = str(item.get("grupo_id") or "")
+            grupo_nome = str(item.get("grupo_nome") or gid)
             if not gid:
                 continue
-            rows = _load_group_tasks(tid, revisao_id, gid, _token)
-            df = _group_rows_to_dataframe(rows)
-            if df.empty:
-                continue
-            pdf_bytes = _build_group_pdf(
-                revisao_titulo=revisao.get("titulo") or "Revisão",
-                semana_atual=int(semana_atual or 1),
-                gestor_nome=item.get("gestor_nome") or "Gestor",
-                grupo_nome=item.get("grupo_nome") or gid,
-                departamento_nome=item.get("departamento_nome") or "—",
-                df=df,
+
+            pdf_bytes = _build_group_pdf_same_as_matriz(
+                tid=tid,
+                revisao_id=revisao_id,
+                grupo_id=gid,
+                grupo_nome=grupo_nome,
+                revisao=revisao,
+                token=_token,
             )
+            if not pdf_bytes:
+                continue
+
             fname = (
                 f"Semana_{int(semana_atual or 1):02d}__"
                 f"{_slugify(item.get('gestor_nome') or 'Gestor')}__"
-                f"{_slugify(item.get('grupo_nome') or gid)}.pdf"
+                f"{_slugify(grupo_nome)}.pdf"
             )
             zf.writestr(fname, pdf_bytes)
     return mem.getvalue()
 
 
-# Compatibilidade com versões anteriores dos imports
+# Compatibilidade com versões anteriores
 load_manager_print_targets = load_manager_print_options
-
-
-def build_manager_print_targets(*args, **kwargs):
-    return load_manager_print_options(*args, **kwargs)
