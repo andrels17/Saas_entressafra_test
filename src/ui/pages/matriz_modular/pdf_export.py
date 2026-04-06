@@ -40,6 +40,7 @@ def _compute_setor_ok_counts(eqs, setor_to_services, task_map):
     return rows
 
 
+# Melhoria 6: definida fora do loop
 def _style_heatmap(df_: pd.DataFrame) -> pd.DataFrame:
     s = pd.DataFrame("", index=df_.index, columns=df_.columns)
     for col in df_.columns:
@@ -84,16 +85,6 @@ def _merge_sector_tables(sector_tables):
             continue
 
         work = df.copy()
-
-        cols_validas = ["Equipamento"]
-        for col in work.columns:
-            if col in ("Equipamento", "%", "Status"):
-                continue
-            serie = work[col].astype(str).str.strip().str.upper()
-            if (serie != "").any():
-                cols_validas.append(col)
-        work = work[cols_validas]
-
         local_cols = ["Equipamento"]
         service_groups = []
         order_map = {"D": 0, "R": 1, "M": 2}
@@ -175,9 +166,9 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
     from src.utils.timezone import fmt_brt as _fmt_brt
 
     PAGE = landscape(A4)
-    LMARGIN = RMARGIN = 0.7 * cm
-    TMARGIN = 0.7 * cm
-    BMARGIN = 0.8 * cm
+    LMARGIN = RMARGIN = 0.6 * cm
+    TMARGIN = 0.6 * cm
+    BMARGIN = 0.7 * cm
     pw = PAGE[0] - LMARGIN - RMARGIN
 
     sty = getSampleStyleSheet()
@@ -197,7 +188,7 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
         "warn_fill": colors.HexColor("#FEF3C7"),
         "bad": colors.HexColor("#DC2626"),
         "bad_fill": colors.HexColor("#FEE2E2"),
-        "empty_fill": colors.HexColor("#FFFFFF"),
+        "empty_fill": colors.HexColor("#F8FAFC"),
     }
 
     def _pct_color(value: int):
@@ -227,76 +218,152 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
             return 0
 
     title_style = ParagraphStyle(
-        "pdf_title", parent=sty["Heading1"], fontSize=14, leading=16, alignment=TA_LEFT,
-        textColor=palette["ink"], fontName="Helvetica-Bold", spaceAfter=0,
+        "pdf_title",
+        parent=sty["Heading1"],
+        fontSize=16,
+        leading=18,
+        alignment=TA_LEFT,
+        textColor=palette["ink"],
+        fontName="Helvetica-Bold",
+        spaceAfter=0,
     )
     section_style = ParagraphStyle(
-        "pdf_section", parent=sty["Heading2"], fontSize=10.4, leading=12,
-        alignment=TA_LEFT, textColor=palette["ink"], fontName="Helvetica-Bold",
-        spaceBefore=0, spaceAfter=1,
+        "pdf_section",
+        parent=sty["Heading2"],
+        fontSize=11.2,
+        leading=13,
+        alignment=TA_LEFT,
+        textColor=palette["ink"],
+        fontName="Helvetica-Bold",
+        spaceBefore=0,
+        spaceAfter=1,
     )
     body_style = ParagraphStyle(
-        "pdf_body", parent=sty["BodyText"], fontSize=7.6, leading=9, alignment=TA_LEFT,
+        "pdf_body",
+        parent=sty["BodyText"],
+        fontSize=8.3,
+        leading=10,
+        alignment=TA_LEFT,
         textColor=palette["soft"],
     )
     small_style = ParagraphStyle(
-        "pdf_small", parent=sty["BodyText"], fontSize=6.8, leading=8.0, alignment=TA_LEFT,
+        "pdf_small",
+        parent=sty["BodyText"],
+        fontSize=7.3,
+        leading=8.5,
+        alignment=TA_LEFT,
         textColor=palette["muted"],
     )
-    meta_label = ParagraphStyle("meta_label", parent=small_style, fontSize=7.0, textColor=palette["muted"])
+    meta_label = ParagraphStyle(
+        "meta_label",
+        parent=small_style,
+        fontSize=7.5,
+        textColor=palette["muted"],
+    )
     meta_value = ParagraphStyle(
-        "meta_value", parent=body_style, fontSize=8.6, leading=10.0, textColor=palette["ink"],
+        "meta_value",
+        parent=body_style,
+        fontSize=9.2,
+        leading=10.8,
+        textColor=palette["ink"],
         fontName="Helvetica-Bold",
     )
     card_label = ParagraphStyle(
-        "card_label", parent=small_style, fontSize=7.2, leading=8.4, alignment=TA_CENTER,
+        "card_label",
+        parent=small_style,
+        fontSize=7.8,
+        leading=9.2,
+        alignment=TA_CENTER,
         textColor=palette["muted"],
     )
     card_value = ParagraphStyle(
-        "card_value", parent=body_style, fontSize=11.5, leading=12.6, alignment=TA_CENTER,
-        textColor=palette["ink"], fontName="Helvetica-Bold",
+        "card_value",
+        parent=body_style,
+        fontSize=14,
+        leading=15,
+        alignment=TA_CENTER,
+        textColor=palette["ink"],
+        fontName="Helvetica-Bold",
     )
     issued_style = ParagraphStyle(
-        "issued_style", parent=small_style, alignment=TA_RIGHT, fontSize=7.0, leading=8.0,
+        "issued_style",
+        parent=small_style,
+        alignment=TA_RIGHT,
+        fontSize=7.8,
+        leading=9.5,
         textColor=palette["ink"],
     )
     sector_meta_style = ParagraphStyle(
-        "sector_meta_style", parent=body_style, fontSize=7.5, leading=8.5, textColor=palette["soft"],
+        "sector_meta_style",
+        parent=body_style,
+        fontSize=8.5,
+        leading=9.5,
+        textColor=palette["soft"],
     )
     head_top = ParagraphStyle(
-        "head_top", parent=small_style, alignment=TA_CENTER, fontSize=5.8, leading=6.4,
-        textColor=colors.white, fontName="Helvetica-Bold",
+        "head_top",
+        parent=small_style,
+        alignment=TA_CENTER,
+        fontSize=6.6,
+        leading=7.0,
+        textColor=colors.white,
+        fontName="Helvetica-Bold",
     )
     head_sub = ParagraphStyle(
-        "head_sub", parent=small_style, alignment=TA_CENTER, fontSize=5.6, leading=6.2,
-        textColor=colors.HexColor("#CBD5E1"), fontName="Helvetica-Bold",
+        "head_sub",
+        parent=small_style,
+        alignment=TA_CENTER,
+        fontSize=6.0,
+        leading=7.3,
+        textColor=colors.HexColor("#CBD5E1"),
+        fontName="Helvetica-Bold",
     )
     head_stage = ParagraphStyle(
-        "head_stage", parent=small_style, alignment=TA_CENTER, fontSize=5.8, leading=6.0,
-        textColor=colors.HexColor("#E5E7EB"), fontName="Helvetica-Bold",
+        "head_stage",
+        parent=small_style,
+        alignment=TA_CENTER,
+        fontSize=5.8,
+        leading=6.9,
+        textColor=colors.HexColor("#E5E7EB"),
+        fontName="Helvetica-Bold",
     )
     cell_left = ParagraphStyle(
-        "cell_left", parent=body_style, fontSize=7.2, leading=8.0, alignment=TA_LEFT,
+        "cell_left",
+        parent=body_style,
+        fontSize=8,
+        leading=8.9,
+        alignment=TA_LEFT,
         textColor=palette["ink"],
     )
     cell_center = ParagraphStyle(
-        "cell_center", parent=body_style, fontSize=6.6, leading=7.0, alignment=TA_CENTER,
+        "cell_center",
+        parent=body_style,
+        fontSize=7.6,
+        leading=8.4,
+        alignment=TA_CENTER,
         textColor=palette["soft"],
     )
+
     summary_head = ParagraphStyle(
-        "summary_head", parent=small_style, fontSize=7.2, leading=8.0, alignment=TA_LEFT,
-        textColor=colors.white, fontName="Helvetica-Bold",
+        "summary_head",
+        parent=small_style,
+        fontSize=8,
+        leading=9,
+        alignment=TA_LEFT,
+        textColor=colors.white,
+        fontName="Helvetica-Bold",
     )
+
 
     def _base_left_table_style(*, header_rows=0, zebra_from=1):
         cmds = [
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("GRID", (0, 0), (-1, -1), 0.30, palette["line"]),
-            ("BOX", (0, 0), (-1, -1), 0.42, palette["line_dark"]),
-            ("LEFTPADDING", (0, 0), (-1, -1), 5),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("GRID", (0, 0), (-1, -1), 0.32, palette["line"]),
+            ("BOX", (0, 0), (-1, -1), 0.45, palette["line_dark"]),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ]
         if header_rows:
             cmds.extend(
@@ -313,17 +380,17 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
         card = Table(
             [[Paragraph(title, card_label)], [Paragraph(value_markup, card_value)]],
             colWidths=[pw / 4.0],
-            rowHeights=[0.42 * cm, 0.66 * cm],
+            rowHeights=[0.50 * cm, 0.80 * cm],
         )
         card.setStyle(
             TableStyle(
                 [
                     ("BACKGROUND", (0, 0), (-1, -1), colors.white),
-                    ("BOX", (0, 0), (-1, -1), 0.50, palette["line"]),
-                    ("TOPPADDING", (0, 0), (-1, -1), 4),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 5),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                    ("BOX", (0, 0), (-1, -1), 0.55, palette["line"]),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ]
             )
@@ -358,7 +425,7 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
 
         table = Table(
             rows,
-            colWidths=[pw * 0.55, pw * 0.15, pw * 0.11, pw * 0.19],
+            colWidths=[pw * 0.57, pw * 0.14, pw * 0.11, pw * 0.18],
             repeatRows=1,
         )
         table.hAlign = "LEFT"
@@ -385,13 +452,10 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
         if not isinstance(df, pd.DataFrame) or df.empty or not sector_groups:
             return [Paragraph("Sem dados desta matriz.", small_style)]
 
-        # A4 exige estratégia inversa: preservar boxes legíveis e quebrar em blocos quando necessário.
-        equip_w = 3.9 * cm
-        stage_min_w = 0.56 * cm
-        stage_pref_w = 0.66 * cm
-        remaining = pw - equip_w
-
-        max_matrix_cols = max(3, int(remaining // stage_min_w))
+        equip_w = 4.0 * cm
+        stage_pref_w = 0.80 * cm
+        stage_min_w = 0.72 * cm
+        max_matrix_cols = max(3, int((pw - equip_w) // stage_pref_w))
         if max_matrix_cols < 3:
             max_matrix_cols = 3
 
@@ -440,7 +504,12 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                     width = len(service_cols)
                     row_setor.extend([""] * width)
                     row_servico.extend([Paragraph(f"<b>{service['service']}</b>", head_sub)] + [""] * (width - 1))
-                    stage_labels = ["D", "R", "M"] if width == 3 else [str(i + 1) for i in range(width)]
+                    stage_labels = []
+                    if width == 3:
+                        stage_labels = ["D", "R", "M"]
+                    else:
+                        for idx in range(width):
+                            stage_labels.append(str(idx + 1))
                     row_etapa.extend([Paragraph(f"<b>{lbl}</b>", head_stage) for lbl in stage_labels])
                     cols_meta.extend(service_cols)
                     if width > 1:
@@ -449,14 +518,14 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
 
                 sector_end = cur_col - 1
                 if sector_end >= sector_start:
-                    row_setor[sector_start:sector_start] = [Paragraph(
-                        f"<b>{sector['sector']}</b><br/><font size='5.2'>{pct}%</font>", head_top
-                    )]
+                    row_setor[sector_start:sector_start] = [Paragraph(f"<b>{sector['sector']}</b><br/><font size='6'>{pct}%</font>", head_top)]
                     del row_setor[sector_start + 1: sector_end + 2]
                     spans.append((sector_start, 0, sector_end, 0))
                     separators.append(sector_end)
 
-            service_boundaries = []
+            # Rastreia onde cada serviço começa e termina (para separadores e zebra)
+            # service_boundaries: lista de (col_start, col_end) — índices 1-based em cols_meta
+            service_boundaries: list[tuple[int, int]] = []
             _svc_cur = 1
             for sector in chunk:
                 for service in sector["services"]:
@@ -464,7 +533,11 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                     service_boundaries.append((_svc_cur, _svc_cur + _w - 1))
                     _svc_cur += _w
 
-            svc_header_colors = [colors.HexColor("#1E293B"), colors.HexColor("#2D3F55")]
+            # Cores alternadas leves para distinguir serviços no header row_servico
+            _svc_header_colors = [
+                colors.HexColor("#1E293B"),  # par  — mesmo tom do header_2
+                colors.HexColor("#2D3F55"),  # ímpar — ligeiramente mais claro
+            ]
 
             data.extend([row_setor, row_servico, row_etapa])
             view = df[cols_meta].copy().fillna("")
@@ -476,13 +549,13 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                     row.append(Paragraph(text, cell_center))
                 data.append(row)
 
+            remaining = pw - equip_w
             matrix_cols = len(cols_meta) - 1
-            matrix_w = min(stage_pref_w, remaining / max(matrix_cols, 1))
+            matrix_w = max(stage_min_w, min(stage_pref_w, remaining / max(matrix_cols, 1)))
             col_widths = [equip_w] + [matrix_w] * matrix_cols
             table = Table(data, colWidths=col_widths, repeatRows=3)
             table.hAlign = "LEFT"
 
-            n_rows_total = len(data)
             style_cmds = _base_left_table_style(header_rows=3, zebra_from=3) + [
                 ("BACKGROUND", (0, 1), (-1, 1), palette["header_2"]),
                 ("BACKGROUND", (0, 2), (-1, 2), palette["header_3"]),
@@ -491,34 +564,58 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                 ("ALIGN", (0, 3), (0, -1), "LEFT"),
                 ("ALIGN", (1, 3), (-1, -1), "CENTER"),
                 ("SPAN", (0, 0), (0, 2)),
-                ("LEFTPADDING", (1, 3), (-1, -1), 1.3),
-                ("RIGHTPADDING", (1, 3), (-1, -1), 1.3),
+
+                # header mais compacto para evitar palavras “em pé”
+                ("LEFTPADDING", (1, 0), (-1, 2), 1.0),
+                ("RIGHTPADDING", (1, 0), (-1, 2), 1.0),
+                ("TOPPADDING", (1, 0), (-1, 2), 2.0),
+                ("BOTTOMPADDING", (1, 0), (-1, 2), 2.0),
+                ("LEFTPADDING", (0, 0), (0, 2), 2.0),
+                ("RIGHTPADDING", (0, 0), (0, 2), 2.0),
+
+                # células das etapas mais quadradas e legíveis
+                ("LEFTPADDING", (1, 3), (-1, -1), 2.0),
+                ("RIGHTPADDING", (1, 3), (-1, -1), 2.0),
                 ("TOPPADDING", (1, 3), (-1, -1), 3.2),
                 ("BOTTOMPADDING", (1, 3), (-1, -1), 3.2),
+
+                # reforço geral de grade para impressão
                 ("GRID", (1, 2), (-1, -1), 0.55, colors.HexColor("#7C8A9A")),
                 ("BOX", (0, 0), (-1, -1), 0.9, colors.HexColor("#475569")),
             ]
-
             for c1, r1, c2, r2 in spans[1:]:
                 style_cmds.append(("SPAN", (c1, r1), (c2, r2)))
 
+            # ── Separadores de serviço (linha fina entre serviços, antes do separador de setor) ──
+            n_rows_total = len(data)
             for svc_idx, (svc_start, svc_end) in enumerate(service_boundaries):
-                svc_color = svc_header_colors[svc_idx % 2]
+                # cor alternada no header row_servico (linha 1) e row_etapa (linha 2)
+                svc_color = _svc_header_colors[svc_idx % 2]
                 style_cmds.append(("BACKGROUND", (svc_start, 1), (svc_end, 1), svc_color))
-                style_cmds.append((
-                    "BACKGROUND", (svc_start, 2), (svc_end, 2),
-                    colors.HexColor("#253347") if svc_idx % 2 == 0 else colors.HexColor("#344860")
-                ))
-                if svc_end not in separators:
-                    style_cmds.append(("LINEAFTER", (svc_end, 0), (svc_end, n_rows_total - 1), 1.6, colors.HexColor("#334155")))
+                style_cmds.append(("BACKGROUND", (svc_start, 2), (svc_end, 2),
+                                   colors.HexColor("#253347") if svc_idx % 2 == 0 else colors.HexColor("#344860")))
 
+                # linha divisória direita do serviço (média — entre serviços dentro do mesmo setor)
+                is_sector_boundary = svc_end in separators
+                if not is_sector_boundary:
+                    # linha de separação entre serviços: mais fina e numa cor intermediária
+                    style_cmds.append(("LINEAFTER", (svc_end, 1), (svc_end, n_rows_total - 1),
+                                       0.9, colors.HexColor("#64748B")))
+
+            # ── Separador forte entre setores ──
             for col in separators:
-                style_cmds.append(("LINEAFTER", (col, 0), (col, n_rows_total - 1), 2.0, colors.HexColor("#0F172A")))
+                style_cmds.append(("LINEAFTER", (col, 0), (col, n_rows_total - 1),
+                                   2.0, colors.HexColor("#0F172A")))
 
             for row_i in range(3, len(data)):
                 for col_i in range(1, len(cols_meta)):
-                    _, _, text = _cell_heat_style(view.iloc[row_i - 3, col_i])
+                    bg, fg, text = _cell_heat_style(view.iloc[row_i - 3, col_i])
+
+                    # modo checklist impresso:
+                    # - células vazias ficam bem destacadas para marcação manual
+                    # - células OK já concluídas permanecem visíveis
                     is_done = bool(text)
+
                     if is_done:
                         style_cmds.extend(
                             [
@@ -533,6 +630,7 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                             [
                                 ("BACKGROUND", (col_i, row_i), (col_i, row_i), colors.white),
                                 ("TEXTCOLOR", (col_i, row_i), (col_i, row_i), colors.white),
+                                # quadrado mais forte para o gestor marcar à caneta
                                 ("BOX", (col_i, row_i), (col_i, row_i), 1.0, colors.HexColor("#475569")),
                             ]
                         )
@@ -540,10 +638,10 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
             table.setStyle(TableStyle(style_cmds))
             if len(chunks) > 1:
                 blocks.append(Paragraph(f"Bloco {chunk_idx}/{len(chunks)}", small_style))
-                blocks.append(Spacer(1, 0.08 * cm))
+                blocks.append(Spacer(1, 0.10 * cm))
             blocks.append(table)
             if chunk_idx < len(chunks):
-                blocks.append(Spacer(1, 0.18 * cm))
+                blocks.append(Spacer(1, 0.24 * cm))
         return blocks
 
     resumo_cols = ["Equipamento", "Concluidos", "Total", "%"]
@@ -566,7 +664,11 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
             return None
         for col in df.columns:
             if "semana" in str(col).lower():
-                serie = df[col].astype(str).str.extract(r"(\d+)", expand=False)
+                serie = (
+                    df[col]
+                    .astype(str)
+                    .str.extract(r"(\d+)", expand=False)
+                )
                 nums = pd.to_numeric(serie, errors="coerce").dropna()
                 if not nums.empty:
                     return int(nums.max()) + 1
@@ -577,14 +679,18 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
             return None
 
         work = df.copy()
+
+        # filtra pela revisão atual se a coluna existir
         if revisao_id is not None and "revisao_id" in work.columns:
             try:
                 work = work[work["revisao_id"].astype(str) == str(revisao_id)]
             except Exception:
                 pass
+
         if work.empty:
             return None
 
+        # prioriza linhas com updated_at preenchido
         if "updated_at" in work.columns:
             try:
                 work["updated_at"] = pd.to_datetime(work["updated_at"], errors="coerce", utc=True)
@@ -593,19 +699,26 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                 pass
 
         nums = (
-            work["semana"].astype(str).str.extract(r"(\d+)", expand=False)
-            .pipe(pd.to_numeric, errors="coerce").dropna()
+            work["semana"]
+            .astype(str)
+            .str.extract(r"(\d+)", expand=False)
+            .pipe(pd.to_numeric, errors="coerce")
+            .dropna()
         )
         if nums.empty:
             return None
+
         return int(nums.max()) + 1
 
     semana_impressao = None
+
+    # prioridade 1: tabela tarefa_servicos da revisão atual
     try:
         semana_impressao = _extract_semana_from_tarefas_servico(tarefas_servico_df, revisao_id)
     except Exception:
         semana_impressao = None
 
+    # prioridade 2: semana explícita vinda do chamador
     if not semana_impressao:
         try:
             if semana_revisao is not None and str(semana_revisao).strip() != "":
@@ -613,12 +726,14 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
         except Exception:
             semana_impressao = None
 
+    # prioridade 3: tentar inferir do resumo da revisão
     if not semana_impressao:
         try:
             semana_impressao = _extract_semana_mais1_from_df(resumo_df)
         except Exception:
             semana_impressao = None
 
+    # fallback final: semana atual apenas se nada da revisão existir
     if not semana_impressao:
         try:
             _dt_emit = pd.to_datetime(emitido, dayfirst=True, errors="coerce")
@@ -628,8 +743,12 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
-        buf, pagesize=PAGE, leftMargin=LMARGIN, rightMargin=RMARGIN,
-        topMargin=TMARGIN, bottomMargin=BMARGIN,
+        buf,
+        pagesize=PAGE,
+        leftMargin=LMARGIN,
+        rightMargin=RMARGIN,
+        topMargin=TMARGIN,
+        bottomMargin=BMARGIN,
     )
 
     story = []
@@ -655,11 +774,10 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
         )
     )
     story.append(header)
-    story.append(HRFlowable(width="100%", thickness=0.75, color=palette["line"], spaceAfter=4, spaceBefore=1))
+    story.append(HRFlowable(width="100%", thickness=0.75, color=palette["line"], spaceAfter=5, spaceBefore=1))
 
     meta = Table(
-        [[Paragraph("Revisão", meta_label), Paragraph("Grupo", meta_label)],
-         [Paragraph(titulo or "—", meta_value), Paragraph(grupo_nome or "—", meta_value)]],
+        [[Paragraph("Revisão", meta_label), Paragraph("Grupo", meta_label)], [Paragraph(titulo or "—", meta_value), Paragraph(grupo_nome or "—", meta_value)]],
         colWidths=[pw * 0.38, pw * 0.62],
     )
     meta.hAlign = "LEFT"
@@ -669,13 +787,13 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 0),
                 ("TOPPADDING", (0, 0), (-1, -1), 1),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
                 ("LINEBELOW", (0, 1), (-1, 1), 0.45, palette["line"]),
             ]
         )
     )
     story.append(meta)
-    story.append(Spacer(1, 0.18 * cm))
+    story.append(Spacer(1, 0.24 * cm))
 
     cards = Table(
         [[
@@ -699,10 +817,10 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
         )
     )
     story.append(cards)
-    story.append(Spacer(1, 0.18 * cm))
+    story.append(Spacer(1, 0.24 * cm))
 
     story.append(Paragraph("Resumo por equipamento", section_style))
-    story.append(Spacer(1, 0.04 * cm))
+    story.append(Spacer(1, 0.05 * cm))
     story.append(_summary_table(rv))
 
     merged_df, sector_groups = _merge_sector_tables(sector_tables)
@@ -716,15 +834,16 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
             nome = sector["sector"]
             ordered_pct.append(f"{nome}: <b>{sector_pct.get(nome, 0)}%</b>")
         story.append(Paragraph(" | ".join(ordered_pct), sector_meta_style))
-    story.append(Spacer(1, 0.10 * cm))
+    story.append(Spacer(1, 0.16 * cm))
 
     for block in _build_consolidated_blocks(merged_df, sector_groups, sector_pct):
         story.append(block)
 
-    story.append(Spacer(1, 0.22 * cm))
-    story.append(HRFlowable(width="100%", thickness=0.55, color=palette["line_dark"], spaceAfter=4, spaceBefore=2))
+
+    story.append(Spacer(1, 0.35 * cm))
+    story.append(HRFlowable(width="100%", thickness=0.55, color=palette["line_dark"], spaceAfter=6, spaceBefore=2))
     story.append(Paragraph("Controle de checklist impresso", section_style))
-    story.append(Spacer(1, 0.05 * cm))
+    story.append(Spacer(1, 0.08 * cm))
 
     checklist_info = Table(
         [[
@@ -738,11 +857,11 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
         ("LEFTPADDING", (0, 0), (-1, -1), 0),
         ("RIGHTPADDING", (0, 0), (-1, -1), 0),
         ("TOPPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]))
     story.append(checklist_info)
-    story.append(Spacer(1, 0.06 * cm))
+    story.append(Spacer(1, 0.10 * cm))
 
     assinatura = Table(
         [
@@ -758,7 +877,7 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
             ],
             [
                 Paragraph("Observações", small_style),
-                "",
+                "", 
                 "",
             ],
             [
@@ -776,20 +895,20 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
         ("BACKGROUND", (0, 0), (-1, 0), palette["panel"]),
         ("GRID", (0, 0), (-1, -1), 0.45, palette["line_dark"]),
         ("BOX", (0, 0), (-1, -1), 0.75, palette["line_dark"]),
-        ("LEFTPADDING", (0, 0), (-1, -1), 5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
     ]))
     story.append(assinatura)
 
     def _footer(canvas, _doc):
         canvas.saveState()
-        canvas.setFont("Helvetica", 7.2)
+        canvas.setFont("Helvetica", 8)
         canvas.setFillColor(palette["muted"])
-        canvas.drawString(LMARGIN, 0.46 * cm, "D = desmontou   R = revisou   M = montou")
-        canvas.drawRightString(PAGE[0] - RMARGIN, 0.46 * cm, f"Página {canvas.getPageNumber()}")
+        canvas.drawString(LMARGIN, 0.58 * cm, "D = desmontou   R = revisou   M = montou")
+        canvas.drawRightString(PAGE[0] - RMARGIN, 0.58 * cm, f"Página {canvas.getPageNumber()}")
         canvas.restoreState()
 
     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
