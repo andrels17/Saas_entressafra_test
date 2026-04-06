@@ -20,7 +20,9 @@ Configuração via st.secrets (ou variáveis de ambiente):
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from html import escape
+from zoneinfo import ZoneInfo
 import smtplib
 import ssl
 import time
@@ -271,6 +273,20 @@ def send_email_with_retry(
         raise last_exc
 
 
+def _saudacao_dinamica() -> str:
+    try:
+        hora = datetime.now(ZoneInfo("America/Sao_Paulo")).hour
+    except Exception:
+        hora = datetime.now().hour
+
+    if hora < 12:
+        return "Bom dia, senhores"
+    if hora < 18:
+        return "Boa tarde, senhores"
+    return "Boa noite, senhores"
+
+
+
 def build_html_body(
     *,
     destinatario_nome: str,
@@ -299,6 +315,7 @@ def build_html_body(
     else:
         bar_color = "#EF4444"
     now = fmt_brt("%d/%m/%Y")
+    titulo_email = f"{revisao_titulo} - Relatório Semanal - Semana {semana_atual}/{semanas_total}"
 
     # ── Card principal: equipamentos sem movimentação ─────────────────────
     # "Sem movimentação" aqui significa: sem nenhum apontamento realizado na
@@ -393,7 +410,7 @@ def build_html_body(
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Relatório Semanal</title></head>
+<title>{titulo_email}</title></head>
 <body style="margin:0;padding:0;background:#F3F4F6;font-family:Arial,Helvetica,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F3F4F6;padding:32px 0;">
   <tr><td align="center">
@@ -401,13 +418,13 @@ def build_html_body(
 
       <!-- Header -->
       <tr><td style="background:#111827;padding:24px 32px;">
-        <div style="font-size:20px;font-weight:700;color:#fff;">Relatório Semanal de Revisão</div>
+        <div style="font-size:20px;font-weight:700;color:#fff;">{titulo_email}</div>
         <div style="font-size:13px;color:rgba(255,255,255,.6);margin-top:4px;">{revisao_titulo} · Semana {semana_atual}/{semanas_total} · {now}</div>
       </td></tr>
 
       <!-- Saudação -->
       <tr><td style="padding:28px 32px 0;">
-        <div style="font-size:15px;color:#374151;">Olá, <b>{destinatario_nome}</b>!</div>
+        <div style="font-size:15px;color:#374151;"><b>{_saudacao_dinamica(destinatario_nome)}</b></div>
         <div style="font-size:14px;color:#6B7280;margin-top:6px;">
           Segue o resumo semanal do departamento <b>{departamento_nome}</b>.
           O PDF com análise detalhada, ranking de equipamentos e alertas está anexo.
