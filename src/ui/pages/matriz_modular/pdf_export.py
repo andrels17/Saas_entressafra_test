@@ -522,6 +522,22 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                     spans.append((sector_start, 0, sector_end, 0))
                     separators.append(sector_end)
 
+            # Rastreia onde cada serviço começa e termina (para separadores e zebra)
+            # service_boundaries: lista de (col_start, col_end) — índices 1-based em cols_meta
+            service_boundaries: list[tuple[int, int]] = []
+            _svc_cur = 1
+            for sector in chunk:
+                for service in sector["services"]:
+                    _w = max(1, len(service["columns"]))
+                    service_boundaries.append((_svc_cur, _svc_cur + _w - 1))
+                    _svc_cur += _w
+
+            # Cores alternadas leves para distinguir serviços no header row_servico
+            _svc_header_colors = [
+                colors.HexColor("#1E293B"),  # par  — mesmo tom do header_2
+                colors.HexColor("#2D3F55"),  # ímpar — ligeiramente mais claro
+            ]
+
             data.extend([row_setor, row_servico, row_etapa])
             view = df[cols_meta].copy().fillna("")
 
@@ -561,9 +577,26 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
             for c1, r1, c2, r2 in spans[1:]:
                 style_cmds.append(("SPAN", (c1, r1), (c2, r2)))
 
-            # separador forte a cada serviço (bloco D/R/M)
+            # ── Separadores de serviço (linha fina entre serviços, antes do separador de setor) ──
+            n_rows_total = len(data)
+            for svc_idx, (svc_start, svc_end) in enumerate(service_boundaries):
+                # cor alternada no header row_servico (linha 1) e row_etapa (linha 2)
+                svc_color = _svc_header_colors[svc_idx % 2]
+                style_cmds.append(("BACKGROUND", (svc_start, 1), (svc_end, 1), svc_color))
+                style_cmds.append(("BACKGROUND", (svc_start, 2), (svc_end, 2),
+                                   colors.HexColor("#253347") if svc_idx % 2 == 0 else colors.HexColor("#344860")))
+
+                # linha divisória direita do serviço (média — entre serviços dentro do mesmo setor)
+                is_sector_boundary = svc_end in separators
+                if not is_sector_boundary:
+                    # linha de separação entre serviços: mais fina e numa cor intermediária
+                    style_cmds.append(("LINEAFTER", (svc_end, 1), (svc_end, n_rows_total - 1),
+                                       0.9, colors.HexColor("#64748B")))
+
+            # ── Separador forte entre setores ──
             for col in separators:
-                style_cmds.append(("LINEAFTER", (col, 0), (col, -1), 1.25, colors.HexColor("#334155")))
+                style_cmds.append(("LINEAFTER", (col, 0), (col, n_rows_total - 1),
+                                   2.0, colors.HexColor("#0F172A")))
 
             for row_i in range(3, len(data)):
                 for col_i in range(1, len(cols_meta)):
