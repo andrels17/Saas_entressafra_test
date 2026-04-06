@@ -93,12 +93,12 @@ def fetch_grupo_template(sb: Client, tenant_id: str, grupo_id: str):
 
     formats = [
         (
-            "servico_id, servicos(id,nome,setor_id,setores(nome))",
+            "servico_id, servicos(id,nome,ativo,setor_id,setores(nome))",
             lambda sv: (sv.get("setores") or {}).get("nome") or sv.get("setor") or "Setor",
             "join setor_id+setores",
         ),
         (
-            "servico_id, servicos(id,nome,setor)",
+            "servico_id, servicos(id,nome,ativo,setor)",
             lambda sv: sv.get("setor") or "Setor",
             "campo setor direto",
         ),
@@ -114,13 +114,26 @@ def fetch_grupo_template(sb: Client, tenant_id: str, grupo_id: str):
             ) or []
             s2s = defaultdict(list)
             all_s = []
+            seen_ids: set[str] = set()
             for r in tpl:
                 sv = r.get("servicos") or {}
                 sid = sv.get("id")
                 if not sid:
                     continue
-                s2s[setor_fn(sv)].append(sv)
-                all_s.append(sv)
+                if str(sv.get("ativo", True)).lower() in {"false", "0", "none"} or sv.get("ativo") is False:
+                    continue
+                sid_s = str(sid)
+                if sid_s in seen_ids:
+                    continue
+                seen_ids.add(sid_s)
+                item = {
+                    "id": sid,
+                    "nome": sv.get("nome"),
+                    "setor": setor_fn(sv),
+                    "ativo": bool(sv.get("ativo", True)),
+                }
+                s2s[setor_fn(sv)].append(item)
+                all_s.append(item)
             if all_s:
                 return s2s, all_s
         except Exception as exc:
@@ -153,8 +166,9 @@ def fetch_grupo_template(sb: Client, tenant_id: str, grupo_id: str):
 
     try:
         svs = (
-            sb.table("servicos").select("id,nome,setor")
+            sb.table("servicos").select("id,nome,setor,ativo")
             .eq("tenant_id", tenant_id)
+            .eq("ativo", True)
             .in_("id", ids)
             .execute().data
         ) or []
