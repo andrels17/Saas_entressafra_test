@@ -1471,7 +1471,7 @@ def dispatch_relatorio_semanal(
                             n_risc_exec = sum(getattr(d, "n_risco_prazo", 0) for d in dept_snapshots)
                             max_dias_par_exec = max([int(getattr(d, "max_dias_parado", 0) or 0) for d in dept_snapshots] or [0])
                             html_e = build_html_body(
-                                destinatario_nome=saudacao_exec,
+                                destinatario_nome="",
                                 departamento_nome="Visão geral — todos os departamentos",
                                 revisao_titulo=exec_payload.revisao_titulo,
                                 semana_atual=exec_payload.semana_atual,
@@ -1493,8 +1493,9 @@ def dispatch_relatorio_semanal(
                             )
                             send_email_with_retry(EmailMessage(
                                 to=all_exec_emails,
-                                subject=(f"[{exec_payload.revisao_titulo}] Visão Executiva — "
-                                         f"Semana {exec_payload.semana_atual}/{exec_payload.semanas_total}"),
+                                subject=(
+                             f"{exec_payload.revisao_titulo} - Relatório Semanal - "
+                             f"Semana {exec_payload.semana_atual}/{exec_payload.semanas_total}"),
                                 html_body=html_e,
                                 attachments=[(pdf_exec, pdf_name_e)],
                             ), cfg=smtp_cfg,
