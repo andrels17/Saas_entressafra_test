@@ -76,32 +76,6 @@ def _merge_sector_tables(sector_tables):
     if not sector_tables:
         return pd.DataFrame(), []
 
-    def _normalize_cell(value) -> str:
-        if value is None:
-            return ""
-        try:
-            if pd.isna(value):
-                return ""
-        except Exception:
-            pass
-        return str(value).strip()
-
-    def _service_has_relevant_data(df_: pd.DataFrame, cols: list[str]) -> bool:
-        if not cols:
-            return False
-        valid_marks = {"OK", "!", "PEND", "PENDENTE", "NOK", "NÃO", "NAO", "X"}
-        for col_name in cols:
-            if col_name not in df_.columns:
-                continue
-            series = df_[col_name].map(_normalize_cell)
-            if series.eq("").all():
-                continue
-            if series.str.upper().isin(valid_marks).any():
-                return True
-            if series.ne("").any():
-                return True
-        return False
-
     frames = []
     sector_groups = []
     seen_columns: set[str] = set()
@@ -117,26 +91,10 @@ def _merge_sector_tables(sector_tables):
         by_service: dict[str, dict] = {}
         service_order: list[str] = []
 
-        candidate_columns = [c for c in work.columns if c not in ("Equipamento", "%", "Status")]
-        grouped_candidates: dict[str, list[str]] = {}
-        for col in candidate_columns:
-            raw = str(col)
-            service_name = raw
-            try:
-                left, right = raw.rsplit(" ", 1)
-                if right in order_map:
-                    service_name = left
-            except Exception:
-                pass
-            grouped_candidates.setdefault(service_name, []).append(col)
+        for col in work.columns:
+            if col in ("Equipamento", "%", "Status"):
+                continue
 
-        active_services = {
-            service_name
-            for service_name, cols in grouped_candidates.items()
-            if _service_has_relevant_data(work, cols)
-        }
-
-        for col in candidate_columns:
             raw = str(col)
             service_name = raw
             suffix = None
@@ -146,9 +104,6 @@ def _merge_sector_tables(sector_tables):
                     service_name, suffix = left, right
             except Exception:
                 pass
-
-            if service_name not in active_services:
-                continue
 
             canonical = f"{setor_nome}|||{raw}"
             idx = 2
@@ -537,6 +492,7 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
             cols_meta = ["Equipamento"]
             spans = [(0, 0, 0, 2)]
             separators = []
+            service_separators = []
             cur_col = 1
 
             for sector in chunk:
@@ -558,6 +514,7 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                     cols_meta.extend(service_cols)
                     if width > 1:
                         spans.append((cur_col, 1, cur_col + width - 1, 1))
+                    service_separators.append(cur_col + width - 1)
                     cur_col += width
 
                 sector_end = cur_col - 1
@@ -566,22 +523,6 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                     del row_setor[sector_start + 1: sector_end + 2]
                     spans.append((sector_start, 0, sector_end, 0))
                     separators.append(sector_end)
-
-            # Rastreia onde cada serviço começa e termina (para separadores e zebra)
-            # service_boundaries: lista de (col_start, col_end) — índices 1-based em cols_meta
-            service_boundaries: list[tuple[int, int]] = []
-            _svc_cur = 1
-            for sector in chunk:
-                for service in sector["services"]:
-                    _w = max(1, len(service["columns"]))
-                    service_boundaries.append((_svc_cur, _svc_cur + _w - 1))
-                    _svc_cur += _w
-
-            # Cores alternadas leves para distinguir serviços no header row_servico
-            _svc_header_colors = [
-                colors.HexColor("#1E293B"),  # par  — mesmo tom do header_2
-                colors.HexColor("#2D3F55"),  # ímpar — ligeiramente mais claro
-            ]
 
             data.extend([row_setor, row_servico, row_etapa])
             view = df[cols_meta].copy().fillna("")
@@ -622,26 +563,15 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
             for c1, r1, c2, r2 in spans[1:]:
                 style_cmds.append(("SPAN", (c1, r1), (c2, r2)))
 
-            # ── Separadores de serviço (linha fina entre serviços, antes do separador de setor) ──
-            n_rows_total = len(data)
-            for svc_idx, (svc_start, svc_end) in enumerate(service_boundaries):
-                # cor alternada no header row_servico (linha 1) e row_etapa (linha 2)
-                svc_color = _svc_header_colors[svc_idx % 2]
-                style_cmds.append(("BACKGROUND", (svc_start, 1), (svc_end, 1), svc_color))
-                style_cmds.append(("BACKGROUND", (svc_start, 2), (svc_end, 2),
-                                   colors.HexColor("#253347") if svc_idx % 2 == 0 else colors.HexColor("#344860")))
+            # separador entre serviços (mais visível na impressão)
+            for col in service_separators:
+                if col in separators:
+                    continue
+                style_cmds.append(("LINEAFTER", (col, 0), (col, -1), 1.45, colors.HexColor("#475569")))
 
-                # linha divisória direita do serviço (média — entre serviços dentro do mesmo setor)
-                is_sector_boundary = svc_end in separators
-                if not is_sector_boundary:
-                    # linha de separação entre serviços: mais forte para impressão em papel
-                    style_cmds.append(("LINEAFTER", (svc_end, 0), (svc_end, n_rows_total - 1),
-                                       1.6, colors.HexColor("#334155")))
-
-            # ── Separador forte entre setores ──
+            # separador forte entre setores
             for col in separators:
-                style_cmds.append(("LINEAFTER", (col, 0), (col, n_rows_total - 1),
-                                   2.0, colors.HexColor("#0F172A")))
+                style_cmds.append(("LINEAFTER", (col, 0), (col, -1), 2.1, colors.HexColor("#1E293B")))
 
             for row_i in range(3, len(data)):
                 for col_i in range(1, len(cols_meta)):
