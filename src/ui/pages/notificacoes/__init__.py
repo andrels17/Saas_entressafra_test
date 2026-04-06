@@ -14,11 +14,10 @@ from src.ui.core.cache import bump_data_version, clear_cached_functions
 from src.utils.supabase_helpers import current_role, current_tenant_id
 from src.utils.nav import get_current_revisao
 
-from .data import load_data, build_alertas
+from .data import load_data, build_alertas, load_manager_group_options, build_manager_groups_zip
 from .fragments import (
     fragment_disparo_manual,
     fragment_configurar_agendamento,
-    fragment_zip_impressao_gestores,
 )
 
 # ── Metadados visuais por categoria ─────────────────────────────────────────
@@ -305,7 +304,89 @@ def render_notificacoes() -> None:
                 st.info("Instale `reportlab` para habilitar exportação em PDF.")
 
         st.divider()
-        fragment_zip_impressao_gestores(tenant_id, revisao_id, is_admin)
+        st.markdown("### 📦 ZIP para impressão por gestor")
+        st.caption("Selecione os gestores e os grupos desejados para gerar um ZIP com 1 PDF da matriz por grupo.")
+
+        manager_options = load_manager_group_options(
+            tenant_id,
+            ver=ver,
+            _token=st.session_state.get("sb_access_token", ""),
+        )
+
+        selected_items = []
+        if not manager_options:
+            st.info("Nenhum gestor com grupos vinculados foi encontrado neste tenant.")
+        else:
+            for gestor in manager_options:
+                gestor_nome = gestor.get("gestor_nome") or "Gestor"
+                grupos = gestor.get("grupos") or []
+                all_group_ids = [str(g.get("grupo_id")) for g in grupos if g.get("grupo_id")]
+                default_checked = st.session_state.get(f"ntf_zip_all_{gestor['user_id']}", False)
+                with st.container(border=True):
+                    head1, head2 = st.columns([1.2, 6])
+                    with head1:
+                        mark_all = st.checkbox(
+                            "Marcar todos",
+                            value=default_checked,
+                            key=f"ntf_zip_all_{gestor['user_id']}",
+                        )
+                    with head2:
+                        st.markdown(f"**{_h(gestor_nome)}**")
+                        deps = sorted({str(g.get('departamento_nome') or '—') for g in grupos})
+                        st.caption("Departamentos: " + ", ".join(deps))
+
+                    for grp in grupos:
+                        gid = str(grp.get("grupo_id") or "")
+                        if not gid:
+                            continue
+                        grp_key = f"ntf_zip_grp_{gestor['user_id']}_{gid}"
+                        if mark_all and not st.session_state.get(grp_key, False):
+                            st.session_state[grp_key] = True
+                        checked = st.checkbox(
+                            f"{grp.get('grupo_nome') or gid} · {grp.get('departamento_nome') or '—'}",
+                            key=grp_key,
+                        )
+                        if checked:
+                            selected_items.append({
+                                "user_id": gestor.get("user_id"),
+                                "gestor_nome": gestor_nome,
+                                "grupo_id": gid,
+                                "grupo_nome": grp.get("grupo_nome"),
+                                "departamento_nome": grp.get("departamento_nome"),
+                            })
+
+            total_pdfs = len(selected_items)
+            total_gestores = len({it['user_id'] for it in selected_items})
+            if total_pdfs:
+                st.caption(f"Serão gerados **{total_pdfs} PDF(s)** para **{total_gestores} gestor(es)**.")
+                sig = str(sorted((it['user_id'], it['grupo_id']) for it in selected_items))
+                if st.button("Gerar ZIP de impressão", key="ntf_zip_build_btn", type="primary", use_container_width=True):
+                    try:
+                        with st.spinner("Gerando PDFs da matriz e montando o ZIP..."):
+                            st.session_state["ntf_zip_print_signature"] = sig
+                            st.session_state["ntf_zip_print_bytes"] = build_manager_groups_zip(
+                                tenant_id,
+                                revisao_id,
+                                revisao.get("titulo") or "revisao",
+                                selected_items,
+                                ver=ver,
+                                _token=st.session_state.get("sb_access_token", ""),
+                            )
+                    except ImportError:
+                        st.info("Instale `reportlab` para habilitar a geração dos PDFs da matriz.")
+
+                if st.session_state.get("ntf_zip_print_signature") == sig and st.session_state.get("ntf_zip_print_bytes"):
+                    nome_zip = f"matrizes_gestores_{(revisao.get('titulo') or 'revisao').replace('/', '-')}.zip"
+                    download_action(
+                        "⬇️ Baixar ZIP de impressão",
+                        data=st.session_state["ntf_zip_print_bytes"],
+                        file_name=nome_zip,
+                        mime="application/zip",
+                        key="ntf_zip_print_dl",
+                        type="primary",
+                    )
+                elif st.session_state.get("ntf_zip_print_signature") == sig:
+                    st.warning("Não foi possível gerar PDFs com a seleção atual. Verifique se os grupos possuem matriz e template configurados.")
 
     # ── E-mail (intocado) ─────────────────────────────────────────────────────
     with tab_email:

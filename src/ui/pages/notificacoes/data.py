@@ -8,6 +8,10 @@ Responsabilidades:
 """
 from __future__ import annotations
 
+import io
+import zipfile
+from collections import defaultdict
+
 import pandas as pd
 import streamlit as st
 
@@ -206,90 +210,179 @@ def resumo_por_grupo(alertas: dict) -> pd.DataFrame:
     return df_res.sort_values("Total alertas", ascending=False).reset_index(drop=True)
 
 
-# ── Impressão em lote por gestor ────────────────────────────────────────────
+# ── Impressão por gestor / grupo ─────────────────────────────────────────────
+
+def _slug(value: str) -> str:
+    value = str(value or '').strip().replace('/', '-').replace('\\', '-')
+    cleaned = ''.join(ch if ch.isalnum() or ch in ('-', '_', ' ') else '_' for ch in value)
+    return '_'.join(cleaned.split()) or 'arquivo'
 
 
-def _sanitize_filename(value: str) -> str:
-    import re
+@st.cache_data(ttl=60, show_spinner=False)
+def load_manager_group_options(tid: str, ver: str = '0', _token: str = '') -> list[dict]:
+    """Retorna gestores e seus grupos, priorizando tenant_user_departamentos.
 
-    value = (value or '').strip()
-    value = re.sub(r'[^0-9A-Za-zÀ-ÿ._ -]+', '_', value)
-    value = re.sub(r'\s+', '_', value)
-    return value.strip('._ ') or 'arquivo'
+    Regras:
+      - gestores são users com role `gestor` ou `manager` em tenant_users
+      - se tenant_user_departamentos.grupo_id vier preenchido, usa o grupo explícito
+      - se vier apenas departamento_id, expande para todos os grupos do departamento
+      - também lê tenant_user_scope como fallback legado
+    """
+    sb = get_supabase_anon()
+    if _token:
+        sb.postgrest.auth(_token)
 
+    try:
+        tu_rows = (
+            sb.table('tenant_users')
+            .select('user_id,role')
+            .eq('tenant_id', tid)
+            .execute()
+            .data
+        ) or []
+    except Exception:
+        tu_rows = []
 
-@st.cache_data(ttl=120, show_spinner=False)
-def load_manager_print_options(tenant_id: str) -> list[dict]:
-    """Carrega gestores e grupos vinculados para geração em lote dos PDFs da matriz."""
-    from src.services.email.recipients import get_manager_pdf_bundles
-    from src.db.supabase_client import get_supabase_service
-
-    bundles = get_manager_pdf_bundles(tenant_id)
-    if not bundles:
+    gestor_ids = {
+        str(r.get('user_id'))
+        for r in tu_rows
+        if str(r.get('role') or '').strip().lower() in {'gestor', 'manager'} and r.get('user_id')
+    }
+    if not gestor_ids:
         return []
 
-    svc = get_supabase_service()
-    group_ids = sorted({gid for b in bundles for gids in b.grupo_ids_por_dept.values() for gid in gids if gid})
-    group_rows = []
-    if group_ids:
-        try:
-            group_rows = (
-                svc.table('equip_grupos')
-                .select('id,nome,departamento_id')
-                .eq('tenant_id', tenant_id)
-                .in_('id', group_ids)
-                .order('nome')
-                .execute()
-                .data
-            ) or []
-        except Exception:
-            group_rows = []
-    group_map = {str(r.get('id')): r for r in group_rows if r.get('id')}
+    try:
+        scope_rows = (
+            sb.table('tenant_user_departamentos')
+            .select('user_id,departamento_id,grupo_id')
+            .eq('tenant_id', tid)
+            .execute()
+            .data
+        ) or []
+    except Exception:
+        scope_rows = []
 
-    managers = []
-    for bundle in bundles:
-        items = []
-        for dep_id, dep_nome in zip(bundle.departamento_ids, bundle.departamento_nomes):
-            for gid in bundle.grupo_ids_por_dept.get(dep_id, []) or []:
-                grow = group_map.get(str(gid), {})
-                items.append({
-                    'grupo_id': str(gid),
-                    'grupo_nome': grow.get('nome') or str(gid),
-                    'departamento_id': str(dep_id),
-                    'departamento_nome': dep_nome or grow.get('departamento_id') or '—',
-                })
+    try:
+        legacy_rows = (
+            sb.table('tenant_user_scope')
+            .select('user_id,departamento_id,grupo_id')
+            .eq('tenant_id', tid)
+            .execute()
+            .data
+        ) or []
+    except Exception:
+        legacy_rows = []
 
-        if not items:
+    try:
+        dep_rows = (
+            sb.table('departamentos')
+            .select('id,nome,ativo')
+            .eq('tenant_id', tid)
+            .execute()
+            .data
+        ) or []
+    except Exception:
+        dep_rows = []
+    dep_map = {str(r.get('id')): r.get('nome') or str(r.get('id')) for r in dep_rows if r.get('id')}
+
+    try:
+        grp_rows = (
+            sb.table('equip_grupos')
+            .select('id,nome,departamento_id,ativo')
+            .eq('tenant_id', tid)
+            .execute()
+            .data
+        ) or []
+    except Exception:
+        grp_rows = []
+
+    active_groups = []
+    for r in grp_rows:
+        ativo = r.get('ativo')
+        if ativo is False:
             continue
+        gid = r.get('id')
+        if gid:
+            active_groups.append(r)
+    grp_map = {str(r.get('id')): r for r in active_groups if r.get('id')}
+    dep_to_groups: dict[str, list[dict]] = defaultdict(list)
+    for g in active_groups:
+        dep_id = g.get('departamento_id')
+        if dep_id:
+            dep_to_groups[str(dep_id)].append(g)
 
-        items = sorted(items, key=lambda x: ((x.get('departamento_nome') or '').lower(), (x.get('grupo_nome') or '').lower()))
-        managers.append({
-            'user_id': bundle.recipient.user_id,
-            'nome': bundle.recipient.nome,
-            'email': bundle.recipient.email,
-            'departamento_nomes': bundle.departamento_nomes,
-            'grupos': items,
+    profile_map = {}
+    try:
+        prof_rows = (
+            sb.table('user_profiles')
+            .select('user_id,nome')
+            .in_('user_id', list(gestor_ids))
+            .execute()
+            .data
+        ) or []
+        profile_map = {str(r.get('user_id')): r.get('nome') or '' for r in prof_rows if r.get('user_id')}
+    except Exception:
+        profile_map = {}
+
+    user_to_groups: dict[str, dict[str, dict]] = defaultdict(dict)
+
+    def _attach(uid: str | None, dep_id: str | None, grp_id: str | None):
+        uid = str(uid or '')
+        if not uid or uid not in gestor_ids:
+            return
+        if grp_id:
+            grp = grp_map.get(str(grp_id))
+            if not grp:
+                return
+            dep_eff = str(grp.get('departamento_id') or dep_id or '')
+            user_to_groups[uid][str(grp['id'])] = {
+                'grupo_id': str(grp['id']),
+                'grupo_nome': grp.get('nome') or str(grp['id']),
+                'departamento_id': dep_eff or None,
+                'departamento_nome': dep_map.get(dep_eff, dep_eff) if dep_eff else '—',
+            }
+            return
+        if dep_id:
+            for grp in dep_to_groups.get(str(dep_id), []):
+                user_to_groups[uid][str(grp['id'])] = {
+                    'grupo_id': str(grp['id']),
+                    'grupo_nome': grp.get('nome') or str(grp['id']),
+                    'departamento_id': str(dep_id),
+                    'departamento_nome': dep_map.get(str(dep_id), str(dep_id)),
+                }
+
+    for row in scope_rows + legacy_rows:
+        _attach(row.get('user_id'), row.get('departamento_id'), row.get('grupo_id'))
+
+    out = []
+    for uid in sorted(user_to_groups.keys(), key=lambda x: (profile_map.get(x) or '').lower()):
+        groups = sorted(
+            user_to_groups[uid].values(),
+            key=lambda g: ((g.get('departamento_nome') or '').lower(), (g.get('grupo_nome') or '').lower()),
+        )
+        if not groups:
+            continue
+        out.append({
+            'user_id': uid,
+            'gestor_nome': profile_map.get(uid) or f'Gestor {uid[:8]}',
+            'grupos': groups,
         })
-
-    return sorted(managers, key=lambda x: (x.get('nome') or '').lower())
-
+    return out
 
 
-def build_manager_print_zip(
-    tenant_id: str,
+def build_manager_groups_zip(
+    tid: str,
     revisao_id: str,
-    selected_managers: list[dict],
-    data_version: str = '0',
-    sb_access_token: str = '',
-    limit_eq: int = 5000,
-) -> tuple[bytes, list[str], list[str]]:
-    """Gera ZIP com um PDF de matriz por grupo selecionado."""
-    import io
-    import zipfile
+    revisao_titulo: str,
+    selected_items: list[dict],
+    ver: str = '0',
+    _token: str = '',
+) -> bytes:
+    """Gera um ZIP com 1 PDF da matriz por grupo selecionado."""
+    if not selected_items:
+        return b''
 
-    from src.db.supabase_client import get_supabase_anon
-    from src.utils.eq_oculto import get_ocultos
-    from src.ui.pages.matriz_modular.data import _load_payload, _fetch_template
+    from src.ui.pages.matriz_modular.data import _load_payload
     from src.ui.pages.matriz_modular.context import (
         _build_eq_labels,
         _build_resumo_df,
@@ -298,90 +391,79 @@ def build_manager_print_zip(
     from src.ui.pages.matriz_modular.pdf_export import _build_pdf_tables
 
     sb = get_supabase_anon()
-    if sb_access_token:
-        sb.postgrest.auth(sb_access_token)
+    if _token:
+        sb.postgrest.auth(_token)
 
+    rev_title = revisao_titulo or 'revisao'
     try:
         rev_rows = (
             sb.table('revisoes')
-            .select('id,titulo')
-            .eq('tenant_id', tenant_id)
+            .select('titulo')
             .eq('id', revisao_id)
             .limit(1)
             .execute()
             .data
         ) or []
+        if rev_rows and rev_rows[0].get('titulo'):
+            rev_title = rev_rows[0]['titulo']
     except Exception:
-        rev_rows = []
-    revisao = rev_rows[0] if rev_rows else {'id': revisao_id, 'titulo': 'Revisão'}
-    titulo = revisao.get('titulo') or 'Revisão'
+        pass
 
-    zip_buffer = io.BytesIO()
-    warnings: list[str] = []
-    files_written: list[str] = []
-
-    ocultos = set()
+    group_name_map = {}
     try:
-        ocultos = get_ocultos(sb, tenant_id, revisao_id)
+        gids = list({str(it.get('grupo_id')) for it in selected_items if it.get('grupo_id')})
+        if gids:
+            grp_rows = (
+                sb.table('equip_grupos')
+                .select('id,nome')
+                .eq('tenant_id', tid)
+                .in_('id', gids)
+                .execute()
+                .data
+            ) or []
+            group_name_map = {str(r.get('id')): r.get('nome') or str(r.get('id')) for r in grp_rows if r.get('id')}
     except Exception:
-        ocultos = set()
+        group_name_map = {}
 
+    pdf_cache: dict[str, tuple[bytes, str]] = {}
+    zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
-        for manager in selected_managers:
-            manager_nome = manager.get('nome') or 'Gestor'
-            manager_slug = _sanitize_filename(manager_nome)
-            for group_item in manager.get('grupos') or []:
-                gid = str(group_item.get('grupo_id') or '')
-                gnome = group_item.get('grupo_nome') or gid
-                if not gid:
+        for item in selected_items:
+            gid = str(item.get('grupo_id') or '')
+            gestor_nome = str(item.get('gestor_nome') or 'Gestor')
+            if not gid:
+                continue
+            grupo_nome = group_name_map.get(gid) or str(item.get('grupo_nome') or gid)
+
+            if gid not in pdf_cache:
+                payload = _load_payload(tid, gid, revisao_id, 10000, ver, _token) or {}
+                eqs = payload.get('eqs') or []
+                tarefas = payload.get('tarefas') or []
+                setor_to_services = payload.get('s2s') or {}
+                all_services = payload.get('all_s') or []
+                if not eqs or not all_services:
                     continue
-                try:
-                    payload = _load_payload(
-                        tenant_id,
-                        gid,
-                        revisao_id,
-                        int(limit_eq),
-                        str(data_version or '0'),
-                        sb_access_token or '',
-                    ) or {}
-                    eqs = payload.get('eqs') or []
-                    if not eqs:
-                        warnings.append(f'{manager_nome} / {gnome}: grupo sem equipamentos para exportação.')
-                        continue
+                task_map = {(str(t['equipamento_id']), str(t['servico_id'])): t for t in tarefas if t.get('equipamento_id') and t.get('servico_id')}
+                eq_label, eq_label_short = _build_eq_labels(eqs, set())
+                resumo_df, *_ = _build_resumo_df(eqs, all_services, task_map, eq_label)
+                sector_tables = _build_sector_tables_for_export(eqs, setor_to_services, task_map, eq_label_short)
+                if not sector_tables:
+                    continue
+                pdf_bytes = _build_pdf_tables(
+                    titulo=rev_title,
+                    grupo_nome=grupo_nome,
+                    resumo_df=resumo_df,
+                    sector_tables=[(n, df.copy()) for n, df in sector_tables],
+                    tarefas_servico_df=pd.DataFrame(tarefas),
+                    revisao_id=revisao_id,
+                )
+                pdf_cache[gid] = (pdf_bytes, grupo_nome)
 
-                    setor_to_services = payload.get('s2s') or {}
-                    all_services = payload.get('all_s') or []
-                    if not all_services:
-                        setor_to_services, all_services = _fetch_template(sb, tenant_id, gid)
-                    if not all_services:
-                        warnings.append(f'{manager_nome} / {gnome}: grupo sem template configurado.')
-                        continue
+            cached = pdf_cache.get(gid)
+            if not cached:
+                continue
+            pdf_bytes, grupo_nome = cached
+            fname = f"{_slug(rev_title)}__{_slug(gestor_nome)}__{_slug(grupo_nome)}.pdf"
+            zf.writestr(fname, pdf_bytes)
 
-                    eq_label, eq_label_short = _build_eq_labels(eqs, ocultos)
-                    tarefas = payload.get('tarefas') or []
-                    task_map = {(str(t.get('equipamento_id')), str(t.get('servico_id'))): t for t in tarefas}
-                    resumo_df, _, _, _ = _build_resumo_df(eqs, all_services, task_map, eq_label)
-                    sector_tables = _build_sector_tables_for_export(eqs, setor_to_services, task_map, eq_label_short)
-                    if not sector_tables:
-                        warnings.append(f'{manager_nome} / {gnome}: não foi possível montar as tabelas do PDF.')
-                        continue
-
-                    pdf_bytes = _build_pdf_tables(
-                        titulo=titulo,
-                        grupo_nome=gnome,
-                        resumo_df=resumo_df,
-                        sector_tables=sector_tables,
-                        revisao_id=revisao_id,
-                    )
-                    if not pdf_bytes:
-                        warnings.append(f'{manager_nome} / {gnome}: PDF vazio.')
-                        continue
-
-                    pdf_name = f"{_sanitize_filename(titulo)}__{manager_slug}__{_sanitize_filename(gnome)}.pdf"
-                    zip_name = f"{manager_slug}/{pdf_name}"
-                    zf.writestr(zip_name, pdf_bytes)
-                    files_written.append(zip_name)
-                except Exception as exc:
-                    warnings.append(f'{manager_nome} / {gnome}: erro ao gerar PDF ({exc}).')
-
-    return zip_buffer.getvalue(), files_written, warnings
+    return zip_buffer.getvalue()
