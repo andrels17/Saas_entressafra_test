@@ -576,8 +576,8 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                 # células das etapas mais quadradas e legíveis
                 ("LEFTPADDING", (1, 3), (-1, -1), 2.0),
                 ("RIGHTPADDING", (1, 3), (-1, -1), 2.0),
-                ("TOPPADDING", (1, 3), (-1, -1), 3.2),
-                ("BOTTOMPADDING", (1, 3), (-1, -1), 3.2),
+                ("TOPPADDING", (1, 3), (-1, -1), 4.8),
+                ("BOTTOMPADDING", (1, 3), (-1, -1), 4.8),
 
                 # reforço geral de grade para impressão
                 ("GRID", (1, 2), (-1, -1), 0.55, colors.HexColor("#7C8A9A")),
@@ -619,10 +619,10 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                     if is_done:
                         style_cmds.extend(
                             [
-                                ("BACKGROUND", (col_i, row_i), (col_i, row_i), colors.HexColor("#DCFCE7")),
+                                ("BACKGROUND", (col_i, row_i), (col_i, row_i), colors.HexColor("#ECFDF5")),
                                 ("TEXTCOLOR", (col_i, row_i), (col_i, row_i), colors.HexColor("#166534")),
                                 ("FONTNAME", (col_i, row_i), (col_i, row_i), "Helvetica-Bold"),
-                                ("BOX", (col_i, row_i), (col_i, row_i), 1.0, colors.HexColor("#166534")),
+                                ("BOX", (col_i, row_i), (col_i, row_i), 1.15, colors.HexColor("#22C55E")),
                             ]
                         )
                     else:
@@ -631,7 +631,7 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                                 ("BACKGROUND", (col_i, row_i), (col_i, row_i), colors.white),
                                 ("TEXTCOLOR", (col_i, row_i), (col_i, row_i), colors.white),
                                 # quadrado mais forte para o gestor marcar à caneta
-                                ("BOX", (col_i, row_i), (col_i, row_i), 1.0, colors.HexColor("#475569")),
+                                ("BOX", (col_i, row_i), (col_i, row_i), 1.2, colors.HexColor("#334155")),
                             ]
                         )
 
@@ -641,7 +641,7 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                 blocks.append(Spacer(1, 0.10 * cm))
             blocks.append(table)
             if chunk_idx < len(chunks):
-                blocks.append(Spacer(1, 0.24 * cm))
+                blocks.append(Spacer(1, 0.34 * cm))
         return blocks
 
     resumo_cols = ["Equipamento", "Concluidos", "Total", "%"]
@@ -893,8 +893,8 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
         ("SPAN", (0, 2), (2, 2)),
         ("SPAN", (0, 3), (2, 3)),
         ("BACKGROUND", (0, 0), (-1, 0), palette["panel"]),
-        ("GRID", (0, 0), (-1, -1), 0.45, palette["line_dark"]),
-        ("BOX", (0, 0), (-1, -1), 0.75, palette["line_dark"]),
+        ("GRID", (0, 0), (-1, -1), 0.65, palette["line_dark"]),
+        ("BOX", (0, 0), (-1, -1), 1.0, palette["line_dark"]),
         ("LEFTPADDING", (0, 0), (-1, -1), 6),
         ("RIGHTPADDING", (0, 0), (-1, -1), 6),
         ("TOPPADDING", (0, 0), (-1, -1), 5),
