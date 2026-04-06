@@ -155,10 +155,10 @@ def build_alertas(
                 if dias_revisao is not None and dias_revisao >= dias_sem_update:
                     sem_inicio.append({**row, "Dias sem update": dias_revisao})
 
-            # sem_update: teve apontamento real mas parou.
-            if status not in ("concluido", "nao_aplica", "travado") and not nenhuma_etapa:
-                if dias_real is not None and dias_real >= dias_sem_update:
-                    sem_update.append({**row, "Dias parado": dias_real})
+            # sem_update: tarefa sem atualização recente, mesmo que ainda sem início.
+            if status not in ("concluido", "nao_aplica", "travado"):
+                if dias is not None and dias >= dias_sem_update:
+                    sem_update.append({**row, "Dias parado": dias})
 
         if pct < esperado_pct - 15 and pct < 100:
             atraso = esperado_pct - pct

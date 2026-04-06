@@ -115,12 +115,11 @@ def _fetch_mv(tenant_id: str, revisao_id: str, _token: str = "") -> list[dict]:
 
 def _mv_to_df(mv_rows: list[dict]) -> pd.DataFrame:
     df = pd.DataFrame(mv_rows)
+    if df.empty:
+        return pd.DataFrame(columns=["grupo_id", "eq_count", "svc_count", "done_steps", "expected_steps", "backlog_steps", "pct"])
     for col in ["eq_count", "svc_count", "done_steps"]:
-        df[col] = pd.to_numeric(
-            df.get(
-                col,
-                0),
-            errors="coerce").fillna(0).astype(int)
+        source = df[col] if col in df.columns else pd.Series([0] * len(df), index=df.index)
+        df[col] = pd.to_numeric(source, errors="coerce").fillna(0).astype(int)
 
     df["expected_raw"] = (df["eq_count"] * df["svc_count"] * 3).astype(int)
     bad = (df["expected_raw"] > 0) & (df["done_steps"] > df["expected_raw"])

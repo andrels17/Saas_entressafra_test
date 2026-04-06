@@ -1,71 +1,110 @@
-"""Rate limit para tentativas de login.
-
-Backend adaptativo:
-- Se REDIS_URL estiver configurado em st.secrets → usa Redis (persistido entre workers)
-- Caso contrário → fallback em memória (funcional mas não cross-worker)
-
-Configuração para produção multitenante (recomendado):
-    # secrets.toml
-    REDIS_URL = "redis://default:senha@host:6379"
-
-Interface pública:
-    check_rate_limit(key) -> (allowed, message, wait_secs)
-    record_failure(key)
-    record_success(key)
-"""
+"""Rate limit para tentativas de login com backend em memória e fallback Redis."""
 from __future__ import annotations
 
 import math
 import time
-from collections import defaultdict
-from typing import DefaultDict
+from dataclasses import dataclass, field
+from typing import Dict
 
 import streamlit as st
 
 WINDOW_SECONDS = 15 * 60
-MAX_FAILURES   = 5
-
-# ── Backend em memória (fallback) ─────────────────────────────────────────────
-_STORE: DefaultDict[str, list[float]] = defaultdict(list)
-
-
-def _get_memory_store():
-    return _STORE
+LOCKOUT_SECONDS = WINDOW_SECONDS
+MAX_ATTEMPTS = 5
+MAX_FAILURES = MAX_ATTEMPTS  # compatibilidade
 
 
-# Alias retrocompatível para testes/código legado.
+@dataclass
+class _Bucket:
+    attempts: list[float] = field(default_factory=list)
+    locked_until: float | None = None
+
+
+def _get_memory_store() -> Dict[str, _Bucket]:
+    global _STORE
+    try:
+        return _STORE
+    except NameError:
+        _STORE = {}
+        return _STORE
+
+
 def _get_store():
     return _get_memory_store()
 
 
-def _bucket(key: str):
-    return _get_memory_store().setdefault(key, [])
+def _coerce_bucket(value) -> _Bucket:
+    if isinstance(value, _Bucket):
+        return value
+    if isinstance(value, list):
+        return _Bucket(attempts=list(value), locked_until=None)
+    return _Bucket()
 
 
-def _prune(key: str, now: float | None = None,
-           *, window_seconds: int = WINDOW_SECONDS) -> list[float]:
-    now = now if now is not None else time.time()
-    cutoff = now - window_seconds
-    bucket = [ts for ts in _get_memory_store().get(key, []) if ts >= cutoff]
-    _get_memory_store()[key] = bucket
+def _bucket(key: str) -> _Bucket:
+    store = _get_store()
+    bucket = _coerce_bucket(store.get(key))
+    store[key] = bucket
     return bucket
 
 
-# ── Backend Redis (produção) ───────────────────────────────────────────────────
+def _prune_bucket(bucket: _Bucket, now: float | None = None, *, window_seconds: int = WINDOW_SECONDS) -> _Bucket:
+    now = time.time() if now is None else now
+    cutoff = now - window_seconds
+    bucket.attempts = [ts for ts in bucket.attempts if ts >= cutoff]
+    if bucket.locked_until is not None and bucket.locked_until <= now:
+        bucket.locked_until = None
+    return bucket
 
-# Singleton do cliente Redis, inicializado uma única vez.
-# Evita abrir uma nova conexão TCP + ping a cada chamada de rate limit,
-# o que era especialmente custoso sob carga (rafaga de tentativas de login).
-# @st.cache_resource garante uma instância por processo Streamlit e
-# funciona corretamente fora do contexto de sessão (sem session_state).
+
+class _MemoryBackend:
+    def _bucket(self, key: str) -> _Bucket:
+        bucket = _bucket(key)
+        return _prune_bucket(bucket)
+
+    def check(self, key: str, *, max_failures: int = MAX_ATTEMPTS, window_seconds: int = WINDOW_SECONDS) -> tuple[bool, str, int]:
+        now = time.time()
+        bucket = _prune_bucket(_bucket(key), now, window_seconds=window_seconds)
+        if bucket.locked_until is not None and bucket.locked_until > now:
+            wait_secs = max(0, int(math.ceil(bucket.locked_until - now)))
+            msg = f"Login bloqueado temporariamente. Tente novamente em {wait_secs} segundo{'s' if wait_secs != 1 else ''}."
+            return False, msg, wait_secs
+        if len(bucket.attempts) >= max_failures:
+            oldest = bucket.attempts[0]
+            wait_secs = max(0, int(math.ceil(oldest + window_seconds - now)))
+            if wait_secs > 0:
+                msg = f"Login bloqueado temporariamente. Tente novamente em {wait_secs} segundo{'s' if wait_secs != 1 else ''}."
+                return False, msg, wait_secs
+        return True, "", 0
+
+    def record_failure(self, key: str) -> int:
+        now = time.time()
+        bucket = _prune_bucket(_bucket(key), now)
+        if bucket.locked_until is not None and bucket.locked_until > now:
+            return 0
+        bucket.attempts.append(now)
+        if len(bucket.attempts) >= MAX_ATTEMPTS:
+            bucket.locked_until = now + LOCKOUT_SECONDS
+            return 0
+        return max(0, MAX_ATTEMPTS - len(bucket.attempts))
+
+    def record_success(self, key: str) -> None:
+        _get_store().pop(key, None)
+
+    def get_info(self, key: str) -> dict:
+        now = time.time()
+        bucket = _prune_bucket(_bucket(key), now)
+        locked_until = bucket.locked_until if bucket.locked_until and bucket.locked_until > now else None
+        return {
+            "attempts_in_window": len(bucket.attempts),
+            "remaining": max(0, MAX_ATTEMPTS - len(bucket.attempts)),
+            "locked": locked_until is not None,
+            "locked_until": locked_until,
+        }
+
+
 @st.cache_resource
 def _get_redis_client():
-    """Inicializa e retorna o cliente Redis singleton.
-
-    Retorna None se REDIS_URL não estiver configurado ou se a conexão falhar.
-    Em caso de falha posterior (rede instável), as funções individuais
-    capturam a exceção e fazem fallback para memória.
-    """
     try:
         redis_url = st.secrets.get("REDIS_URL") or ""
         if not redis_url:
@@ -76,7 +115,6 @@ def _get_redis_client():
             redis_url,
             socket_connect_timeout=2,
             socket_timeout=2,
-            # Reconexão automática em caso de queda transitória
             retry_on_timeout=True,
             health_check_interval=30,
         )
@@ -87,15 +125,29 @@ def _get_redis_client():
 
 
 def _get_redis():
-    """Retorna o cliente Redis cacheado. Nunca levanta exceção."""
     try:
         return _get_redis_client()
     except Exception:
         return None
 
 
+def _memory_backend() -> _MemoryBackend:
+    return _MemoryBackend()
+
+
+def _memory_check(key: str, *, max_failures: int, window_seconds: int) -> tuple[bool, str, int]:
+    return _memory_backend().check(key, max_failures=max_failures, window_seconds=window_seconds)
+
+
+def _memory_record_failure(key: str) -> int:
+    return _memory_backend().record_failure(key)
+
+
+def _memory_record_success(key: str) -> None:
+    _memory_backend().record_success(key)
+
+
 def _redis_check(key: str, *, max_failures: int, window_seconds: int) -> tuple[bool, str, int]:
-    """Rate limit via Redis usando sorted set."""
     r = _get_redis()
     if r is None:
         return _memory_check(key, max_failures=max_failures, window_seconds=window_seconds)
@@ -107,21 +159,13 @@ def _redis_check(key: str, *, max_failures: int, window_seconds: int) -> tuple[b
         pipe.zcard(key)
         pipe.expire(key, window_seconds)
         _, count, _ = pipe.execute()
-
         if count < max_failures:
             return True, "", 0
-
         oldest = r.zrange(key, 0, 0, withscores=True)
-        wait_secs = max(0, int(math.ceil(
-            float(oldest[0][1]) + window_seconds - now
-        ))) if oldest else window_seconds
-        msg = (
-            f"Muitas tentativas de login. Tente novamente em {wait_secs} "
-            f"segundo{'s' if wait_secs != 1 else ''}."
-        )
+        wait_secs = max(0, int(math.ceil(float(oldest[0][1]) + window_seconds - now))) if oldest else window_seconds
+        msg = f"Login bloqueado temporariamente. Tente novamente em {wait_secs} segundo{'s' if wait_secs != 1 else ''}."
         return False, msg, wait_secs
     except Exception:
-        # Redis falhou — fallback em memória
         return _memory_check(key, max_failures=max_failures, window_seconds=window_seconds)
 
 
@@ -136,7 +180,8 @@ def _redis_record_failure(key: str) -> int:
         pipe.expire(key, WINDOW_SECONDS)
         pipe.zcard(key)
         results = pipe.execute()
-        return int(results[2])
+        count = int(results[2])
+        return max(0, MAX_ATTEMPTS - count)
     except Exception:
         return _memory_record_failure(key)
 
@@ -152,58 +197,19 @@ def _redis_record_success(key: str) -> None:
         _memory_record_success(key)
 
 
-# ── Backend memória ────────────────────────────────────────────────────────────
-
-def _memory_check(key: str, *, max_failures: int,
-                  window_seconds: int) -> tuple[bool, str, int]:
-    now = time.time()
-    bucket = _prune(key, now, window_seconds=window_seconds)
-    if len(bucket) < max_failures:
-        return True, "", 0
-    oldest_relevant = bucket[0]
-    wait_secs = max(0, int(math.ceil((oldest_relevant + window_seconds) - now)))
-    msg = (
-        f"Muitas tentativas de login. Tente novamente em {wait_secs} "
-        f"segundo{'s' if wait_secs != 1 else ''}."
-    )
-    return False, msg, wait_secs
-
-
-def _memory_record_failure(key: str) -> int:
-    bucket = _prune(key)
-    bucket.append(time.time())
-    _get_memory_store()[key] = bucket
-    return len(bucket)
-
-
-def _memory_record_success(key: str) -> None:
-    _get_memory_store().pop(key, None)
-
-
-# ── Interface pública ──────────────────────────────────────────────────────────
-
 def get_rate_limit_key(identifier: str | None = None) -> str:
-    if identifier:
+    if identifier is not None:
         return f"login:{str(identifier).strip().lower()}"
     session_user = (
         st.session_state.get("login_email")
         or st.session_state.get("user_email")
         or st.session_state.get("username")
-        or "anonymous"
+        or ""
     )
     return f"login:{str(session_user).strip().lower()}"
 
 
-def check_rate_limit(
-    key: str,
-    *,
-    max_failures: int = MAX_FAILURES,
-    window_seconds: int = WINDOW_SECONDS,
-) -> tuple[bool, str, int]:
-    """Retorna (allowed, message, wait_secs).
-
-    Usa Redis se disponível, memória caso contrário.
-    """
+def check_rate_limit(key: str, *, max_failures: int = MAX_FAILURES, window_seconds: int = WINDOW_SECONDS) -> tuple[bool, str, int]:
     return _redis_check(key, max_failures=max_failures, window_seconds=window_seconds)
 
 
@@ -213,3 +219,7 @@ def record_failure(key: str) -> int:
 
 def record_success(key: str) -> None:
     _redis_record_success(key)
+
+
+def get_attempts_info(key: str) -> dict:
+    return _memory_backend().get_info(key)

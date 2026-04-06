@@ -94,7 +94,7 @@ def fetch_grupo_template(sb: Client, tenant_id: str, grupo_id: str):
     formats = [
         (
             "servico_id, servicos(id,nome,setor_id,setores(nome))",
-            lambda sv: (sv.get("setores") or {}).get("nome") or "Setor",
+            lambda sv: (sv.get("setores") or {}).get("nome") or sv.get("setor") or "Setor",
             "join setor_id+setores",
         ),
         (

@@ -50,7 +50,13 @@ def build_sector_frame(
         row["%"] = round((done_c / total) * 100)
         rows.append(row)
 
-    return pd.DataFrame(rows), col_meta, obs_map
+    df = pd.DataFrame(rows)
+    for sid, sname in zip(svc_ids, svc_names):
+        for suffix in ("D", "R", "M"):
+            col = f"{sname} {suffix}"
+            if col in df.columns:
+                df[col] = df[col].astype(object)
+    return df, col_meta, obs_map
 
 
 def sector_progress_label(*, equipamentos: list[dict], svc_ids: list[str], task_map: dict, setor_nome: str) -> tuple[int, int, int, str]:

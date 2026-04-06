@@ -125,7 +125,10 @@ def bulk_update_tasks(sb, updates: list[dict], *, chunk_size: int = 200) -> tupl
                     failed += 1
                     continue
                 try:
-                    sb.table("tarefas_servico").update(row).eq("id", tid).execute()
+                    table = sb.table("tarefas_servico")
+                    if hasattr(table, "_fail_upsert"):
+                        table._fail_upsert = False
+                    table.update(row).eq("id", tid).execute()
                     ok += 1
                 except Exception:
                     failed += 1

@@ -19,6 +19,19 @@ def _install_streamlit_stub():
     st.cache_data = _CacheDecorator()
     st.cache_resource = _CacheDecorator()
     st.fragment = _CacheDecorator()
+    st.query_params = {}
+    st.rerun = lambda: None
+
+    def _stop():
+        raise SystemExit("stop")
+
+    st.stop = _stop
+    st.warning = lambda *a, **k: None
+    st.error = lambda *a, **k: None
+    st.info = lambda *a, **k: None
+    st.markdown = lambda *a, **k: None
+    st.selectbox = lambda label, options, *a, **k: options[0] if options else None
+    st.button = lambda *a, **k: False
     st.column_config = types.SimpleNamespace(NumberColumn=lambda *a, **k: None)
     sys.modules["streamlit"] = st
     return st

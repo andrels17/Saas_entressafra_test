@@ -100,7 +100,9 @@ def hard_logout() -> None:
     except Exception:
         pass  # ignorado intencionalmente — query_params pode não estar disponível
 
-    st.rerun()
+    rerun = getattr(st, "rerun", None)
+    if callable(rerun):
+        rerun()
 
 
 def reset_for_login_attempt() -> None:

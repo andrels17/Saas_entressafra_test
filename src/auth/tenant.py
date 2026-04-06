@@ -54,16 +54,21 @@ def refresh_current_role() -> str:
     sb.postgrest.auth(token)
 
     try:
-        res = (
+        query = (
             sb.table("tenant_users")
             .select("role")
             .eq("tenant_id", tenant_id)
             .eq("user_id", user_id)
-            .maybe_single()
-            .execute()
         )
-        role = ((getattr(res, "data", None) or {}).get(
-            "role") or "viewer").lower()
+        if hasattr(query, "limit"):
+            query = query.limit(1)
+        elif hasattr(query, "maybe_single"):
+            query = query.maybe_single()
+        res = query.execute()
+        data = getattr(res, "data", None)
+        if isinstance(data, list):
+            data = data[0] if data else {}
+        role = str((data or {}).get("role") or "viewer").lower()
     except Exception:
         role = "viewer"
 
@@ -152,7 +157,9 @@ def ensure_tenant_selected() -> None:
         t = options[choice]
         st.session_state["current_tenant_id"] = t["tenant_id"]
         st.session_state["current_role"] = t["role"]
-        st.rerun()
+        rerun = getattr(st, "rerun", None)
+        if callable(rerun):
+            rerun()
 
     st.info("Selecione a empresa e clique em **Continuar**.")
     st.stop()

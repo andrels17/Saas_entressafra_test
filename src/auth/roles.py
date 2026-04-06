@@ -1,9 +1,4 @@
-"""Definições de papéis com compatibilidade retroativa.
-
-O sistema usa principalmente a string `gestor`, mas ainda existem pontos
-legados que usam `manager`. Este módulo normaliza ambos para o mesmo papel
-operacional, sem conceder visão irrestrita.
-"""
+"""Definições de papéis com compatibilidade retroativa."""
 from __future__ import annotations
 
 from enum import Enum
@@ -14,7 +9,7 @@ class Role(str, Enum):
     ADMIN = "admin"
     SUPERVISOR = "supervisor"
     GESTOR = "gestor"
-    MANAGER = "manager"  # alias legado de GESTOR
+    MANAGER = "manager"
     EXECUTOR = "executor"
     USER = "user"
     VIEWER = "viewer"
@@ -32,7 +27,7 @@ class Role(str, Enum):
         return raw
 
     @classmethod
-    def from_str(cls, value: str | None) -> "Role":
+    def from_str(cls, value: str | None) -> "Role | None":
         norm = cls.normalize(value)
         mapping = {
             cls.SUPERADMIN.value: cls.SUPERADMIN,
@@ -43,15 +38,15 @@ class Role(str, Enum):
             cls.USER.value: cls.USER,
             cls.VIEWER.value: cls.VIEWER,
         }
-        return mapping.get(norm, cls.VIEWER)
+        return mapping.get(norm)
 
     @classmethod
     def is_admin(cls, value: str | None) -> bool:
-        return cls.normalize(value) in {r.value for r in cls.ADMIN_ROLES}
+        return cls.normalize(value) in cls.ADMIN_ROLES
 
     @classmethod
     def is_manager(cls, value: str | None) -> bool:
-        return cls.normalize(value) in {r.value for r in cls.MANAGER_ROLES}
+        return cls.normalize(value) in cls.MANAGER_ROLES
 
     @classmethod
     def can_manage(cls, value: str | None) -> bool:
@@ -59,15 +54,17 @@ class Role(str, Enum):
 
     @classmethod
     def is_user(cls, value: str | None) -> bool:
-        return cls.normalize(value) in {r.value for r in cls.USER_ROLES}
+        return cls.normalize(value) in cls.USER_ROLES
 
 
-Role.ADMIN_ROLES = {Role.SUPERADMIN, Role.ADMIN}
-Role.MANAGER_ROLES = {Role.SUPERADMIN, Role.ADMIN, Role.SUPERVISOR, Role.GESTOR}
-Role.USER_ROLES = {Role.SUPERADMIN, Role.ADMIN, Role.SUPERVISOR, Role.GESTOR, Role.EXECUTOR, Role.USER}
-Role.ALL_ROLES = {Role.SUPERADMIN, Role.ADMIN, Role.SUPERVISOR, Role.GESTOR, Role.EXECUTOR, Role.USER, Role.VIEWER}
+Role.ADMIN_ROLES = frozenset({Role.SUPERADMIN.value, Role.ADMIN.value})
+Role.SUPERVISOR_ROLES = frozenset({Role.SUPERADMIN.value, Role.ADMIN.value, Role.SUPERVISOR.value})
+Role.MANAGER_ROLES = frozenset({Role.SUPERADMIN.value, Role.ADMIN.value, Role.SUPERVISOR.value, Role.GESTOR.value, Role.MANAGER.value})
+Role.USER_ROLES = frozenset({Role.SUPERADMIN.value, Role.ADMIN.value, Role.SUPERVISOR.value, Role.GESTOR.value, Role.MANAGER.value, Role.EXECUTOR.value, Role.USER.value})
+Role.ALL_ROLES = frozenset({Role.SUPERADMIN.value, Role.ADMIN.value, Role.SUPERVISOR.value, Role.GESTOR.value, Role.MANAGER.value, Role.EXECUTOR.value, Role.USER.value, Role.VIEWER.value})
 
 ADMIN_ROLES = Role.ADMIN_ROLES
+SUPERVISOR_ROLES = Role.SUPERVISOR_ROLES
 MANAGER_ROLES = Role.MANAGER_ROLES
 USER_ROLES = Role.USER_ROLES
 ALL_ROLES = Role.ALL_ROLES
