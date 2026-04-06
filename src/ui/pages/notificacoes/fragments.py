@@ -506,7 +506,6 @@ def fragment_zip_impressao(tenant_id: str, revisao_id: str, revisao: dict, seman
             st.checkbox(
                 f"{gestor.get('gestor_nome', 'Gestor')} · {len(grupos)} grupo(s)",
                 key=mgr_key,
-                value=bool(st.session_state.get(mgr_key, False)),
             )
             departamentos = gestor.get("departamentos") or []
             if departamentos:
@@ -520,7 +519,6 @@ def fragment_zip_impressao(tenant_id: str, revisao_id: str, revisao: dict, seman
                 checked = st.checkbox(
                     f"{grupo.get('grupo_nome', gid)} · {grupo.get('departamento_nome', '—')}",
                     key=grp_key,
-                    value=bool(st.session_state.get(grp_key, False)),
                 )
                 grp_states_post.append(bool(checked))
                 if checked:
