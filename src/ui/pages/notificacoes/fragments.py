@@ -461,6 +461,7 @@ O `scheduler.py` e o GitHub Actions lêem esta configuração automaticamente do
 
 # ── ZIP de impressão por gestor ─────────────────────────────────────────────
 
+
 @st.fragment
 def fragment_zip_impressao(tenant_id: str, revisao_id: str, revisao: dict, semana_atual: int, data_version: str) -> None:
     st.markdown("### 📦 ZIP para impressão por gestor")
@@ -479,63 +480,135 @@ def fragment_zip_impressao(tenant_id: str, revisao_id: str, revisao: dict, seman
     with c2:
         st.caption(f"{total_grupos} grupo(s) disponível(is)")
 
-    def _manager_changed(gestor_key: str, group_keys: list[str]) -> None:
+    def _manager_changed(gestor_key: str, dep_keys: list[str], group_keys: list[str]) -> None:
         checked = bool(st.session_state.get(gestor_key, False))
+        for key in dep_keys:
+            st.session_state[key] = checked
         for key in group_keys:
             st.session_state[key] = checked
 
-    def _groups_changed(gestor_key: str, group_keys: list[str]) -> None:
-        vals = [bool(st.session_state.get(key, False)) for key in group_keys]
-        st.session_state[gestor_key] = bool(vals) and all(vals)
+    def _department_changed(gestor_key: str, dep_key: str, dep_group_keys: list[str], all_dep_keys: list[str], all_group_keys: list[str]) -> None:
+        checked = bool(st.session_state.get(dep_key, False))
+        for key in dep_group_keys:
+            st.session_state[key] = checked
+
+        dep_states = [bool(st.session_state.get(k, False)) for k in all_dep_keys]
+        group_states = [bool(st.session_state.get(k, False)) for k in all_group_keys]
+        st.session_state[gestor_key] = bool(dep_states) and all(dep_states) and bool(group_states) and all(group_states)
+
+    def _group_changed(gestor_key: str, dep_key: str, dep_group_keys: list[str], all_dep_keys: list[str], all_group_keys: list[str]) -> None:
+        dep_states = [bool(st.session_state.get(k, False)) for k in dep_group_keys]
+        st.session_state[dep_key] = bool(dep_states) and all(dep_states)
+
+        all_states = [bool(st.session_state.get(k, False)) for k in all_group_keys]
+        st.session_state[gestor_key] = bool(all_states) and all(all_states)
+
+        for other_dep_key in all_dep_keys:
+            if other_dep_key == dep_key:
+                continue
 
     selected: list[dict] = []
+
     for gestor in gestores:
         gestor_id = str(gestor.get("gestor_id") or "")
         grupos = gestor.get("grupos") or []
         if not gestor_id or not grupos:
             continue
 
+        gestor_nome = gestor.get("gestor_nome", "Gestor")
         gestor_key = f"ntf_zip_mgr_{gestor_id}_{data_version}"
-        group_keys = [f"ntf_zip_grp_{gestor_id}_{str(grupo.get('grupo_id') or '')}_{data_version}" for grupo in grupos]
 
-        for key in group_keys:
-            if key not in st.session_state:
-                st.session_state[key] = False
+        grupos_por_departamento: dict[str, list[dict]] = {}
+        for grupo in grupos:
+            dep_nome = str(grupo.get("departamento_nome") or "Sem departamento")
+            grupos_por_departamento.setdefault(dep_nome, []).append(grupo)
+
+        dep_keys: list[str] = []
+        dep_group_keys_map: dict[str, list[str]] = {}
+        all_group_keys: list[str] = []
+
+        for dep_nome, dep_grupos in grupos_por_departamento.items():
+            dep_slug = dep_nome.lower().replace(" ", "_").replace("/", "_")
+            dep_key = f"ntf_zip_dep_{gestor_id}_{dep_slug}_{data_version}"
+            dep_keys.append(dep_key)
+
+            group_keys: list[str] = []
+            for grupo in dep_grupos:
+                gid = str(grupo.get("grupo_id") or "")
+                g_key = f"ntf_zip_grp_{gestor_id}_{gid}_{data_version}"
+                group_keys.append(g_key)
+                all_group_keys.append(g_key)
+                if g_key not in st.session_state:
+                    st.session_state[g_key] = False
+
+            dep_group_keys_map[dep_key] = group_keys
+            if dep_key not in st.session_state:
+                st.session_state[dep_key] = all(bool(st.session_state.get(k, False)) for k in group_keys) if group_keys else False
+
         if gestor_key not in st.session_state:
-            st.session_state[gestor_key] = all(bool(st.session_state.get(k, False)) for k in group_keys)
+            st.session_state[gestor_key] = all(bool(st.session_state.get(k, False)) for k in all_group_keys) if all_group_keys else False
 
-        with st.container(border=True):
+        selected_count = sum(1 for key in all_group_keys if bool(st.session_state.get(key, False)))
+        partial = selected_count > 0 and selected_count < len(all_group_keys)
+        exp_label = f"{gestor_nome} · {len(grupos)} grupo(s)"
+        if partial:
+            exp_label += f" · {selected_count} selecionado(s)"
+
+        with st.expander(exp_label, expanded=partial):
             st.checkbox(
-                f"{gestor.get('gestor_nome', 'Gestor')} · {len(grupos)} grupo(s)",
+                "Selecionar todos os grupos deste gestor",
                 key=gestor_key,
                 on_change=_manager_changed,
-                args=(gestor_key, group_keys),
+                args=(gestor_key, dep_keys, all_group_keys),
             )
+
             if gestor.get("email"):
                 st.caption(gestor.get("email"))
 
-            group_states: list[bool] = []
-            for grupo, group_key in zip(grupos, group_keys):
-                gid = str(grupo.get("grupo_id") or "")
-                st.checkbox(
-                    f"{grupo.get('grupo_nome', gid)} · {grupo.get('departamento_nome', '—')}",
-                    key=group_key,
-                    on_change=_groups_changed,
-                    args=(gestor_key, group_keys),
-                )
-                checked = bool(st.session_state.get(group_key, False))
-                group_states.append(checked)
-                if checked:
-                    selected.append({
-                        "gestor_id": gestor_id,
-                        "gestor_nome": gestor.get("gestor_nome", "Gestor"),
-                        "grupo_id": gid,
-                        "grupo_nome": grupo.get("grupo_nome", gid),
-                        "departamento_id": grupo.get("departamento_id", ""),
-                        "departamento_nome": grupo.get("departamento_nome", "—"),
-                    })
+            for dep_nome, dep_grupos in grupos_por_departamento.items():
+                dep_slug = dep_nome.lower().replace(" ", "_").replace("/", "_")
+                dep_key = f"ntf_zip_dep_{gestor_id}_{dep_slug}_{data_version}"
+                dep_group_keys = dep_group_keys_map.get(dep_key, [])
 
-            if any(group_states) and not all(group_states):
+                dep_selected = sum(1 for key in dep_group_keys if bool(st.session_state.get(key, False)))
+                dep_partial = dep_selected > 0 and dep_selected < len(dep_group_keys)
+
+                st.markdown(f"**📁 {dep_nome}**")
+                dept_col1, dept_col2 = st.columns([0.78, 0.22])
+                with dept_col1:
+                    st.checkbox(
+                        f"Selecionar departamento · {len(dep_grupos)} grupo(s)",
+                        key=dep_key,
+                        on_change=_department_changed,
+                        args=(gestor_key, dep_key, dep_group_keys, dep_keys, all_group_keys),
+                    )
+                with dept_col2:
+                    if dep_partial:
+                        st.caption(f"{dep_selected}/{len(dep_group_keys)}")
+
+                for grupo in dep_grupos:
+                    gid = str(grupo.get("grupo_id") or "")
+                    group_key = f"ntf_zip_grp_{gestor_id}_{gid}_{data_version}"
+                    st.checkbox(
+                        grupo.get("grupo_nome", gid),
+                        key=group_key,
+                        on_change=_group_changed,
+                        args=(gestor_key, dep_key, dep_group_keys, dep_keys, all_group_keys),
+                    )
+
+                    if bool(st.session_state.get(group_key, False)):
+                        selected.append({
+                            "gestor_id": gestor_id,
+                            "gestor_nome": gestor_nome,
+                            "grupo_id": gid,
+                            "grupo_nome": grupo.get("grupo_nome", gid),
+                            "departamento_id": grupo.get("departamento_id", ""),
+                            "departamento_nome": grupo.get("departamento_nome", "—"),
+                        })
+
+                st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+            if partial:
                 st.caption("Seleção parcial deste gestor.")
 
     st.divider()
