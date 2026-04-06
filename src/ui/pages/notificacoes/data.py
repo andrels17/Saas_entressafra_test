@@ -11,7 +11,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from src.utils.supabase_helpers import sb_for_user
+from src.db.supabase_client import get_supabase_anon
 
 
 # ── Helpers de data ──────────────────────────────────────────────────────────
@@ -43,7 +43,9 @@ def dias_desde(ts_str: str | None) -> int | None:
 @st.cache_data(ttl=60, show_spinner=False)
 def load_data(tid: str, rev_id: str, ver: str = "0", _token: str = "") -> dict:
     """Carrega todos os dados necessários para os alertas em uma só query."""
-    sb = sb_for_user()
+    sb = get_supabase_anon()
+    if _token:
+        sb.postgrest.auth(_token)
     try:
         tarefas = (
             sb.table("tarefas_servico")
