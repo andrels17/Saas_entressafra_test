@@ -222,27 +222,87 @@ def _slugify(value: str) -> str:
     return value or "item"
 
 
+def _load_profiles_map(svc, user_ids: list[str]) -> dict[str, str]:
+    if not user_ids:
+        return {}
+    try:
+        rows = (
+            svc.table("user_profiles")
+            .select("user_id,nome")
+            .in_("user_id", user_ids)
+            .execute()
+            .data
+        ) or []
+        return {str(r.get("user_id")): (r.get("nome") or "") for r in rows if r.get("user_id")}
+    except Exception:
+        return {}
+
+
 @st.cache_data(ttl=60, show_spinner=False)
 def load_manager_print_options(tid: str, ver: str = "0", _token: str = "") -> list[dict]:
-    """Retorna gestores e grupos disponíveis para geração do ZIP de impressão."""
+    """Retorna gestores e grupos disponíveis para geração do ZIP de impressão.
+
+    Importante: esta função não depende de e-mail nem de auth.admin.
+    Ela usa tenant_users + tenant_user_departamentos/tenant_user_scope +
+    equip_grupos, que é o que de fato define o vínculo operacional.
+    """
     try:
-        from src.services.email.recipients import get_manager_pdf_bundles
-        bundles = get_manager_pdf_bundles(tid) or []
+        from src.db.supabase_client import get_supabase_service
+        svc = get_supabase_service()
     except Exception:
-        bundles = []
-    if not bundles:
         return []
 
-    sb = get_supabase_anon()
-    if _token:
-        sb.postgrest.auth(_token)
+    try:
+        tu_rows = (
+            svc.table("tenant_users")
+            .select("user_id,role")
+            .eq("tenant_id", tid)
+            .execute()
+            .data
+        ) or []
+    except Exception:
+        tu_rows = []
+
+    role_map: dict[str, str] = {}
+    gestor_uids: set[str] = set()
+    for row in tu_rows:
+        uid = str(row.get("user_id") or "").strip()
+        role = str(row.get("role") or "").strip().lower()
+        if not uid:
+            continue
+        role_map[uid] = role
+        if role in {"gestor", "manager"}:
+            gestor_uids.add(uid)
+
+    scope_rows: list[dict] = []
+    for table in ("tenant_user_departamentos", "tenant_user_scope"):
+        try:
+            rows = (
+                svc.table(table)
+                .select("user_id,departamento_id,grupo_id")
+                .eq("tenant_id", tid)
+                .execute()
+                .data
+            ) or []
+            scope_rows.extend(rows)
+        except Exception:
+            pass
+
+    if not scope_rows:
+        return []
+
+    if not gestor_uids:
+        gestor_uids = {
+            str(r.get("user_id") or "").strip()
+            for r in scope_rows
+            if str(r.get("user_id") or "").strip()
+        }
 
     try:
         grupos_rows = (
-            sb.table("equip_grupos")
+            svc.table("equip_grupos")
             .select("id,nome,departamento_id")
             .eq("tenant_id", tid)
-            .order("nome")
             .execute()
             .data
         ) or []
@@ -251,7 +311,7 @@ def load_manager_print_options(tid: str, ver: str = "0", _token: str = "") -> li
 
     try:
         dep_rows = (
-            sb.table("departamentos")
+            svc.table("departamentos")
             .select("id,nome")
             .eq("tenant_id", tid)
             .execute()
@@ -260,46 +320,78 @@ def load_manager_print_options(tid: str, ver: str = "0", _token: str = "") -> li
     except Exception:
         dep_rows = []
 
-    dep_nome_map = {str(r.get("id")): r.get("nome") or "—" for r in dep_rows if r.get("id")}
-    grupo_map = {str(r.get("id")): r for r in grupos_rows if r.get("id")}
+    dep_nome_map = {str(r.get("id")): (r.get("nome") or "—") for r in dep_rows if r.get("id")}
+    grupos_by_dep: dict[str, list[dict]] = defaultdict(list)
+    grupo_nome_map: dict[str, str] = {}
+    grupo_dep_map: dict[str, str] = {}
+    for row in grupos_rows:
+        gid = str(row.get("id") or "").strip()
+        dep_id = str(row.get("departamento_id") or "").strip()
+        if not gid:
+            continue
+        grupo_nome_map[gid] = row.get("nome") or gid
+        grupo_dep_map[gid] = dep_id
+        if dep_id:
+            grupos_by_dep[dep_id].append(row)
+
+    uid_dep_to_group_ids: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+
+    for row in scope_rows:
+        uid = str(row.get("user_id") or "").strip()
+        if not uid or uid not in gestor_uids:
+            continue
+        dep_id = str(row.get("departamento_id") or "").strip()
+        gid = str(row.get("grupo_id") or "").strip()
+        if gid and not dep_id:
+            dep_id = grupo_dep_map.get(gid, "")
+        if not dep_id:
+            continue
+        if gid:
+            uid_dep_to_group_ids[uid][dep_id].add(gid)
+        else:
+            for grp in grupos_by_dep.get(dep_id, []):
+                gid2 = str(grp.get("id") or "").strip()
+                if gid2:
+                    uid_dep_to_group_ids[uid][dep_id].add(gid2)
+
+    if not uid_dep_to_group_ids:
+        return []
+
+    profile_map = _load_profiles_map(svc, sorted(uid_dep_to_group_ids.keys()))
 
     gestores: list[dict] = []
-    for bundle in bundles:
-        recipient = bundle.recipient
+    for uid, dep_map in uid_dep_to_group_ids.items():
         grupos_flat: list[dict] = []
         seen: set[str] = set()
-
-        for dep_id, dep_nome in zip(bundle.departamento_ids, bundle.departamento_nomes):
-            dep_id = str(dep_id)
-            explicit_gids = [str(g) for g in (bundle.grupo_ids_por_dept.get(dep_id) or [])]
-            for gid in explicit_gids:
-                row = grupo_map.get(gid, {})
+        for dep_id, gids in dep_map.items():
+            for gid in sorted(gids):
                 if gid in seen:
                     continue
                 seen.add(gid)
                 grupos_flat.append({
                     "grupo_id": gid,
-                    "grupo_nome": row.get("nome") or gid,
+                    "grupo_nome": grupo_nome_map.get(gid, gid),
                     "departamento_id": dep_id,
-                    "departamento_nome": dep_nome or dep_nome_map.get(dep_id, "—"),
-                    "label": f"{row.get('nome') or gid} · {dep_nome or dep_nome_map.get(dep_id, '—')}",
+                    "departamento_nome": dep_nome_map.get(dep_id, "—"),
+                    "label": f"{grupo_nome_map.get(gid, gid)} · {dep_nome_map.get(dep_id, '—')}",
                 })
 
         if not grupos_flat:
             continue
 
         gestores.append({
-            "gestor_id": str(recipient.user_id),
-            "gestor_nome": recipient.nome or recipient.email or "Gestor",
-            "email": recipient.email or "",
+            "gestor_id": uid,
+            "gestor_nome": profile_map.get(uid) or f"Gestor {uid[:8]}",
+            "email": "",
+            "role": role_map.get(uid, ""),
             "departamentos": [
                 {
-                    "departamento_id": str(dep_id),
-                    "departamento_nome": dep_nome or dep_nome_map.get(str(dep_id), "—"),
+                    "departamento_id": dep_id,
+                    "departamento_nome": dep_nome_map.get(dep_id, "—"),
                 }
-                for dep_id, dep_nome in zip(bundle.departamento_ids, bundle.departamento_nomes)
+                for dep_id in sorted(dep_map.keys())
             ],
-            "grupos": sorted(grupos_flat, key=lambda x: (str(x["departamento_nome"]), str(x["grupo_nome"]))),
+            "grupos": sorted(grupos_flat, key=lambda x: (str(x.get("departamento_nome") or ""), str(x.get("grupo_nome") or ""))),
         })
 
     return sorted(gestores, key=lambda x: str(x.get("gestor_nome") or "").lower())
@@ -356,48 +448,79 @@ def _build_group_pdf(*, revisao_titulo: str, semana_atual: int, gestor_nome: str
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import cm
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-    from reportlab.lib.enums import TA_LEFT
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-    buff = io.BytesIO()
-    doc = SimpleDocTemplate(buff, pagesize=landscape(A4), leftMargin=0.8*cm, rightMargin=0.8*cm, topMargin=0.8*cm, bottomMargin=0.8*cm)
+    mem = io.BytesIO()
+    doc = SimpleDocTemplate(
+        mem,
+        pagesize=landscape(A4),
+        leftMargin=0.7 * cm,
+        rightMargin=0.7 * cm,
+        topMargin=0.8 * cm,
+        bottomMargin=0.8 * cm,
+    )
     styles = getSampleStyleSheet()
-    title = ParagraphStyle("title", parent=styles["Heading1"], fontName="Helvetica-Bold", fontSize=14, leading=16, alignment=TA_LEFT, textColor=colors.HexColor("#111827"))
-    meta = ParagraphStyle("meta", parent=styles["BodyText"], fontSize=8.5, leading=10, textColor=colors.HexColor("#374151"))
-    small = ParagraphStyle("small", parent=styles["BodyText"], fontSize=7.4, leading=8.5, textColor=colors.HexColor("#111827"))
+    title_style = ParagraphStyle(
+        "ntf_zip_title",
+        parent=styles["Heading1"],
+        fontName="Helvetica-Bold",
+        fontSize=14,
+        leading=16,
+        textColor=colors.HexColor("#111827"),
+        spaceAfter=4,
+    )
+    meta_style = ParagraphStyle(
+        "ntf_zip_meta",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=9,
+        leading=11,
+        textColor=colors.HexColor("#475569"),
+        spaceAfter=2,
+    )
+
+    cols = [c for c in ["Equipamento", "Modelo", "Setor", "Serviço", "D", "R", "M", "Status", "Obs."] if c in df.columns]
+    data_tbl = [cols] + df[cols].fillna("").astype(str).values.tolist()
+    usable = landscape(A4)[0] - (1.4 * cm)
+    widths = {
+        "Equipamento": 2.5 * cm,
+        "Modelo": 3.2 * cm,
+        "Setor": 3.0 * cm,
+        "Serviço": 7.0 * cm,
+        "D": 0.9 * cm,
+        "R": 0.9 * cm,
+        "M": 0.9 * cm,
+        "Status": 2.0 * cm,
+        "Obs.": 6.0 * cm,
+    }
+    col_widths = [widths.get(c, usable / max(len(cols), 1)) for c in cols]
+
+    tbl = Table(data_tbl, repeatRows=1, colWidths=col_widths)
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F172A")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("LEADING", (0, 0), (-1, -1), 9),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#CBD5E1")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (4, 1), (6, -1), "CENTER"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
 
     story = [
-        Paragraph(f"Matriz para impressão — {grupo_nome}", title),
-        Spacer(1, 0.15*cm),
-        Paragraph(f"Revisão: <b>{revisao_titulo or '—'}</b> · Semana: <b>{semana_atual}</b>", meta),
-        Paragraph(f"Gestor: <b>{gestor_nome or '—'}</b> · Departamento: <b>{departamento_nome or '—'}</b>", meta),
-        Spacer(1, 0.35*cm),
+        Paragraph(f"Matriz para impressão · {grupo_nome}", title_style),
+        Paragraph(f"Revisão: <b>{revisao_titulo}</b>", meta_style),
+        Paragraph(f"Semana: <b>{int(semana_atual or 1)}</b> · Departamento: <b>{departamento_nome}</b> · Gestor: <b>{gestor_nome}</b>", meta_style),
+        Spacer(1, 0.25 * cm),
+        tbl,
     ]
-
-    table_data = [[Paragraph(f"<b>{c}</b>", small) for c in df.columns]]
-    for _, row in df.iterrows():
-        table_data.append([Paragraph(str(row.get(c, "") or "—"), small) for c in df.columns])
-
-    widths = [2.2*cm, 3.1*cm, 2.7*cm, 5.2*cm, 0.8*cm, 0.8*cm, 0.8*cm, 2.3*cm, 5.6*cm]
-    tbl = Table(table_data, colWidths=widths, repeatRows=1)
-    style_cmds = [
-        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#0F172A")),
-        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
-        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-        ("GRID", (0,0), (-1,-1), 0.3, colors.HexColor("#CBD5E1")),
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-        ("LEFTPADDING", (0,0), (-1,-1), 4),
-        ("RIGHTPADDING", (0,0), (-1,-1), 4),
-        ("TOPPADDING", (0,0), (-1,-1), 4),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 4),
-    ]
-    for i in range(1, len(table_data)):
-        bg = colors.HexColor("#F8FAFC") if i % 2 == 0 else colors.white
-        style_cmds.append(("BACKGROUND", (0, i), (-1, i), bg))
-    tbl.setStyle(TableStyle(style_cmds))
-    story.append(tbl)
     doc.build(story)
-    return buff.getvalue()
+    return mem.getvalue()
 
 
 def build_manager_print_zip(

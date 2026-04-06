@@ -451,13 +451,10 @@ O `scheduler.py` e o GitHub Actions lêem esta configuração automaticamente do
 """)
 
 
-
-# ── ZIP de impressão por gestor ─────────────────────────────────────────────
-
 @st.fragment
 def fragment_zip_impressao(tenant_id: str, revisao_id: str, revisao: dict, semana_atual: int, data_version: str) -> None:
     st.markdown("### 📦 ZIP para impressão por gestor")
-    st.caption("Selecione os gestores e os grupos desejados para gerar um ZIP com 1 PDF da matriz por grupo.")
+    st.caption("Selecione os gestores e os grupos desejados para gerar um ZIP com 1 PDF por grupo.")
 
     token = st.session_state.get("sb_access_token", "")
     gestores = load_manager_print_options(tenant_id, str(data_version), token)
@@ -474,8 +471,8 @@ def fragment_zip_impressao(tenant_id: str, revisao_id: str, revisao: dict, seman
 
     selected: list[dict] = []
     for gestor in gestores:
-        gestor_id = str(gestor.get("gestor_id"))
-        grupos = gestor.get("grupos", [])
+        gestor_id = str(gestor.get("gestor_id") or "")
+        grupos = gestor.get("grupos") or []
         if not grupos:
             continue
 
@@ -485,11 +482,13 @@ def fragment_zip_impressao(tenant_id: str, revisao_id: str, revisao: dict, seman
                 key=f"ntf_zip_mgr_{gestor_id}_{data_version}",
                 value=False,
             )
-            if gestor.get("email"):
-                st.caption(gestor.get("email"))
+            departamentos = gestor.get("departamentos") or []
+            if departamentos:
+                deps_txt = ", ".join(d.get("departamento_nome") or "—" for d in departamentos)
+                st.caption(f"Departamentos: {deps_txt}")
 
             for grupo in grupos:
-                gid = str(grupo.get("grupo_id"))
+                gid = str(grupo.get("grupo_id") or "")
                 checked = st.checkbox(
                     f"{grupo.get('grupo_nome', gid)} · {grupo.get('departamento_nome', '—')}",
                     key=f"ntf_zip_grp_{gestor_id}_{gid}_{data_version}",
@@ -521,7 +520,7 @@ def fragment_zip_impressao(tenant_id: str, revisao_id: str, revisao: dict, seman
             token,
         )
     except ImportError:
-        st.info("Instale `reportlab` para habilitar a geração dos PDFs da matriz.")
+        st.info("Instale `reportlab` para habilitar a geração dos PDFs.")
         return
     except Exception as exc:
         st.error(f"Não foi possível gerar o ZIP: {exc}")
