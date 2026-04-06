@@ -485,6 +485,60 @@ def _build_group_pdf_same_as_matriz(
     )
 
 
+def build_manager_print_documents(
+    tid: str,
+    revisao_id: str,
+    selections: list[dict],
+    revisao: dict,
+    semana_atual: int,
+    _token: str = "",
+) -> list[dict]:
+    """Gera os PDFs individuais para download/impressão por grupo selecionado."""
+    docs: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+
+    for item in selections or []:
+        gid = str(item.get("grupo_id") or "").strip()
+        gestor_nome = str(item.get("gestor_nome") or "Gestor").strip() or "Gestor"
+        grupo_nome = str(item.get("grupo_nome") or gid).strip() or gid
+        if not gid:
+            continue
+
+        dedup_key = (gestor_nome, gid)
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+
+        pdf_bytes = _build_group_pdf_same_as_matriz(
+            tid=tid,
+            revisao_id=revisao_id,
+            grupo_id=gid,
+            grupo_nome=grupo_nome,
+            revisao=revisao,
+            token=_token,
+        )
+        if not pdf_bytes:
+            continue
+
+        fname = (
+            f"Semana_{int(semana_atual or 1):02d}__"
+            f"{_slugify(gestor_nome)}__"
+            f"{_slugify(grupo_nome)}.pdf"
+        )
+        docs.append({
+            "gestor_id": str(item.get("gestor_id") or ""),
+            "gestor_nome": gestor_nome,
+            "grupo_id": gid,
+            "grupo_nome": grupo_nome,
+            "departamento_id": str(item.get("departamento_id") or ""),
+            "departamento_nome": str(item.get("departamento_nome") or "—"),
+            "file_name": fname,
+            "pdf_bytes": pdf_bytes,
+        })
+
+    return docs
+
+
 def build_manager_print_zip(
     tid: str,
     revisao_id: str,
@@ -494,31 +548,18 @@ def build_manager_print_zip(
     _token: str = "",
 ) -> bytes:
     """Gera ZIP com 1 PDF por grupo, usando exatamente o layout da Matriz."""
+    docs = build_manager_print_documents(
+        tid=tid,
+        revisao_id=revisao_id,
+        selections=selections,
+        revisao=revisao,
+        semana_atual=semana_atual,
+        _token=_token,
+    )
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for item in selections or []:
-            gid = str(item.get("grupo_id") or "")
-            grupo_nome = str(item.get("grupo_nome") or gid)
-            if not gid:
-                continue
-
-            pdf_bytes = _build_group_pdf_same_as_matriz(
-                tid=tid,
-                revisao_id=revisao_id,
-                grupo_id=gid,
-                grupo_nome=grupo_nome,
-                revisao=revisao,
-                token=_token,
-            )
-            if not pdf_bytes:
-                continue
-
-            fname = (
-                f"Semana_{int(semana_atual or 1):02d}__"
-                f"{_slugify(item.get('gestor_nome') or 'Gestor')}__"
-                f"{_slugify(grupo_nome)}.pdf"
-            )
-            zf.writestr(fname, pdf_bytes)
+        for doc in docs:
+            zf.writestr(doc["file_name"], doc["pdf_bytes"])
     return mem.getvalue()
 
 

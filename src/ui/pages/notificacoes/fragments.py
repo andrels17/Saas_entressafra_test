@@ -2,20 +2,21 @@
 from __future__ import annotations
 from html import escape as _h
 
+import base64
 import streamlit as st
+import streamlit.components.v1 as components
 
 from src.ui.components.actions import download_action
 from src.ui.components.forms import (form_section, form_submit_button,
                                      validate_time_hhmm, validation_summary)
 from src.ui.components.tables import titled_table
 from src.ui.components.states import empty_message
-from .data import resumo_por_grupo, build_manager_print_zip
-
-# Compatibilidade com nomes antigos/novos
-try:
-    from .data import load_manager_print_options
-except ImportError:  # pragma: no cover
-    from .data import load_manager_print_targets as load_manager_print_options
+from .data import (
+    resumo_por_grupo,
+    load_manager_print_options,
+    build_manager_print_documents,
+    build_manager_print_zip,
+)
 
 
 # ── Helper de download CSV ───────────────────────────────────────────────────
@@ -457,10 +458,13 @@ O `scheduler.py` e o GitHub Actions lêem esta configuração automaticamente do
 """)
 
 
+
+# ── ZIP de impressão por gestor ─────────────────────────────────────────────
+
 @st.fragment
 def fragment_zip_impressao(tenant_id: str, revisao_id: str, revisao: dict, semana_atual: int, data_version: str) -> None:
     st.markdown("### 📦 ZIP para impressão por gestor")
-    st.caption("Selecione os gestores e os grupos desejados para gerar um ZIP com 1 PDF por grupo.")
+    st.caption("Selecione os gestores e os grupos desejados para baixar o ZIP ou abrir os PDFs individuais para impressão.")
 
     token = st.session_state.get("sb_access_token", "")
     gestores = load_manager_print_options(tenant_id, str(data_version), token)
@@ -475,52 +479,52 @@ def fragment_zip_impressao(tenant_id: str, revisao_id: str, revisao: dict, seman
     with c2:
         st.caption(f"{total_grupos} grupo(s) disponível(is)")
 
-    selected: list[dict] = []
-    sync_prefix = f"_ntf_zip_mgr_sync_{data_version}_"
+    def _manager_changed(gestor_key: str, group_keys: list[str]) -> None:
+        checked = bool(st.session_state.get(gestor_key, False))
+        for key in group_keys:
+            st.session_state[key] = checked
 
+    def _groups_changed(gestor_key: str, group_keys: list[str]) -> None:
+        vals = [bool(st.session_state.get(key, False)) for key in group_keys]
+        st.session_state[gestor_key] = bool(vals) and all(vals)
+
+    selected: list[dict] = []
     for gestor in gestores:
         gestor_id = str(gestor.get("gestor_id") or "")
         grupos = gestor.get("grupos") or []
-        if not grupos:
+        if not gestor_id or not grupos:
             continue
 
-        mgr_key = f"ntf_zip_mgr_{gestor_id}_{data_version}"
-        grp_keys = [f"ntf_zip_grp_{gestor_id}_{str(g.get('grupo_id') or '')}_{data_version}" for g in grupos]
+        gestor_key = f"ntf_zip_mgr_{gestor_id}_{data_version}"
+        group_keys = [f"ntf_zip_grp_{gestor_id}_{str(grupo.get('grupo_id') or '')}_{data_version}" for grupo in grupos]
 
-        prev_mgr = bool(st.session_state.get(f"{sync_prefix}{gestor_id}", False))
-        mgr_checked = bool(st.session_state.get(mgr_key, False))
-
-        # Clique no gestor sincroniza todos os grupos antes de renderizar
-        if mgr_checked != prev_mgr:
-            for gk in grp_keys:
-                st.session_state[gk] = mgr_checked
-            st.session_state[f"{sync_prefix}{gestor_id}"] = mgr_checked
-
-        # Se todos os grupos já estavam marcados manualmente, reflete no gestor
-        grp_states_pre = [bool(st.session_state.get(gk, False)) for gk in grp_keys]
-        if grp_states_pre and all(grp_states_pre) != bool(st.session_state.get(mgr_key, False)):
-            st.session_state[mgr_key] = all(grp_states_pre)
-            st.session_state[f"{sync_prefix}{gestor_id}"] = all(grp_states_pre)
+        for key in group_keys:
+            if key not in st.session_state:
+                st.session_state[key] = False
+        if gestor_key not in st.session_state:
+            st.session_state[gestor_key] = all(bool(st.session_state.get(k, False)) for k in group_keys)
 
         with st.container(border=True):
             st.checkbox(
                 f"{gestor.get('gestor_nome', 'Gestor')} · {len(grupos)} grupo(s)",
-                key=mgr_key,
+                key=gestor_key,
+                on_change=_manager_changed,
+                args=(gestor_key, group_keys),
             )
-            departamentos = gestor.get("departamentos") or []
-            if departamentos:
-                deps_txt = ", ".join(d.get("departamento_nome") or "—" for d in departamentos)
-                st.caption(f"Departamentos: {deps_txt}")
+            if gestor.get("email"):
+                st.caption(gestor.get("email"))
 
-            grp_states_post: list[bool] = []
-            for grupo in grupos:
+            group_states: list[bool] = []
+            for grupo, group_key in zip(grupos, group_keys):
                 gid = str(grupo.get("grupo_id") or "")
-                grp_key = f"ntf_zip_grp_{gestor_id}_{gid}_{data_version}"
-                checked = st.checkbox(
+                st.checkbox(
                     f"{grupo.get('grupo_nome', gid)} · {grupo.get('departamento_nome', '—')}",
-                    key=grp_key,
+                    key=group_key,
+                    on_change=_groups_changed,
+                    args=(gestor_key, group_keys),
                 )
-                grp_states_post.append(bool(checked))
+                checked = bool(st.session_state.get(group_key, False))
+                group_states.append(checked)
                 if checked:
                     selected.append({
                         "gestor_id": gestor_id,
@@ -531,44 +535,142 @@ def fragment_zip_impressao(tenant_id: str, revisao_id: str, revisao: dict, seman
                         "departamento_nome": grupo.get("departamento_nome", "—"),
                     })
 
-            # Mantém o gestor consistente após interações manuais nos grupos
-            all_groups_checked = bool(grp_states_post) and all(grp_states_post)
-            if bool(st.session_state.get(mgr_key, False)) != all_groups_checked:
-                st.session_state[mgr_key] = all_groups_checked
-            st.session_state[f"{sync_prefix}{gestor_id}"] = bool(st.session_state.get(mgr_key, False))
+            if any(group_states) and not all(group_states):
+                st.caption("Seleção parcial deste gestor.")
 
     st.divider()
     st.caption(f"Serão gerados {len(selected)} PDF(s).")
     if not selected:
-        st.warning("Marque pelo menos um grupo para gerar o ZIP.")
+        st.warning("Marque pelo menos um grupo para gerar os PDFs.")
         return
 
-    try:
-        zip_bytes = build_manager_print_zip(
-            tenant_id,
-            revisao_id,
-            selected,
-            revisao,
-            semana_atual,
-            token,
+    selection_signature = tuple(sorted(
+        (str(item.get("gestor_id") or ""), str(item.get("grupo_id") or ""))
+        for item in selected
+    ))
+    docs_sig_key = f"ntf_print_docs_sig_{revisao_id}"
+    docs_state_key = f"ntf_print_docs_{revisao_id}"
+    if st.session_state.get(docs_sig_key) != selection_signature:
+        st.session_state.pop(docs_state_key, None)
+        st.session_state[docs_sig_key] = selection_signature
+
+    action_col1, action_col2 = st.columns(2)
+    with action_col1:
+        try:
+            zip_bytes = build_manager_print_zip(
+                tenant_id,
+                revisao_id,
+                selected,
+                revisao,
+                semana_atual,
+                token,
+            )
+        except ImportError:
+            st.info("Instale `reportlab` para habilitar a geração dos PDFs da matriz.")
+            return
+        except Exception as exc:
+            st.error(f"Não foi possível gerar o ZIP: {exc}")
+            return
+
+        if zip_bytes:
+            st.download_button(
+                "⬇️ Baixar ZIP para impressão",
+                data=zip_bytes,
+                file_name=f"matrizes_impressao_semana_{int(semana_atual or 1):02d}.zip",
+                mime="application/zip",
+                use_container_width=True,
+                type="primary",
+                key=f"ntf_zip_dl_{revisao_id}_{data_version}_{len(selected)}",
+            )
+        else:
+            st.warning("Nenhum PDF pôde ser gerado para os grupos selecionados.")
+            return
+
+    with action_col2:
+        prepare = st.button(
+            "🖨️ Preparar impressão dos PDFs",
+            use_container_width=True,
+            key=f"ntf_prepare_print_{revisao_id}_{data_version}_{len(selected)}",
         )
-    except ImportError:
-        st.info("Instale `reportlab` para habilitar a geração dos PDFs.")
-        return
-    except Exception as exc:
-        st.error(f"Não foi possível gerar o ZIP: {exc}")
+
+    if prepare:
+        with st.spinner("Gerando PDFs individuais para impressão...", show_time=True):
+            try:
+                docs = build_manager_print_documents(
+                    tenant_id,
+                    revisao_id,
+                    selected,
+                    revisao,
+                    semana_atual,
+                    token,
+                )
+            except ImportError:
+                st.info("Instale `reportlab` para habilitar a geração dos PDFs da matriz.")
+                return
+            except Exception as exc:
+                st.error(f"Não foi possível preparar os PDFs: {exc}")
+                return
+        st.session_state[docs_state_key] = docs
+
+    docs = st.session_state.get(docs_state_key) or []
+    if not docs:
         return
 
-    if not zip_bytes:
-        st.warning("Nenhum PDF pôde ser gerado para os grupos selecionados.")
-        return
+    st.divider()
+    st.markdown("#### 🖨️ PDFs individuais para impressão")
+    st.caption("Clique em imprimir para abrir o PDF em nova aba e disparar a janela de impressão do navegador.")
 
-    st.download_button(
-        "⬇️ Gerar ZIP para impressão",
-        data=zip_bytes,
-        file_name=f"matrizes_impressao_semana_{int(semana_atual or 1):02d}.zip",
-        mime="application/zip",
-        use_container_width=True,
-        type="primary",
-        key=f"ntf_zip_dl_{revisao_id}_{data_version}_{len(selected)}",
-    )
+    for idx, doc in enumerate(docs, start=1):
+        pdf_bytes = doc.get("pdf_bytes") or b""
+        if not pdf_bytes:
+            continue
+        file_name = str(doc.get("file_name") or f"documento_{idx}.pdf")
+        label = f"{doc.get('gestor_nome', 'Gestor')} · {doc.get('grupo_nome', 'Grupo')}"
+        depto = doc.get("departamento_nome") or "—"
+        pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+        button_id = f"print_btn_{revisao_id}_{idx}_{abs(hash(file_name))}"
+
+        with st.container(border=True):
+            st.markdown(f"**{label}**")
+            st.caption(f"Departamento: {depto}")
+            dl_col, print_col = st.columns([1, 1])
+            with dl_col:
+                st.download_button(
+                    "⬇️ Baixar PDF",
+                    data=pdf_bytes,
+                    file_name=file_name,
+                    mime="application/pdf",
+                    use_container_width=True,
+                    key=f"ntf_pdf_dl_{revisao_id}_{idx}_{file_name}",
+                )
+            with print_col:
+                components.html(
+                    f"""
+                    <div style="padding-top: 2px;">
+                      <button id="{button_id}" style="width:100%;padding:0.55rem 0.75rem;border:none;border-radius:0.55rem;background:#0f766e;color:white;font-weight:600;cursor:pointer;">🖨️ Imprimir PDF</button>
+                    </div>
+                    <script>
+                    const btn = document.getElementById({button_id!r});
+                    btn.addEventListener('click', () => {{
+                        const b64 = {pdf_b64!r};
+                        const byteChars = atob(b64);
+                        const byteNumbers = new Array(byteChars.length);
+                        for (let i = 0; i < byteChars.length; i++) {{
+                            byteNumbers[i] = byteChars.charCodeAt(i);
+                        }}
+                        const blob = new Blob([new Uint8Array(byteNumbers)], {{ type: 'application/pdf' }});
+                        const url = URL.createObjectURL(blob);
+                        const win = window.open(url, '_blank');
+                        if (win) {{
+                            setTimeout(() => {{
+                                try {{ win.focus(); win.print(); }} catch (e) {{}}
+                            }}, 900);
+                        }} else {{
+                            alert('O navegador bloqueou a nova aba. Libere pop-ups para imprimir direto.');
+                        }}
+                    }});
+                    </script>
+                    """,
+                    height=52,
+                )
+

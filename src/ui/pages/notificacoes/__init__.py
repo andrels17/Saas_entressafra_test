@@ -276,7 +276,7 @@ def render_notificacoes() -> None:
         from src.ui.components.actions import download_action
 
         st.markdown("### ⬇️ Exportações")
-        st.caption("Baixe os alertas em formato CSV por categoria, PDF consolidado ou gere ZIPs de impressão da matriz por gestor.")
+        st.caption("Baixe os alertas em formato CSV por categoria ou PDF consolidado.")
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("**CSV por categoria**")
