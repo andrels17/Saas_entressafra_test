@@ -204,3 +204,184 @@ def resumo_por_grupo(alertas: dict) -> pd.DataFrame:
     df_res = pd.DataFrame(list(grupos.values()))
     df_res["Total alertas"] = df_res[["Travados", "Sem início", "Parados", "Risco prazo"]].sum(axis=1)
     return df_res.sort_values("Total alertas", ascending=False).reset_index(drop=True)
+
+
+# ── Impressão em lote por gestor ────────────────────────────────────────────
+
+
+def _sanitize_filename(value: str) -> str:
+    import re
+
+    value = (value or '').strip()
+    value = re.sub(r'[^0-9A-Za-zÀ-ÿ._ -]+', '_', value)
+    value = re.sub(r'\s+', '_', value)
+    return value.strip('._ ') or 'arquivo'
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def load_manager_print_options(tenant_id: str) -> list[dict]:
+    """Carrega gestores e grupos vinculados para geração em lote dos PDFs da matriz."""
+    from src.services.email.recipients import get_manager_pdf_bundles
+    from src.db.supabase_client import get_supabase_service
+
+    bundles = get_manager_pdf_bundles(tenant_id)
+    if not bundles:
+        return []
+
+    svc = get_supabase_service()
+    group_ids = sorted({gid for b in bundles for gids in b.grupo_ids_por_dept.values() for gid in gids if gid})
+    group_rows = []
+    if group_ids:
+        try:
+            group_rows = (
+                svc.table('equip_grupos')
+                .select('id,nome,departamento_id')
+                .eq('tenant_id', tenant_id)
+                .in_('id', group_ids)
+                .order('nome')
+                .execute()
+                .data
+            ) or []
+        except Exception:
+            group_rows = []
+    group_map = {str(r.get('id')): r for r in group_rows if r.get('id')}
+
+    managers = []
+    for bundle in bundles:
+        items = []
+        for dep_id, dep_nome in zip(bundle.departamento_ids, bundle.departamento_nomes):
+            for gid in bundle.grupo_ids_por_dept.get(dep_id, []) or []:
+                grow = group_map.get(str(gid), {})
+                items.append({
+                    'grupo_id': str(gid),
+                    'grupo_nome': grow.get('nome') or str(gid),
+                    'departamento_id': str(dep_id),
+                    'departamento_nome': dep_nome or grow.get('departamento_id') or '—',
+                })
+
+        if not items:
+            continue
+
+        items = sorted(items, key=lambda x: ((x.get('departamento_nome') or '').lower(), (x.get('grupo_nome') or '').lower()))
+        managers.append({
+            'user_id': bundle.recipient.user_id,
+            'nome': bundle.recipient.nome,
+            'email': bundle.recipient.email,
+            'departamento_nomes': bundle.departamento_nomes,
+            'grupos': items,
+        })
+
+    return sorted(managers, key=lambda x: (x.get('nome') or '').lower())
+
+
+
+def build_manager_print_zip(
+    tenant_id: str,
+    revisao_id: str,
+    selected_managers: list[dict],
+    data_version: str = '0',
+    sb_access_token: str = '',
+    limit_eq: int = 5000,
+) -> tuple[bytes, list[str], list[str]]:
+    """Gera ZIP com um PDF de matriz por grupo selecionado."""
+    import io
+    import zipfile
+
+    from src.db.supabase_client import get_supabase_anon
+    from src.utils.eq_oculto import get_ocultos
+    from src.ui.pages.matriz_modular.data import _load_payload, _fetch_template
+    from src.ui.pages.matriz_modular.context import (
+        _build_eq_labels,
+        _build_resumo_df,
+        _build_sector_tables_for_export,
+    )
+    from src.ui.pages.matriz_modular.pdf_export import _build_pdf_tables
+
+    sb = get_supabase_anon()
+    if sb_access_token:
+        sb.postgrest.auth(sb_access_token)
+
+    try:
+        rev_rows = (
+            sb.table('revisoes')
+            .select('id,titulo')
+            .eq('tenant_id', tenant_id)
+            .eq('id', revisao_id)
+            .limit(1)
+            .execute()
+            .data
+        ) or []
+    except Exception:
+        rev_rows = []
+    revisao = rev_rows[0] if rev_rows else {'id': revisao_id, 'titulo': 'Revisão'}
+    titulo = revisao.get('titulo') or 'Revisão'
+
+    zip_buffer = io.BytesIO()
+    warnings: list[str] = []
+    files_written: list[str] = []
+
+    ocultos = set()
+    try:
+        ocultos = get_ocultos(sb, tenant_id, revisao_id)
+    except Exception:
+        ocultos = set()
+
+    with zipfile.ZipFile(zip_buffer, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+        for manager in selected_managers:
+            manager_nome = manager.get('nome') or 'Gestor'
+            manager_slug = _sanitize_filename(manager_nome)
+            for group_item in manager.get('grupos') or []:
+                gid = str(group_item.get('grupo_id') or '')
+                gnome = group_item.get('grupo_nome') or gid
+                if not gid:
+                    continue
+                try:
+                    payload = _load_payload(
+                        tenant_id,
+                        gid,
+                        revisao_id,
+                        int(limit_eq),
+                        str(data_version or '0'),
+                        sb_access_token or '',
+                    ) or {}
+                    eqs = payload.get('eqs') or []
+                    if not eqs:
+                        warnings.append(f'{manager_nome} / {gnome}: grupo sem equipamentos para exportação.')
+                        continue
+
+                    setor_to_services = payload.get('s2s') or {}
+                    all_services = payload.get('all_s') or []
+                    if not all_services:
+                        setor_to_services, all_services = _fetch_template(sb, tenant_id, gid)
+                    if not all_services:
+                        warnings.append(f'{manager_nome} / {gnome}: grupo sem template configurado.')
+                        continue
+
+                    eq_label, eq_label_short = _build_eq_labels(eqs, ocultos)
+                    tarefas = payload.get('tarefas') or []
+                    task_map = {(str(t.get('equipamento_id')), str(t.get('servico_id'))): t for t in tarefas}
+                    resumo_df, _, _, _ = _build_resumo_df(eqs, all_services, task_map, eq_label)
+                    sector_tables = _build_sector_tables_for_export(eqs, setor_to_services, task_map, eq_label_short)
+                    if not sector_tables:
+                        warnings.append(f'{manager_nome} / {gnome}: não foi possível montar as tabelas do PDF.')
+                        continue
+
+                    pdf_bytes = _build_pdf_tables(
+                        titulo=titulo,
+                        grupo_nome=gnome,
+                        resumo_df=resumo_df,
+                        sector_tables=sector_tables,
+                        revisao_id=revisao_id,
+                    )
+                    if not pdf_bytes:
+                        warnings.append(f'{manager_nome} / {gnome}: PDF vazio.')
+                        continue
+
+                    pdf_name = f"{_sanitize_filename(titulo)}__{manager_slug}__{_sanitize_filename(gnome)}.pdf"
+                    zip_name = f"{manager_slug}/{pdf_name}"
+                    zf.writestr(zip_name, pdf_bytes)
+                    files_written.append(zip_name)
+                except Exception as exc:
+                    warnings.append(f'{manager_nome} / {gnome}: erro ao gerar PDF ({exc}).')
+
+    return zip_buffer.getvalue(), files_written, warnings

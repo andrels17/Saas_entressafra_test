@@ -9,7 +9,7 @@ from src.ui.components.forms import (form_section, form_submit_button,
                                      validate_time_hhmm, validation_summary)
 from src.ui.components.tables import titled_table
 from src.ui.components.states import empty_message
-from .data import resumo_por_grupo
+from .data import resumo_por_grupo, load_manager_print_options, build_manager_print_zip
 
 
 # ── Helper de download CSV ───────────────────────────────────────────────────
@@ -168,6 +168,146 @@ def fragment_resumo_grupos(alertas: dict) -> None:
                        data=df_res[cols_pub].to_csv(index=False).encode("utf-8"),
                        file_name="alertas_resumo_grupos.csv", mime="text/csv",
                        use_container_width=True, key="dl_resumo_grupos")
+
+
+
+
+# ── Aba: ZIP para impressão por gestor ──────────────────────────────────────
+
+
+def _manager_ck_key(uid: str) -> str:
+    return f"ntf_zip_mgr_{uid}"
+
+
+def _group_ck_key(uid: str, gid: str) -> str:
+    return f"ntf_zip_grp_{uid}_{gid}"
+
+
+def _toggle_manager_groups(uid: str, group_ids: list[str]) -> None:
+    checked = bool(st.session_state.get(_manager_ck_key(uid), False))
+    for gid in group_ids:
+        st.session_state[_group_ck_key(uid, gid)] = checked
+
+
+def _sync_manager_from_groups(uid: str, group_ids: list[str]) -> None:
+    selected = [bool(st.session_state.get(_group_ck_key(uid, gid), False)) for gid in group_ids]
+    st.session_state[_manager_ck_key(uid)] = bool(selected) and all(selected)
+
+
+@st.fragment
+def fragment_zip_impressao_gestores(tenant_id: str, revisao_id: str, is_admin: bool) -> None:
+    st.markdown('### 📦 ZIP para impressão por gestor')
+    st.caption('Selecione os gestores e os grupos desejados para gerar um ZIP com 1 PDF da matriz por grupo.')
+
+    if not is_admin:
+        st.info('Apenas administradores podem gerar o ZIP em lote para impressão.')
+        return
+
+    managers = load_manager_print_options(tenant_id)
+    if not managers:
+        st.info('Nenhum gestor com grupos vinculados foi encontrado neste tenant.')
+        return
+
+    total_groups = 0
+    selected_groups = 0
+    selected_payload: list[dict] = []
+
+    for manager in managers:
+        uid = str(manager.get('user_id') or '')
+        nome = manager.get('nome') or 'Gestor'
+        email = manager.get('email') or ''
+        groups = manager.get('grupos') or []
+        group_ids = [str(g.get('grupo_id')) for g in groups if g.get('grupo_id')]
+        total_groups += len(group_ids)
+
+        mgr_key = _manager_ck_key(uid)
+        if mgr_key not in st.session_state:
+            st.session_state[mgr_key] = False
+        for gid in group_ids:
+            gkey = _group_ck_key(uid, gid)
+            if gkey not in st.session_state:
+                st.session_state[gkey] = False
+
+        box_col, info_col = st.columns([0.08, 0.92])
+        with box_col:
+            st.checkbox(
+                'Selecionar gestor',
+                key=mgr_key,
+                label_visibility='collapsed',
+                on_change=_toggle_manager_groups,
+                args=(uid, group_ids),
+            )
+        with info_col:
+            with st.expander(f"**{nome}** — {len(group_ids)} grupo(s)", expanded=False):
+                if email:
+                    st.caption(email)
+                dep_names = manager.get('departamento_nomes') or []
+                if dep_names:
+                    st.caption('Departamentos: ' + ', '.join(dep_names))
+
+                selected_manager_groups = []
+                for group in groups:
+                    gid = str(group.get('grupo_id') or '')
+                    if not gid:
+                        continue
+                    grp_key = _group_ck_key(uid, gid)
+                    dep_nome = group.get('departamento_nome') or '—'
+                    grp_nome = group.get('grupo_nome') or gid
+                    st.checkbox(
+                        f"{grp_nome} · {dep_nome}",
+                        key=grp_key,
+                        on_change=_sync_manager_from_groups,
+                        args=(uid, group_ids),
+                    )
+                    if st.session_state.get(grp_key):
+                        selected_manager_groups.append(group)
+
+                if selected_manager_groups:
+                    selected_groups += len(selected_manager_groups)
+                    selected_payload.append({
+                        'user_id': uid,
+                        'nome': nome,
+                        'email': email,
+                        'grupos': selected_manager_groups,
+                    })
+
+    st.divider()
+    col_info, col_action = st.columns([2, 1])
+    with col_info:
+        st.info(f'Selecionados: **{selected_groups} PDF(s)** de **{total_groups}** grupo(s) disponíveis.')
+    with col_action:
+        can_generate = selected_groups > 0
+        if not can_generate:
+            st.caption('Marque ao menos um grupo para habilitar o ZIP.')
+
+    if st.button('Gerar ZIP para impressão', type='primary', use_container_width=True, disabled=not can_generate, key='ntf_zip_generate'):
+        with st.spinner('Gerando PDFs e compactando ZIP...', show_time=True):
+            zip_bytes, files_written, warnings = build_manager_print_zip(
+                tenant_id=tenant_id,
+                revisao_id=revisao_id,
+                selected_managers=selected_payload,
+                data_version=str(st.session_state.get('data_version', '0')),
+                sb_access_token=str(st.session_state.get('sb_access_token', '')),
+            )
+
+        if files_written:
+            st.success(f'ZIP pronto com {len(files_written)} PDF(s).')
+            download_action(
+                '⬇️ Baixar ZIP de impressão',
+                data=zip_bytes,
+                file_name=f'impressao_matriz_{revisao_id}.zip',
+                mime='application/zip',
+                key='ntf_zip_download',
+                type='primary',
+                use_container_width=True,
+            )
+        else:
+            st.error('Nenhum PDF pôde ser gerado com a seleção atual.')
+
+        if warnings:
+            with st.expander('Ocorrências da geração', expanded=not files_written):
+                for msg in warnings:
+                    st.warning(msg)
 
 
 # ── Aba: disparo manual de e-mail ────────────────────────────────────────────

@@ -18,6 +18,7 @@ from .data import load_data, build_alertas
 from .fragments import (
     fragment_disparo_manual,
     fragment_configurar_agendamento,
+    fragment_zip_impressao_gestores,
 )
 
 # ── Metadados visuais por categoria ─────────────────────────────────────────
@@ -275,7 +276,7 @@ def render_notificacoes() -> None:
         from src.ui.components.actions import download_action
 
         st.markdown("### ⬇️ Exportações")
-        st.caption("Baixe os alertas em formato CSV por categoria ou PDF consolidado.")
+        st.caption("Baixe os alertas em formato CSV por categoria, PDF consolidado ou gere ZIPs de impressão da matriz por gestor.")
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("**CSV por categoria**")
@@ -302,6 +303,9 @@ def render_notificacoes() -> None:
                 )
             except ImportError:
                 st.info("Instale `reportlab` para habilitar exportação em PDF.")
+
+        st.divider()
+        fragment_zip_impressao_gestores(tenant_id, revisao_id, is_admin)
 
     # ── E-mail (intocado) ─────────────────────────────────────────────────────
     with tab_email:
