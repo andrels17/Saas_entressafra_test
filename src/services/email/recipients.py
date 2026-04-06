@@ -433,27 +433,18 @@ class ManagerPdfBundle:
 def get_manager_pdf_bundles(tenant_id: str) -> list[ManagerPdfBundle]:
     """Retorna um bundle por gestor contendo todos os seus departamentos.
 
-    Ao invés de um e-mail por departamento (comportamento anterior),
-    o dispatcher usa esses bundles para enviar um único e-mail por gestor
-    com todos os PDFs dos seus departamentos como anexos.
+    Consolida vínculos de duas tabelas:
+      - tenant_user_departamentos: vínculos explícitos departamento_id (e grupo_id opcional)
+      - tenant_user_scope: vínculo legado de linha única (departamento_id ou grupo_id)
+
+    Se o gestor só tem grupo_id, deriva o departamento via equip_grupos.
+    Ao invés de um e-mail por departamento, o dispatcher envia um único
+    e-mail por gestor com todos os PDFs dos seus departamentos como anexos.
     """
     svc = get_supabase_service()
     prefs = _fetch_email_prefs(svc, tenant_id)
 
-    # Vínculos gestor → departamento
-    try:
-        links = (
-            svc.table("tenant_user_departamentos")
-            .select("user_id,departamento_id")
-            .eq("tenant_id", tenant_id)
-            .execute()
-            .data
-        ) or []
-    except Exception as exc:
-        log.warning("get_manager_pdf_bundles: falha ao buscar vínculos: %s", exc)
-        return []
-
-    # Roles dos usuários
+    # Roles dos usuários — necessário para filtrar só gestores
     try:
         tu_rows = (
             svc.table("tenant_users")
@@ -467,23 +458,73 @@ def get_manager_pdf_bundles(tenant_id: str) -> list[ManagerPdfBundle]:
         return []
     user_roles = {row["user_id"]: row.get("role", "") for row in tu_rows if row.get("user_id")}
 
-    # Agrupa dep_ids por gestor — apenas usuários tipo gestor
-    uid_to_dep_ids: dict[str, list[str]] = {}
-    for link in links:
-        uid = link.get("user_id")
-        dep_id = link.get("departamento_id")
-        if not (uid and dep_id):
-            continue
-        role = user_roles.get(uid, "")
-        if _resolve_tipo(uid, role, prefs) == TIPO_GESTOR:
-            uid_to_dep_ids.setdefault(uid, []).append(dep_id)
+    # Filtra apenas usuários do tipo gestor
+    gestor_uids: set[str] = {
+        uid for uid, role in user_roles.items()
+        if _resolve_tipo(uid, role, prefs) == TIPO_GESTOR
+    }
+    if not gestor_uids:
+        return []
+
+    # Mapa grupo_id → departamento_id (para derivar depto a partir de grupo)
+    dep_to_grupos = _fetch_groups_by_department(svc, tenant_id)
+    grp_to_dep: dict[str, str] = {}
+    for dep_id, grp_ids in dep_to_grupos.items():
+        for gid in grp_ids:
+            grp_to_dep[gid] = dep_id
+
+    # uid → set de dep_ids (consolidado de ambas as tabelas)
+    uid_to_dep_ids: dict[str, set[str]] = {}
+    # uid → dep_id → set de grupo_ids explícitos (quando vinculado por grupo)
+    uid_dep_to_grp_ids: dict[str, dict[str, set[str]]] = {}
+
+    def _add_link(uid: str, dep_id: str | None, grp_id: str | None):
+        """Registra o vínculo uid → dep_id, derivando dep_id do grupo se necessário."""
+        if not uid or uid not in gestor_uids:
+            return
+        if not dep_id and grp_id:
+            dep_id = grp_to_dep.get(grp_id)
+        if not dep_id:
+            return
+        uid_to_dep_ids.setdefault(uid, set()).add(dep_id)
+        if grp_id:
+            uid_dep_to_grp_ids.setdefault(uid, {}).setdefault(dep_id, set()).add(grp_id)
+
+    # Fonte 1: tenant_user_departamentos (principal, suporta múltiplos deptos)
+    try:
+        rows1 = (
+            svc.table("tenant_user_departamentos")
+            .select("user_id,departamento_id,grupo_id")
+            .eq("tenant_id", tenant_id)
+            .execute()
+            .data
+        ) or []
+    except Exception as exc:
+        log.warning("get_manager_pdf_bundles: falha ao buscar tenant_user_departamentos: %s", exc)
+        rows1 = []
+    for row in rows1:
+        _add_link(row.get("user_id"), row.get("departamento_id"), row.get("grupo_id"))
+
+    # Fonte 2: tenant_user_scope (legado — um registro por usuário)
+    try:
+        rows2 = (
+            svc.table("tenant_user_scope")
+            .select("user_id,departamento_id,grupo_id")
+            .eq("tenant_id", tenant_id)
+            .execute()
+            .data
+        ) or []
+    except Exception as exc:
+        log.warning("get_manager_pdf_bundles: falha ao buscar tenant_user_scope: %s", exc)
+        rows2 = []
+    for row in rows2:
+        _add_link(row.get("user_id"), row.get("departamento_id"), row.get("grupo_id"))
 
     if not uid_to_dep_ids:
         return []
 
-    # Nomes e grupos dos departamentos
+    # Busca nomes dos departamentos
     all_dep_ids = list({d for deps in uid_to_dep_ids.values() for d in deps})
-    dep_to_grupos = _fetch_groups_by_department(svc, tenant_id)
     try:
         dep_rows = (
             svc.table("departamentos")
@@ -503,10 +544,19 @@ def get_manager_pdf_bundles(tenant_id: str) -> list[ManagerPdfBundle]:
     emails = _fetch_user_emails(svc, all_uids)
 
     bundles: list[ManagerPdfBundle] = []
-    for uid, dep_ids in uid_to_dep_ids.items():
+    for uid, dep_ids_set in uid_to_dep_ids.items():
         email = emails.get(uid, "")
         if not email:
             continue
+        dep_ids = sorted(dep_ids_set)  # ordem estável
+
+        # grupo_ids por departamento: se o gestor tem grupos explícitos, usa-os;
+        # caso contrário usa todos os grupos do departamento (comportamento padrão)
+        grp_map: dict[str, list[str]] = {}
+        for dep_id in dep_ids:
+            explicit = sorted(uid_dep_to_grp_ids.get(uid, {}).get(dep_id, set()))
+            grp_map[dep_id] = explicit if explicit else dep_to_grupos.get(dep_id, [])
+
         bundles.append(
             ManagerPdfBundle(
                 recipient=Recipient(
@@ -517,7 +567,7 @@ def get_manager_pdf_bundles(tenant_id: str) -> list[ManagerPdfBundle]:
                 ),
                 departamento_ids=dep_ids,
                 departamento_nomes=[dep_nome_map.get(d, d) for d in dep_ids],
-                grupo_ids_por_dept={d: dep_to_grupos.get(d, []) for d in dep_ids},
+                grupo_ids_por_dept=grp_map,
             )
         )
     return bundles
