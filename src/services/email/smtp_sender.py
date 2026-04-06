@@ -273,17 +273,25 @@ def send_email_with_retry(
         raise last_exc
 
 
-def _saudacao_dinamica() -> str:
+def _saudacao_dinamica(destinatario_nome: str | None = None) -> str:
     try:
         hora = datetime.now(ZoneInfo("America/Sao_Paulo")).hour
     except Exception:
         hora = datetime.now().hour
 
     if hora < 12:
-        return "Bom dia, senhores"
-    if hora < 18:
-        return "Boa tarde, senhores"
-    return "Boa noite, senhores"
+        base = "Bom dia"
+    elif hora < 18:
+        base = "Boa tarde"
+    else:
+        base = "Boa noite"
+
+    nome = str(destinatario_nome or "").strip()
+    if nome:
+        primeiro_nome = nome.split()[0]
+        return f"{base}, {primeiro_nome},"
+
+    return f"{base}, senhores,"
 
 
 
