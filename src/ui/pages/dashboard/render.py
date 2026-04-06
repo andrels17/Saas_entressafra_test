@@ -31,6 +31,16 @@ from src.utils.supabase_helpers import current_tenant_id, sb_for_user
 from src.utils.observability import log_error
 from src.utils.ui_helpers import status_badge
 
+from .transforms import (
+    apply_filters,
+    build_inteligencia,
+    equipment_progress,
+    fmt_date,
+    group_progress,
+    normalize_matriz_base,
+    overall_from_base,
+    tendencia_alertas,
+)
 
 from .data_access import (
     _load_revisao,
