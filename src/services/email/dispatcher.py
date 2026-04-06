@@ -620,7 +620,7 @@ def _build_payload(
     from src.services.reporting.pdf_relatorio_semanal import (
         RelatorioDeptPayload, SemanaSnapshot, EquipamentoCritico,
     )
-    from src.ui.pages.dashboard.transforms import equipment_progress, overall_from_base
+    from src.ui.pages.dashboard.transforms import equipment_progress, overall_from_base, group_progress
 
     semanas_total = int(revisao.get("semanas_total") or 1)
     data_inicio = revisao.get("data_inicio")
@@ -636,13 +636,26 @@ def _build_payload(
         "pct": 0.0, "total": 0, "concl": 0, "pend": 0, "andamento": 0, "trav": 0, "na": 0
     }
 
-    # Snapshot consolidado do kpi_engine para o topo do PDF.
+    # Snapshot consolidado do kpi_engine para fallback.
+    # Prioridade do PDF: usar o MESMO cálculo do dashboard sobre a base
+    # normalizada; só cair no kpi_engine quando a base vier vazia/zerada.
     snapshot_kpi = _calc_snapshot_from_kpi_engine(
         tenant_id=tenant_id,
         revisao_id=revisao.get("id", ""),
         grupo_ids=grupo_ids,
     )
-    group_pct_map = snapshot_kpi.get("group_pct_map") or {}
+
+    dashboard_group_pct_map: dict[str, int] = {}
+    if base is not None and not base.empty:
+        gp_df = group_progress(base)
+        if gp_df is not None and not gp_df.empty:
+            dashboard_group_pct_map = {
+                str(row.get("grupo_id")): int(round(float(row.get("pct_concluido") or 0)))
+                for _, row in gp_df.iterrows()
+                if row.get("grupo_id") is not None
+            }
+
+    group_pct_map = dashboard_group_pct_map or snapshot_kpi.get("group_pct_map") or {}
 
     grupo_nomes: dict[str, str] = {}
     gnrows = _with_fallback(
@@ -851,11 +864,27 @@ def _build_payload(
                 "flag_alerta": alerta_eq,
             })
 
-    # Topo: usa kpi_engine quando disponível; senão cai no overall do dashboard.
-    pct_geral_snapshot = int(snapshot_kpi.get("pct_geral") or round(float(overall.get("pct") or 0)))
-    n_equipamentos = int(snapshot_kpi.get("n_equipamentos") or overall.get("total") or len(all_equipamentos))
-    done_steps_total = int(snapshot_kpi.get("done_steps_total") or done_steps_total_dash)
-    expected_steps_total = int(snapshot_kpi.get("expected_steps_total") or expected_steps_total_dash)
+    # Topo: usa SEMPRE a mesma fórmula do dashboard sobre a base normalizada.
+    # O kpi_engine permanece apenas como fallback defensivo quando a base do
+    # dashboard vier vazia/zerada por algum motivo.
+    dashboard_pct = int(round(float(overall.get("pct") or 0)))
+    dashboard_n_equip = int(overall.get("total") or len(all_equipamentos))
+
+    snapshot_pct = int(snapshot_kpi.get("pct_geral") or 0)
+    snapshot_n_equip = int(snapshot_kpi.get("n_equipamentos") or 0)
+    snapshot_done = int(snapshot_kpi.get("done_steps_total") or 0)
+    snapshot_expected = int(snapshot_kpi.get("expected_steps_total") or 0)
+
+    use_kpi_fallback = bool(
+        (base is None or base.empty or dashboard_pct <= 0)
+        and snapshot_expected > 0
+        and snapshot_pct > 0
+    )
+
+    pct_geral_snapshot = snapshot_pct if use_kpi_fallback else dashboard_pct
+    n_equipamentos = snapshot_n_equip if use_kpi_fallback and snapshot_n_equip > 0 else dashboard_n_equip
+    done_steps_total = snapshot_done if use_kpi_fallback and snapshot_expected > 0 else int(done_steps_total_dash)
+    expected_steps_total = snapshot_expected if use_kpi_fallback and snapshot_expected > 0 else int(expected_steps_total_dash)
 
     n_concluidos = max(n_concluidos_local, int(overall.get("concl") or 0))
     n_travados = max(n_travados_local, int(overall.get("trav") or 0))
