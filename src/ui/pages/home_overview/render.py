@@ -421,7 +421,14 @@ def _fragment_home_live() -> None:
     from src.ui.pages.home_overview.data import _token_hash
     _tok_hash = _token_hash(_tok)
     st.session_state["_tok_hash_cache"] = _tok_hash
-    rev = load_revision(tenant_id, ver, get_current_revisao(), token_hash=_tok_hash, _token=_tok)
+    rev = load_revision(
+        tenant_id,
+        ver,
+        get_current_revisao(),
+        data_version=ver,
+        token_hash=_tok_hash,
+        _token=_tok,
+    )
     if not rev:
         st.warning("Nenhuma revisão encontrada para este tenant.")
         return
@@ -659,6 +666,14 @@ def _render_greeting() -> None:
 
 
 def render_home_overview() -> None:
+    if "data_version" not in st.session_state:
+        st.session_state["data_version"] = str(int(time.time()))
+
+    if not st.session_state.get("_home_initialized"):
+        st.session_state["_home_initialized"] = True
+        bump_data_version()
+        st.rerun()
+
     _render_greeting()
     st.caption(f"Atualização automática ativa a cada {_HOME_AUTO_REFRESH_EVERY}.")
     _fragment_home_live()

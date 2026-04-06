@@ -30,6 +30,7 @@ def load_revision(
         tenant_id: str,
         ver: str = "0",
         rev_id: str | None = None,
+        data_version: str = "",
         token_hash: str = "",
         _token: str = "") -> dict | None:
     sb = _sb_from_token(_token)
