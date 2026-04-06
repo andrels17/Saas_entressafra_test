@@ -13,6 +13,7 @@ concurrency:
 env:
   PYTHON_VERSION: "3.11"
   PYTHONPATH: .
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   lint:
@@ -51,7 +52,6 @@ jobs:
     name: Testes unitários
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: lint
 
     steps:
       - name: Checkout
@@ -67,7 +67,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest pytest-cov pandas
+          pip install pytest pytest-cov pandas pypdf
 
       - name: Executar testes
         run: |
@@ -90,7 +90,6 @@ jobs:
     name: Verificação de estrutura
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: lint
 
     steps:
       - name: Checkout
@@ -119,7 +118,15 @@ jobs:
 
           st = types.ModuleType("streamlit")
           st.cache_resource = _CR()
+          st.cache_data = _CR()
           st.session_state = {}
+          st.query_params = {}
+          st.rerun = lambda: None
+
+          def _stop():
+              raise SystemExit("stop")
+          st.stop = _stop
+
           sys.modules["streamlit"] = st
 
           sup = types.ModuleType("supabase")
@@ -178,7 +185,6 @@ jobs:
     name: Segurança básica
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: lint
 
     steps:
       - name: Checkout
