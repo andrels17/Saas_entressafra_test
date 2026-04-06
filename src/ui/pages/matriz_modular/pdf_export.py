@@ -151,7 +151,7 @@ def _merge_sector_tables(sector_tables):
 def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_revisao=None, tarefas_servico_df=None, revisao_id=None) -> bytes:
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-    from reportlab.lib.pagesizes import A3, landscape
+    from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import cm
     from reportlab.platypus import (
@@ -165,7 +165,7 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
     )
     from src.utils.timezone import fmt_brt as _fmt_brt
 
-    PAGE = landscape(A3)
+    PAGE = landscape(A4)
     LMARGIN = RMARGIN = 1.0 * cm
     TMARGIN = 1.0 * cm
     BMARGIN = 1.0 * cm
@@ -452,11 +452,15 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
         if not isinstance(df, pd.DataFrame) or df.empty or not sector_groups:
             return [Paragraph("Sem dados desta matriz.", small_style)]
 
-        equip_w = 5.0 * cm
-        stage_w = 0.82 * cm
-        max_matrix_cols = max(3, int((pw - equip_w) // stage_w))
-        if max_matrix_cols < 3:
-            max_matrix_cols = 3
+        # Otimizado para A4 paisagem:
+        # ocupa melhor a largura útil da página e só comprime quando necessário.
+        equip_w_min = 4.4 * cm
+        equip_w_max = 6.0 * cm
+        stage_w_min = 0.52 * cm
+        stage_w_target = 0.78 * cm
+        stage_w_max = 0.98 * cm
+
+        max_matrix_cols = max(3, int((pw - equip_w_min) // stage_w_min))
 
         chunks = []
         current_chunk = []
@@ -492,7 +496,6 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
             cols_meta = ["Equipamento"]
             spans = [(0, 0, 0, 2)]
             separators = []
-            service_separators = []
             cur_col = 1
 
             for sector in chunk:
@@ -514,7 +517,6 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                     cols_meta.extend(service_cols)
                     if width > 1:
                         spans.append((cur_col, 1, cur_col + width - 1, 1))
-                    service_separators.append(cur_col + width - 1)
                     cur_col += width
 
                 sector_end = cur_col - 1
@@ -523,6 +525,22 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                     del row_setor[sector_start + 1: sector_end + 2]
                     spans.append((sector_start, 0, sector_end, 0))
                     separators.append(sector_end)
+
+            # Rastreia onde cada serviço começa e termina (para separadores e zebra)
+            # service_boundaries: lista de (col_start, col_end) — índices 1-based em cols_meta
+            service_boundaries: list[tuple[int, int]] = []
+            _svc_cur = 1
+            for sector in chunk:
+                for service in sector["services"]:
+                    _w = max(1, len(service["columns"]))
+                    service_boundaries.append((_svc_cur, _svc_cur + _w - 1))
+                    _svc_cur += _w
+
+            # Cores alternadas leves para distinguir serviços no header row_servico
+            _svc_header_colors = [
+                colors.HexColor("#1E293B"),  # par  — mesmo tom do header_2
+                colors.HexColor("#2D3F55"),  # ímpar — ligeiramente mais claro
+            ]
 
             data.extend([row_setor, row_servico, row_etapa])
             view = df[cols_meta].copy().fillna("")
@@ -534,9 +552,28 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                     row.append(Paragraph(text, cell_center))
                 data.append(row)
 
-            remaining = pw - equip_w
             matrix_cols = len(cols_meta) - 1
-            matrix_w = max(0.60 * cm, min(0.78 * cm, remaining / max(matrix_cols, 1)))
+
+            # Primeiro tenta uma largura confortável para A4.
+            matrix_w = min(stage_w_max, max(stage_w_min, stage_w_target))
+            equip_w = pw - (matrix_cols * matrix_w)
+
+            # Se "Equipamento" ficar estreito demais, comprime apenas o necessário.
+            if equip_w < equip_w_min:
+                matrix_w = max(stage_w_min, (pw - equip_w_min) / max(matrix_cols, 1))
+                equip_w = pw - (matrix_cols * matrix_w)
+
+            # Se sobrar bastante largura, amplia "Equipamento" e redistribui o excedente.
+            if equip_w > equip_w_max and matrix_cols > 0:
+                extra = equip_w - equip_w_max
+                equip_w = equip_w_max
+                matrix_w = min(stage_w_max, matrix_w + (extra / matrix_cols))
+
+            # Garante uso integral da largura útil da página.
+            occupied = equip_w + (matrix_cols * matrix_w)
+            if matrix_cols > 0 and abs(occupied - pw) > 0.01:
+                matrix_w += (pw - occupied) / matrix_cols
+
             col_widths = [equip_w] + [matrix_w] * matrix_cols
             table = Table(data, colWidths=col_widths, repeatRows=3)
             table.hAlign = "LEFT"
@@ -563,15 +600,26 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
             for c1, r1, c2, r2 in spans[1:]:
                 style_cmds.append(("SPAN", (c1, r1), (c2, r2)))
 
-            # separador entre serviços (mais visível na impressão)
-            for col in service_separators:
-                if col in separators:
-                    continue
-                style_cmds.append(("LINEAFTER", (col, 0), (col, -1), 1.45, colors.HexColor("#475569")))
+            # ── Separadores de serviço (linha fina entre serviços, antes do separador de setor) ──
+            n_rows_total = len(data)
+            for svc_idx, (svc_start, svc_end) in enumerate(service_boundaries):
+                # cor alternada no header row_servico (linha 1) e row_etapa (linha 2)
+                svc_color = _svc_header_colors[svc_idx % 2]
+                style_cmds.append(("BACKGROUND", (svc_start, 1), (svc_end, 1), svc_color))
+                style_cmds.append(("BACKGROUND", (svc_start, 2), (svc_end, 2),
+                                   colors.HexColor("#253347") if svc_idx % 2 == 0 else colors.HexColor("#344860")))
 
-            # separador forte entre setores
+                # linha divisória direita do serviço (média — entre serviços dentro do mesmo setor)
+                is_sector_boundary = svc_end in separators
+                if not is_sector_boundary:
+                    # linha de separação entre serviços: mais fina e numa cor intermediária
+                    style_cmds.append(("LINEAFTER", (svc_end, 1), (svc_end, n_rows_total - 1),
+                                       0.9, colors.HexColor("#64748B")))
+
+            # ── Separador forte entre setores ──
             for col in separators:
-                style_cmds.append(("LINEAFTER", (col, 0), (col, -1), 2.1, colors.HexColor("#1E293B")))
+                style_cmds.append(("LINEAFTER", (col, 0), (col, n_rows_total - 1),
+                                   2.0, colors.HexColor("#0F172A")))
 
             for row_i in range(3, len(data)):
                 for col_i in range(1, len(cols_meta)):
