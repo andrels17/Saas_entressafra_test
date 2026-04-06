@@ -9,7 +9,13 @@ from src.ui.components.forms import (form_section, form_submit_button,
                                      validate_time_hhmm, validation_summary)
 from src.ui.components.tables import titled_table
 from src.ui.components.states import empty_message
-from .data import resumo_por_grupo, load_manager_print_targets
+from .data import resumo_por_grupo, build_manager_print_zip
+
+# Compatibilidade com nomes antigos/novos
+try:
+    from .data import load_manager_print_options
+except ImportError:  # pragma: no cover
+    from .data import load_manager_print_targets as load_manager_print_options
 
 
 # ── Helper de download CSV ───────────────────────────────────────────────────
@@ -451,156 +457,120 @@ O `scheduler.py` e o GitHub Actions lêem esta configuração automaticamente do
 """)
 
 
-def _set_group_selection(group_keys: list[str], value: bool) -> None:
-    for key in group_keys:
-        st.session_state[key] = value
-
-
-def _clear_print_zip_cache() -> None:
-    st.session_state.pop("_ntf_print_zip_bytes", None)
-    st.session_state.pop("_ntf_print_zip_name", None)
-
-
-def _apply_manager_selection(manager_key: str, group_keys: list[str]) -> None:
-    value = bool(st.session_state.get(manager_key, False))
-    _set_group_selection(group_keys, value)
-    _clear_print_zip_cache()
-
-
-def _print_selection_store() -> list[dict]:
-    return st.session_state.setdefault("_ntf_print_selection", [])
-
-
 @st.fragment
 def fragment_zip_impressao(tenant_id: str, revisao_id: str, revisao: dict, semana_atual: int, data_version: str) -> None:
     st.markdown("### 📦 ZIP para impressão por gestor")
-    st.caption("Selecione os grupos por gestor e gere um ZIP com um PDF individual para cada grupo marcado.")
+    st.caption("Selecione os gestores e os grupos desejados para gerar um ZIP com 1 PDF por grupo.")
 
-    try:
-        targets = load_manager_print_targets(
-            tenant_id,
-            ver=data_version,
-            _token=str(st.session_state.get("sb_access_token", "")),
-        )
-    except Exception as exc:
-        st.warning(f"Não foi possível carregar gestores e grupos: {exc}")
+    token = st.session_state.get("sb_access_token", "")
+    gestores = load_manager_print_options(tenant_id, str(data_version), token)
+    if not gestores:
+        st.info("Nenhum gestor com grupos vinculados foi encontrado neste tenant.")
         return
 
-    if not targets:
-        st.info("Nenhum gestor com grupos vinculados foi encontrado para impressão.")
-        return
+    total_grupos = sum(len(g.get("grupos", [])) for g in gestores)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.caption(f"{len(gestores)} gestor(es) encontrado(s)")
+    with c2:
+        st.caption(f"{total_grupos} grupo(s) disponível(is)")
 
-    top_cols = st.columns([1, 1, 1.2])
-    all_group_keys: list[str] = []
-    for manager in targets:
-        uid = manager.get("user_id") or manager.get("nome")
-        for group in manager.get("grupos", []):
-            all_group_keys.append(f"ntf_print_grp_{uid}_{group['grupo_id']}")
+    selected: list[dict] = []
+    sync_prefix = f"_ntf_zip_mgr_sync_{data_version}_"
 
-    with top_cols[0]:
-        if st.button("Marcar todos", key="ntf_print_mark_all", use_container_width=True):
-            _set_group_selection(all_group_keys, True)
-            st.rerun()
-    with top_cols[1]:
-        if st.button("Limpar seleção", key="ntf_print_clear_all", use_container_width=True):
-            _set_group_selection(all_group_keys, False)
-            _clear_print_zip_cache()
-            st.rerun()
+    for gestor in gestores:
+        gestor_id = str(gestor.get("gestor_id") or "")
+        grupos = gestor.get("grupos") or []
+        if not grupos:
+            continue
 
-    selected_items: list[dict] = []
-    total_groups = 0
-    for manager in targets:
-        uid = manager.get("user_id") or manager.get("nome")
-        gestor_nome = manager.get("nome") or "Gestor"
-        gestor_email = manager.get("email") or ""
-        grupos = manager.get("grupos") or []
-        total_groups += len(grupos)
-        selected_count = 0
-        group_keys = [f"ntf_print_grp_{uid}_{g['grupo_id']}" for g in grupos]
-        manager_key = f"ntf_print_manager_{uid}"
+        mgr_key = f"ntf_zip_mgr_{gestor_id}_{data_version}"
+        grp_keys = [f"ntf_zip_grp_{gestor_id}_{str(g.get('grupo_id') or '')}_{data_version}" for g in grupos]
 
-        if manager_key not in st.session_state:
-            st.session_state[manager_key] = bool(group_keys) and all(
-                bool(st.session_state.get(k, False)) for k in group_keys
-            )
+        prev_mgr = bool(st.session_state.get(f"{sync_prefix}{gestor_id}", False))
+        mgr_checked = bool(st.session_state.get(mgr_key, False))
 
-        with st.expander(f"👤 {gestor_nome} · {len(grupos)} grupo(s)", expanded=False):
+        # Clique no gestor sincroniza todos os grupos antes de renderizar
+        if mgr_checked != prev_mgr:
+            for gk in grp_keys:
+                st.session_state[gk] = mgr_checked
+            st.session_state[f"{sync_prefix}{gestor_id}"] = mgr_checked
+
+        # Se todos os grupos já estavam marcados manualmente, reflete no gestor
+        grp_states_pre = [bool(st.session_state.get(gk, False)) for gk in grp_keys]
+        if grp_states_pre and all(grp_states_pre) != bool(st.session_state.get(mgr_key, False)):
+            st.session_state[mgr_key] = all(grp_states_pre)
+            st.session_state[f"{sync_prefix}{gestor_id}"] = all(grp_states_pre)
+
+        with st.container(border=True):
             st.checkbox(
-                f"{gestor_nome} · {len(grupos)} grupo(s)",
-                key=manager_key,
-                on_change=_apply_manager_selection,
-                args=(manager_key, group_keys),
+                f"{gestor.get('gestor_nome', 'Gestor')} · {len(grupos)} grupo(s)",
+                key=mgr_key,
+                value=bool(st.session_state.get(mgr_key, False)),
             )
-            if gestor_email:
-                st.caption(gestor_email)
+            departamentos = gestor.get("departamentos") or []
+            if departamentos:
+                deps_txt = ", ".join(d.get("departamento_nome") or "—" for d in departamentos)
+                st.caption(f"Departamentos: {deps_txt}")
 
-            for idx, group in enumerate(grupos):
-                gkey = f"ntf_print_grp_{uid}_{group['grupo_id']}"
+            grp_states_post: list[bool] = []
+            for grupo in grupos:
+                gid = str(grupo.get("grupo_id") or "")
+                grp_key = f"ntf_zip_grp_{gestor_id}_{gid}_{data_version}"
                 checked = st.checkbox(
-                    group.get("label") or group.get("grupo_nome") or group.get("grupo_id"),
-                    key=gkey,
-                    value=bool(st.session_state.get(gkey, False)),
+                    f"{grupo.get('grupo_nome', gid)} · {grupo.get('departamento_nome', '—')}",
+                    key=grp_key,
+                    value=bool(st.session_state.get(grp_key, False)),
                 )
+                grp_states_post.append(bool(checked))
                 if checked:
-                    selected_count += 1
-                    selected_items.append(
-                        {
-                            "gestor_nome": gestor_nome,
-                            "gestor_email": gestor_email,
-                            "grupo_id": group.get("grupo_id"),
-                            "grupo_nome": group.get("grupo_nome"),
-                            "departamento_nome": group.get("departamento_nome"),
-                        }
-                    )
+                    selected.append({
+                        "gestor_id": gestor_id,
+                        "gestor_nome": gestor.get("gestor_nome", "Gestor"),
+                        "grupo_id": gid,
+                        "grupo_nome": grupo.get("grupo_nome", gid),
+                        "departamento_id": grupo.get("departamento_id", ""),
+                        "departamento_nome": grupo.get("departamento_nome", "—"),
+                    })
 
-            st.session_state[manager_key] = bool(grupos) and selected_count == len(grupos)
-            st.caption(f"Selecionados deste gestor: {selected_count} de {len(grupos)}")
-
-    _print_selection_store().clear()
-    _print_selection_store().extend(selected_items)
+            # Mantém o gestor consistente após interações manuais nos grupos
+            all_groups_checked = bool(grp_states_post) and all(grp_states_post)
+            if bool(st.session_state.get(mgr_key, False)) != all_groups_checked:
+                st.session_state[mgr_key] = all_groups_checked
+            st.session_state[f"{sync_prefix}{gestor_id}"] = bool(st.session_state.get(mgr_key, False))
 
     st.divider()
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Gestores", len(targets))
-    m2.metric("Grupos disponíveis", total_groups)
-    m3.metric("PDFs a gerar", len(selected_items))
+    st.caption(f"Serão gerados {len(selected)} PDF(s).")
+    if not selected:
+        st.warning("Marque pelo menos um grupo para gerar o ZIP.")
+        return
 
-    if selected_items:
-        st.success(f"Serão gerados {len(selected_items)} PDF(s) para impressão dentro de um único ZIP.")
-    else:
-        st.info("Marque pelo menos um grupo para habilitar a geração do ZIP.")
-
-    if st.button("Gerar ZIP para impressão", key="ntf_print_generate_zip", type="primary", use_container_width=True, disabled=not selected_items):
-        from .pdf import build_print_zip
-
-        with st.spinner("Gerando PDFs e montando ZIP...", show_time=True):
-            zip_bytes = build_print_zip(
-                tenant_id=tenant_id,
-                revisao_id=revisao_id,
-                revisao_titulo=(revisao.get("titulo") or "Revisão"),
-                selections=selected_items,
-                semana_atual=semana_atual,
-                data_version=data_version,
-                token=str(st.session_state.get("sb_access_token", "")),
-            )
-
-        if not zip_bytes:
-            st.error("Nenhum PDF pôde ser gerado para os grupos selecionados.")
-        else:
-            rev_slug = (revisao.get("titulo") or "revisao").replace("/", "-").replace(" ", "_")
-            st.session_state["_ntf_print_zip_bytes"] = zip_bytes
-            st.session_state["_ntf_print_zip_name"] = f"impressao_{rev_slug}_semana_{int(semana_atual or 0):02d}.zip"
-            st.success("ZIP pronto para download.")
-
-    zip_bytes = st.session_state.get("_ntf_print_zip_bytes")
-    zip_name = st.session_state.get("_ntf_print_zip_name")
-    if zip_bytes and zip_name:
-        download_action(
-            "⬇️ Baixar ZIP com PDFs",
-            data=zip_bytes,
-            file_name=zip_name,
-            mime="application/zip",
-            use_container_width=True,
-            key="ntf_print_zip_download",
-            type="primary",
+    try:
+        zip_bytes = build_manager_print_zip(
+            tenant_id,
+            revisao_id,
+            selected,
+            revisao,
+            semana_atual,
+            token,
         )
+    except ImportError:
+        st.info("Instale `reportlab` para habilitar a geração dos PDFs.")
+        return
+    except Exception as exc:
+        st.error(f"Não foi possível gerar o ZIP: {exc}")
+        return
+
+    if not zip_bytes:
+        st.warning("Nenhum PDF pôde ser gerado para os grupos selecionados.")
+        return
+
+    st.download_button(
+        "⬇️ Gerar ZIP para impressão",
+        data=zip_bytes,
+        file_name=f"matrizes_impressao_semana_{int(semana_atual or 1):02d}.zip",
+        mime="application/zip",
+        use_container_width=True,
+        type="primary",
+        key=f"ntf_zip_dl_{revisao_id}_{data_version}_{len(selected)}",
+    )

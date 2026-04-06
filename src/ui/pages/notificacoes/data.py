@@ -557,3 +557,11 @@ def build_manager_print_zip(
             )
             zf.writestr(fname, pdf_bytes)
     return mem.getvalue()
+
+
+# Compatibilidade com versões anteriores dos imports
+load_manager_print_targets = load_manager_print_options
+
+
+def build_manager_print_targets(*args, **kwargs):
+    return load_manager_print_options(*args, **kwargs)
