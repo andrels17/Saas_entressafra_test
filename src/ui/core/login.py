@@ -6,6 +6,80 @@ from src.auth.audit import audit_login_success, audit_login_failure, audit_login
 from src.ui.core.error_messages import show_error
 from src.utils import nav
 
+_LOADING_SCREEN_HTML = """
+<style>
+#agro-loader {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    background: #0D1117;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    animation: loader-fadein 0.18s ease;
+}
+@keyframes loader-fadein {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+.agro-loader-icon {
+    width: 56px; height: 56px;
+    background: linear-gradient(135deg, #DC2626, #7f1d1d);
+    border-radius: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.8rem;
+    box-shadow: 0 0 40px rgba(220,38,38,0.35);
+    animation: loader-pulse 1.6s ease-in-out infinite;
+}
+@keyframes loader-pulse {
+    0%, 100% { box-shadow: 0 0 30px rgba(220,38,38,0.3); }
+    50%       { box-shadow: 0 0 55px rgba(220,38,38,0.6); }
+}
+.agro-loader-brand {
+    font-size: 1.45rem; font-weight: 800;
+    color: #E6EDF3; letter-spacing: -0.5px;
+}
+.agro-loader-brand span { color: #DC2626; }
+.agro-loader-bar-wrap {
+    width: 200px; height: 3px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 99px;
+    overflow: hidden;
+}
+.agro-loader-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #DC2626, #ef4444);
+    border-radius: 99px;
+    animation: loader-bar 1.4s ease-in-out infinite;
+}
+@keyframes loader-bar {
+    0%   { width: 0%;   margin-left: 0%; }
+    50%  { width: 70%;  margin-left: 15%; }
+    100% { width: 0%;   margin-left: 100%; }
+}
+.agro-loader-msg {
+    font-size: 0.8rem;
+    color: #6B7280;
+    letter-spacing: 0.04em;
+}
+</style>
+<div id="agro-loader">
+    <div class="agro-loader-icon">🌾</div>
+    <div class="agro-loader-brand">Agro<span>Safra</span></div>
+    <div class="agro-loader-bar-wrap">
+        <div class="agro-loader-bar"></div>
+    </div>
+    <div class="agro-loader-msg">Carregando sua plataforma…</div>
+</div>
+"""
+
+
+def _show_loading_screen() -> None:
+    """Exibe a tela de carregamento animada antes do rerun pós-login."""
+    st.markdown(_LOADING_SCREEN_HTML, unsafe_allow_html=True)
+
 
 def render_login() -> None:
     st.markdown(
@@ -168,7 +242,11 @@ def render_login() -> None:
                 ):
                     st.session_state.pop(k, None)
                 st.session_state["_identity_user_id"] = user_id
-                st.success("✅ Login realizado!")
+
+                # Exibe tela de carregamento animada antes do rerun.
+                # O overlay cobre toda a tela enquanto o Streamlit recarrega
+                # a página autenticada, eliminando o flash cinza padrão.
+                _show_loading_screen()
                 nav.goto("Início")
 
             except Exception as e:
