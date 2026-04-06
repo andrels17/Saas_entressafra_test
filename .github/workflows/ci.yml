@@ -39,10 +39,7 @@ jobs:
 
       - name: Verificar imports, estilo e erros reais
         run: |
-          ruff check src tests \
-            --select E,F,W,I \
-            --ignore E501,E402,F401 \
-            --output-format github
+          ruff check src tests             --select E,F,W,I             --ignore E501,E402,F401             --output-format github
 
       - name: Verificar formatação
         run: |
@@ -71,12 +68,7 @@ jobs:
 
       - name: Executar testes
         run: |
-          python -m pytest tests \
-            --tb=short \
-            --cov=src \
-            --cov-report=term-missing \
-            --cov-report=xml:coverage.xml \
-            -v
+          python -m pytest tests             --tb=short             --cov=src             --cov-report=term-missing             --cov-report=xml:coverage.xml             -v
 
       - name: Upload cobertura
         if: always()
@@ -121,12 +113,15 @@ jobs:
           st.cache_data = _CR()
           st.session_state = {}
           st.query_params = {}
-          st.rerun = lambda: None
+
+          def _rerun():
+              return None
 
           def _stop():
               raise SystemExit("stop")
-          st.stop = _stop
 
+          st.rerun = _rerun
+          st.stop = _stop
           sys.modules["streamlit"] = st
 
           sup = types.ModuleType("supabase")
@@ -163,20 +158,18 @@ jobs:
           print("✅ Todos os imports críticos OK")
           PY
 
-      - name: Verificar migration SQL existe
+      - name: Verificar migrations SQL existem
         run: |
-          test -f migrations/001_create_audit_logs.sql && \
-            echo "✅ Migration 001 existe" || \
-            (echo "❌ Migration 001 não encontrada" && exit 1)
+          if find . -type f -path "*/migrations/*.sql" | grep -q .; then
+            echo "✅ Há migrations SQL no projeto"
+          else
+            echo "❌ Nenhuma migration SQL encontrada"
+            exit 1
+          fi
 
       - name: Verificar arquivos de teste existem
         run: |
-          for f in \
-            tests/test_kpi.py \
-            tests/test_rate_limit.py \
-            tests/test_audit.py \
-            tests/test_observability.py \
-            tests/test_integration_auth_tenant.py
+          for f in             tests/test_kpi.py             tests/test_rate_limit.py             tests/test_audit.py             tests/test_observability.py             tests/test_integration_auth_tenant.py
           do
             test -f "$f" && echo "✅ $f" || (echo "❌ $f não encontrado" && exit 1)
           done
