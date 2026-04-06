@@ -48,16 +48,43 @@ def _prune(key: str, now: float | None = None,
 
 # ── Backend Redis (produção) ───────────────────────────────────────────────────
 
-def _get_redis():
-    """Tenta obter cliente Redis. Retorna None se não configurado ou falhar."""
+# Singleton do cliente Redis, inicializado uma única vez.
+# Evita abrir uma nova conexão TCP + ping a cada chamada de rate limit,
+# o que era especialmente custoso sob carga (rafaga de tentativas de login).
+# @st.cache_resource garante uma instância por processo Streamlit e
+# funciona corretamente fora do contexto de sessão (sem session_state).
+@st.cache_resource
+def _get_redis_client():
+    """Inicializa e retorna o cliente Redis singleton.
+
+    Retorna None se REDIS_URL não estiver configurado ou se a conexão falhar.
+    Em caso de falha posterior (rede instável), as funções individuais
+    capturam a exceção e fazem fallback para memória.
+    """
     try:
         redis_url = st.secrets.get("REDIS_URL") or ""
         if not redis_url:
             return None
         import redis  # type: ignore
-        client = redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2)
+
+        client = redis.from_url(
+            redis_url,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+            # Reconexão automática em caso de queda transitória
+            retry_on_timeout=True,
+            health_check_interval=30,
+        )
         client.ping()
         return client
+    except Exception:
+        return None
+
+
+def _get_redis():
+    """Retorna o cliente Redis cacheado. Nunca levanta exceção."""
+    try:
+        return _get_redis_client()
     except Exception:
         return None
 
