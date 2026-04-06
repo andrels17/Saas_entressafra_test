@@ -237,10 +237,8 @@ def page_header(
     subtitle = kwargs.pop("subtitle", "")
 
     if kwargs:
-        raise TypeError(
-            f"page_header() recebeu kwargs inesperados: {
-                ', '.join(
-                    kwargs.keys())}")
+        unexpected = ", ".join(kwargs.keys())
+        raise TypeError(f"page_header() recebeu kwargs inesperados: {unexpected}")
 
     if args:
         if len(args) == 1:
