@@ -626,26 +626,28 @@ def _fragment_home_live() -> None:
 def _render_greeting() -> None:
     """Saudação personalizada com nome do usuário e horário do dia."""
     from html import escape as _h
-    from datetime import datetime
     from src.ui.core.sidebar_display import get_display_names
     from src.utils.supabase_helpers import current_tenant_id
-
+    from src.utils.timezone import now_brt  # <-- importação adicionada
+ 
     user_id = str(st.session_state.get("sb_user_id") or "")
     tenant_id = current_tenant_id() or ""
     _, user_name = get_display_names(tenant_id, user_id)
-
-    hour = datetime.now().hour
+ 
+    # now_brt() retorna datetime aware em UTC-3 (Brasília / Fortaleza),
+    # independente do fuso do servidor onde o app está rodando.
+    hour = now_brt().hour
     if hour < 12:
         saudacao = "Bom dia"
     elif hour < 18:
         saudacao = "Boa tarde"
     else:
         saudacao = "Boa noite"
-
+ 
     primeiro_nome = (_h(user_name.split()[0]) if user_name and user_name != "Usuário"
                      else "")
     greeting = f"{saudacao}, {primeiro_nome}!" if primeiro_nome else f"{saudacao}!"
-
+ 
     st.markdown(
         f'<div style="margin-bottom:4px">'
         f'<span style="font-size:1.55rem;font-weight:800;color:#F5F5F5">{greeting}</span>'
