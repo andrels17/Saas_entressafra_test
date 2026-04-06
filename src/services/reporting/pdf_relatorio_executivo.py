@@ -422,29 +422,39 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         stroke=1)
     cx0, cy0 = 24 * mm, y - chart_h + 8 * mm
     cw, ch = w - 48 * mm, chart_h - 16 * mm
+    trend = sorted(trend_display, key=lambda r: int(r.get('semana', 0)))[-4:]
+    values = [int(r.get('pct', 0) or 0) for r in trend]
+    if values:
+        vmin = min(values)
+        vmax = max(values)
+        pad = max(2, int(round((vmax - vmin) * 0.25)))
+        y_min = max(0, vmin - pad)
+        y_max = min(100, vmax + pad)
+        if y_max <= y_min:
+            y_max = min(100, y_min + 5)
+    else:
+        y_min, y_max = 0, 100
+
     c.setStrokeColor(BORDER)
     for frac in (0, 0.25, 0.5, 0.75, 1):
         yy = cy0 + ch * frac
+        val = int(round(y_min + (y_max - y_min) * frac))
         c.line(cx0, yy, cx0 + cw, yy)
         c.setFillColor(MUTED)
         c.setFont('Helvetica', 6.5)
-        c.drawRightString(cx0 - 2, yy - 2, f"{int(frac * 100)}%")
+        c.drawRightString(cx0 - 2, yy - 2, f"{val}%")
 
-    trend = sorted(trend_display, key=lambda r: int(r.get('semana', 0)))[-4:]
     if trend:
         n = len(trend)
         pts = []
         for i, row in enumerate(trend):
+            pct_val = int(row.get('pct', 0) or 0)
             px = cx0 + (cw * i / max(n - 1, 1))
-            py = cy0 + ch * (int(row.get('pct', 0)) / 100)
-            pts.append(
-                (px, py, int(
-                    row.get(
-                        'semana', 0)), int(
-                    row.get(
-                        'pct', 0))))
+            norm = (pct_val - y_min) / max((y_max - y_min), 1)
+            py = cy0 + ch * max(0, min(1, norm))
+            pts.append((px, py, int(row.get('semana', 0)), pct_val))
         c.setStrokeColor(BLUE)
-        c.setLineWidth(1.6)
+        c.setLineWidth(2.2)
         for i in range(len(pts) - 1):
             c.line(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1])
         for px, py, sem, pct in pts:
