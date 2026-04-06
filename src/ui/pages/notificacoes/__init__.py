@@ -1,5 +1,6 @@
 """Página de notificações — Feed in-app + Exportar + E-mail."""
 from __future__ import annotations
+from html import escape as _h
 
 import streamlit as st
 
@@ -69,7 +70,7 @@ def _render_header_card(alertas: dict, revisao: dict) -> None:
             f'letter-spacing:0.08em;text-transform:uppercase;margin-bottom:3px">'
             f'Revisão ativa</div>'
             f'<div style="font-size:1.05rem;font-weight:700;color:#E8EDF5;margin-bottom:2px">'
-            f'{titulo}</div>'
+            f'{_h(titulo)}</div>'
             f'<div style="font-size:0.78rem;color:#8A9BAE">'
             f'Semana <b style="color:#E8EDF5">{sem}</b> de '
             f'<b style="color:#E8EDF5">{tot_sem}</b></div>',

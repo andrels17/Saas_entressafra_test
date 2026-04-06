@@ -1,5 +1,6 @@
 """Dashboard por Equipamento — visão completa de um equipamento específico."""
 from __future__ import annotations
+from html import escape as _h
 
 import hashlib
 
@@ -55,9 +56,9 @@ def _render_header(equip: dict, pct: int) -> None:
                 </div>
                 <div style="font-size:1.45rem;font-weight:800;color:#F5F5F5;
                             line-height:1.2;word-break:break-word">
-                    {equip['frota']}
+                    {_h(equip['frota'])}
                     <span style="color:#8A9BAE;font-weight:400">—</span>
-                    {equip['modelo']}
+                    {_h(equip['modelo'])}
                 </div>
             </div>
             <span style="flex-shrink:0;display:inline-block;padding:4px 12px;
@@ -67,10 +68,10 @@ def _render_header(equip: dict, pct: int) -> None:
         </div>
         <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px">
             <span style="font-size:0.8rem;color:#8A9BAE">
-                🏭 <b style="color:#C8D0DB">{equip['departamento_nome']}</b>
+                🏭 <b style="color:#C8D0DB">{_h(equip['departamento_nome'])}</b>
             </span>
             <span style="font-size:0.8rem;color:#8A9BAE">
-                ⊕ <b style="color:#C8D0DB">{equip['grupo_nome']}</b>
+                ⊕ <b style="color:#C8D0DB">{_h(equip['grupo_nome'])}</b>
             </span>
         </div>
         <div>

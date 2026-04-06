@@ -1,4 +1,5 @@
 from __future__ import annotations
+from html import escape as _h
 
 from datetime import datetime, timezone
 
@@ -370,12 +371,12 @@ def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_di
         st.markdown('#### 🔥 Prioridades agora')
         for idx, item in enumerate(priority_sorted[:3], start=1):
             st.markdown(
-                f'<div class="mtz-priority-item"><b>{idx}. {item["setor_nome"]}</b> · '
+                f'<div class="mtz-priority-item"><b>{idx}. {_h(str(item["setor_nome"]))}</b> · '
                 f'{item["risk_icon"]} risco {item["risk_label"]} · '
                 f'<b>{item["pct"]}%</b> concluído · '
                 f'{item["criticos"]} críticos · '
                 f'{item["atrasadas_m"]} atraso(s) de montagem<br>'
-                f'<span style="opacity:.78">{item["recommendation"]}</span></div>',
+                f'<span style="opacity:.78">{_h(str(item["recommendation"]))}</span></div>',
                 unsafe_allow_html=True,
             )
         st.markdown('</div>', unsafe_allow_html=True)

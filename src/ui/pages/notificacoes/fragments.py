@@ -1,5 +1,6 @@
 """Fragments de UI para notificações (cada seção da página como @st.fragment)."""
 from __future__ import annotations
+from html import escape as _h
 
 import streamlit as st
 
@@ -41,7 +42,7 @@ def fragment_resumo(alertas: dict, revisao: dict) -> None:
     st.markdown(
         f'<div style="font-size:.85rem;color:rgba(255,255,255,.55);margin-bottom:8px">'
         f'Semana <b style="color:#fff">{semana}</b> de <b style="color:#fff">{total_s}</b>'
-        f' · Revisão: <b style="color:#FFD100">{revisao.get("titulo", "—")}</b></div>',
+        f' · Revisão: <b style="color:#FFD100">{_h(revisao.get("titulo", "—"))}</b></div>',
         unsafe_allow_html=True,
     )
     c1, c2, c3, c4 = st.columns(4)
@@ -158,7 +159,7 @@ def fragment_resumo_grupos(alertas: dict) -> None:
             f'<div style="padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.08);'
             f'background:rgba(255,255,255,.03);margin-bottom:8px">'
             f'<div style="font-size:.9rem;font-weight:700;margin-bottom:6px">'
-            f'{row["Grupo"]} <span style="color:{color};font-size:.8rem">({total} alerta{"s" if total > 1 else ""})</span></div>'
+            f'{_h(str(row["Grupo"]))} <span style="color:{color};font-size:.8rem">({total} alerta{"s" if total > 1 else ""})</span></div>'
             f'<div style="display:flex;flex-wrap:wrap;gap:6px">{"".join(badges)}</div>'
             f'</div>', unsafe_allow_html=True,
         )

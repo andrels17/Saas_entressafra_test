@@ -17,6 +17,7 @@ Requer tabela `tarefa_comentarios` no Supabase:
     created_at timestamptz default now()
 """
 from __future__ import annotations
+from html import escape as _h
 
 import streamlit as st
 from datetime import datetime
@@ -97,10 +98,10 @@ def render_comentarios(
                     f'<div style="flex:1;background:rgba(255,255,255,.04);border-radius:8px;'
                     f'padding:7px 10px;border:1px solid rgba(255,255,255,.07)">'
                     f'<div style="display:flex;justify-content:space-between;margin-bottom:3px">'
-                    f'<span style="font-size:.78rem;font-weight:600;color:#D1D5DB">{nome}</span>'
+                    f'<span style="font-size:.78rem;font-weight:600;color:#D1D5DB">{_h(str(nome))}</span>'
                     f'<span style="font-size:.72rem;color:rgba(255,255,255,.35)">{dt}</span>'
                     f'</div>'
-                    f'<div style="font-size:.83rem;color:rgba(255,255,255,.8);line-height:1.4">{txt}</div>'
+                    f'<div style="font-size:.83rem;color:rgba(255,255,255,.8);line-height:1.4">{_h(str(txt))}</div>'
                     f'</div></div>',
                     unsafe_allow_html=True,
                 )

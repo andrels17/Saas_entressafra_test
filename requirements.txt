@@ -8,4 +8,5 @@ matplotlib==3.9.2
 reportlab==4.2.5
 openpyxl
 # Rate limiting backend (opcional — recomendado para produção multi-instância)
+# Ative adicionando REDIS_URL ao secrets.toml e descomentando a linha abaixo:
 # redis>=5.0.0

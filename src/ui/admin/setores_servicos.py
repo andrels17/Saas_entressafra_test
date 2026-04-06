@@ -9,12 +9,14 @@ Melhorias UI/UX v2:
 - Serviços agrupados por setor
 """
 from __future__ import annotations
+from html import escape as _h
 
 from collections import defaultdict
 
 import streamlit as st
 from src.utils import nav
-from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_role
+from src.utils.supabase_helpers import sanitize_user_input,\
+     sb_for_user, current_tenant_id, current_role
 from src.ui.core.styles import page_header as _ph
 from src.ui.admin_components.utils import inject_enterprise_css
 
@@ -100,7 +102,7 @@ def _tab_setores(sb, tenant_id: str) -> None:
             st.warning("⚠️ Informe um nome para o setor.")
         else:
             try:
-                sb.table("setores").insert({"tenant_id": tenant_id, "nome": nome}).execute()
+                sb.table("setores").insert({"tenant_id": tenant_id, "nome": sanitize_user_input(nome, max_length=100)}).execute()
                 st.toast("✅ Setor criado!", icon=":material/check_circle:")
                 nav.rerun_keep_menu()
             except Exception as e:
@@ -144,7 +146,7 @@ def _tab_setores(sb, tenant_id: str) -> None:
             st.session_state[edit_key] = False
 
         st.markdown(
-            f'<div class="ss-item-card"><span class="ss-item-name">{s["nome"]}</span>{_badge(s["ativo"])}</div>',
+            f'<div class="ss-item-card"><span class="ss-item-name">{_h(str(s["nome"] or ""))}</span>{_badge(s["ativo"])}</div>',
             unsafe_allow_html=True,
         )
         col_e, col_t, col_sp = st.columns([1, 1, 4])
@@ -222,7 +224,7 @@ def _tab_servicos(sb, tenant_id: str) -> None:
                 sb.table("servicos").insert({
                     "tenant_id": tenant_id,
                     "setor_id": setor_map[setor_escolhido],
-                    "nome": nome,
+                    "nome": sanitize_user_input(nome, max_length=100),
                 }).execute()
                 st.toast("✅ Serviço criado!", icon=":material/check_circle:")
                 nav.rerun_keep_menu()
@@ -287,7 +289,7 @@ def _tab_servicos(sb, tenant_id: str) -> None:
                     st.session_state[edit_key] = False
 
                 st.markdown(
-                    f'<div class="ss-item-card"><span class="ss-item-name">{sv["nome"]}</span>{_badge(sv["ativo"])}</div>',
+                    f'<div class="ss-item-card"><span class="ss-item-name">{_h(str(sv["nome"] or ""))}</span>{_badge(sv["ativo"])}</div>',
                     unsafe_allow_html=True,
                 )
                 col_e, col_t2, col_sp = st.columns([1, 1, 4])

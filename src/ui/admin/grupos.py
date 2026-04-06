@@ -2,7 +2,8 @@ from src.ui.core.styles import page_header as _ph
 import streamlit as st
 from src.ui.admin_components.layout import admin_block, admin_divider
 from src.ui.admin_components.utils import inject_enterprise_css, pager, safe_rerun, norm_name
-from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_role
+from src.utils.supabase_helpers import sanitize_user_input,\
+     sb_for_user, current_tenant_id, current_role
 from src.db.supabase_client import get_supabase_anon
 from src.auth.audit import (
     audit_grupo_criado,
@@ -497,7 +498,7 @@ def render_admin_grupos() -> None:
                 st.warning("Informe um nome.")
                 st.stop()
             try:
-                payload = {"tenant_id": tenant_id, "nome": nome_norm}
+                payload = {"tenant_id": tenant_id, "nome": sanitize_user_input(nome_norm, max_length=150)}
                 if dep_sel and dep_sel != "(sem departamento)":
                     payload["departamento_id"] = dep_map.get(dep_sel)
                 try:

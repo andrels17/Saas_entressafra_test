@@ -1,4 +1,5 @@
 from __future__ import annotations
+from html import escape as _h
 
 import streamlit as st
 
@@ -83,11 +84,11 @@ def render_selection_screen(*, tenant_id, revisao_id, grupos, search, status_fil
                 with st.container(border=True):
                     st.markdown(f'<div class="mtz-select-card {ring_cls}">', unsafe_allow_html=True)
                     st.markdown(
-                        f'<div class="mtz-card-title">{_truncate_card_title(nome, 22)}</div>',
+                        f'<div class="mtz-card-title">{_h(_truncate_card_title(nome, 22))}</div>',
                         unsafe_allow_html=True,
                     )
                     st.markdown(
-                        f'<div class="mtz-card-subtitle">{_truncate_card_subtitle(dept_lbl, 20)}</div>',
+                        f'<div class="mtz-card-subtitle">{_h(_truncate_card_subtitle(dept_lbl, 20))}</div>',
                         unsafe_allow_html=True,
                     )
                     st.markdown(
@@ -95,7 +96,7 @@ def render_selection_screen(*, tenant_id, revisao_id, grupos, search, status_fil
                         unsafe_allow_html=True,
                     )
                     st.markdown(
-                        f'<div class="mtz-card-status {status_cls}">{status_txt}</div>',
+                        f'<div class="mtz-card-status {status_cls}">{_h(status_txt)}</div>',
                         unsafe_allow_html=True,
                     )
                     if st.button(

@@ -10,6 +10,7 @@ Melhorias UI/UX v2:
 - Feedback mais claro em todas as ações
 """
 from __future__ import annotations
+from html import escape as _h
 
 from collections import defaultdict
 
@@ -120,7 +121,7 @@ def _render_coverage(grupos, eq_active_by_gid, svc_by_gid) -> None:
             continue
         st.markdown(
             f'<div class="tpl-coverage-row">'
-            f'<div><span class="tpl-group-name">{g["nome"]}</span>'
+            f'<div><span class="tpl-group-name">{_h(str(g["nome"] or ""))}</span>'
             f'<br><span class="tpl-meta">{r["n_eq"]} equip. · {r["n_svc"]} serviços</span></div>'
             f'{_cov_badge(r["covered"], r["n_eq"] > 0, r["n_svc"] > 0)}'
             f'</div>',
