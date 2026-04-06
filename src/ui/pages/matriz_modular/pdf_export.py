@@ -76,6 +76,32 @@ def _merge_sector_tables(sector_tables):
     if not sector_tables:
         return pd.DataFrame(), []
 
+    def _normalize_cell(value) -> str:
+        if value is None:
+            return ""
+        try:
+            if pd.isna(value):
+                return ""
+        except Exception:
+            pass
+        return str(value).strip()
+
+    def _service_has_relevant_data(df_: pd.DataFrame, cols: list[str]) -> bool:
+        if not cols:
+            return False
+        valid_marks = {"OK", "!", "PEND", "PENDENTE", "NOK", "NÃO", "NAO", "X"}
+        for col_name in cols:
+            if col_name not in df_.columns:
+                continue
+            series = df_[col_name].map(_normalize_cell)
+            if series.eq("").all():
+                continue
+            if series.str.upper().isin(valid_marks).any():
+                return True
+            if series.ne("").any():
+                return True
+        return False
+
     frames = []
     sector_groups = []
     seen_columns: set[str] = set()
@@ -91,10 +117,26 @@ def _merge_sector_tables(sector_tables):
         by_service: dict[str, dict] = {}
         service_order: list[str] = []
 
-        for col in work.columns:
-            if col in ("Equipamento", "%", "Status"):
-                continue
+        candidate_columns = [c for c in work.columns if c not in ("Equipamento", "%", "Status")]
+        grouped_candidates: dict[str, list[str]] = {}
+        for col in candidate_columns:
+            raw = str(col)
+            service_name = raw
+            try:
+                left, right = raw.rsplit(" ", 1)
+                if right in order_map:
+                    service_name = left
+            except Exception:
+                pass
+            grouped_candidates.setdefault(service_name, []).append(col)
 
+        active_services = {
+            service_name
+            for service_name, cols in grouped_candidates.items()
+            if _service_has_relevant_data(work, cols)
+        }
+
+        for col in candidate_columns:
             raw = str(col)
             service_name = raw
             suffix = None
@@ -104,6 +146,9 @@ def _merge_sector_tables(sector_tables):
                     service_name, suffix = left, right
             except Exception:
                 pass
+
+            if service_name not in active_services:
+                continue
 
             canonical = f"{setor_nome}|||{raw}"
             idx = 2
@@ -589,9 +634,9 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                 # linha divisória direita do serviço (média — entre serviços dentro do mesmo setor)
                 is_sector_boundary = svc_end in separators
                 if not is_sector_boundary:
-                    # linha de separação entre serviços: mais fina e numa cor intermediária
-                    style_cmds.append(("LINEAFTER", (svc_end, 1), (svc_end, n_rows_total - 1),
-                                       0.9, colors.HexColor("#64748B")))
+                    # linha de separação entre serviços: mais forte para impressão em papel
+                    style_cmds.append(("LINEAFTER", (svc_end, 0), (svc_end, n_rows_total - 1),
+                                       1.6, colors.HexColor("#334155")))
 
             # ── Separador forte entre setores ──
             for col in separators:
