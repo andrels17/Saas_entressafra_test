@@ -580,11 +580,12 @@ def _build_pdf_tables(
             LMARGIN,
             0.58 * cm,
             "D = desmontou   R = revisou   M = montou")
+        pagina = canvas.getPageNumber()
         canvas.drawRightString(
             PAGE[0] - RMARGIN,
             0.58 * cm,
-            f"Página {
-                canvas.getPageNumber()}")
+            f"Página {pagina}"
+        )
         canvas.restoreState()
 
     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
