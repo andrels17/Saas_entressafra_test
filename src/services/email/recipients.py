@@ -416,6 +416,113 @@ def get_all_users_with_prefs(tenant_id: str) -> list[dict[str, Any]]:
     return sorted(result, key=lambda item: (item["role"], item["nome"]))
 
 
+@dataclass
+class ManagerPdfBundle:
+    """Gestor com todos os departamentos aos quais está vinculado.
+
+    O dispatcher gera um PDF por departamento e os agrupa num único e-mail
+    para cada gestor, evitando N e-mails separados quando o gestor cobre
+    múltiplos departamentos.
+    """
+    recipient: Recipient
+    departamento_ids: list[str]
+    departamento_nomes: list[str]
+    grupo_ids_por_dept: dict[str, list[str]]  # dep_id → grupo_ids
+
+
+def get_manager_pdf_bundles(tenant_id: str) -> list[ManagerPdfBundle]:
+    """Retorna um bundle por gestor contendo todos os seus departamentos.
+
+    Ao invés de um e-mail por departamento (comportamento anterior),
+    o dispatcher usa esses bundles para enviar um único e-mail por gestor
+    com todos os PDFs dos seus departamentos como anexos.
+    """
+    svc = get_supabase_service()
+    prefs = _fetch_email_prefs(svc, tenant_id)
+
+    # Vínculos gestor → departamento
+    try:
+        links = (
+            svc.table("tenant_user_departamentos")
+            .select("user_id,departamento_id")
+            .eq("tenant_id", tenant_id)
+            .execute()
+            .data
+        ) or []
+    except Exception as exc:
+        log.warning("get_manager_pdf_bundles: falha ao buscar vínculos: %s", exc)
+        return []
+
+    # Roles dos usuários
+    try:
+        tu_rows = (
+            svc.table("tenant_users")
+            .select("user_id,role")
+            .eq("tenant_id", tenant_id)
+            .execute()
+            .data
+        ) or []
+    except Exception as exc:
+        log.warning("get_manager_pdf_bundles: falha ao buscar tenant_users: %s", exc)
+        return []
+    user_roles = {row["user_id"]: row.get("role", "") for row in tu_rows if row.get("user_id")}
+
+    # Agrupa dep_ids por gestor — apenas usuários tipo gestor
+    uid_to_dep_ids: dict[str, list[str]] = {}
+    for link in links:
+        uid = link.get("user_id")
+        dep_id = link.get("departamento_id")
+        if not (uid and dep_id):
+            continue
+        role = user_roles.get(uid, "")
+        if _resolve_tipo(uid, role, prefs) == TIPO_GESTOR:
+            uid_to_dep_ids.setdefault(uid, []).append(dep_id)
+
+    if not uid_to_dep_ids:
+        return []
+
+    # Nomes e grupos dos departamentos
+    all_dep_ids = list({d for deps in uid_to_dep_ids.values() for d in deps})
+    dep_to_grupos = _fetch_groups_by_department(svc, tenant_id)
+    try:
+        dep_rows = (
+            svc.table("departamentos")
+            .select("id,nome")
+            .eq("tenant_id", tenant_id)
+            .in_("id", all_dep_ids)
+            .execute()
+            .data
+        ) or []
+    except Exception as exc:
+        log.warning("get_manager_pdf_bundles: falha ao buscar departamentos: %s", exc)
+        dep_rows = []
+    dep_nome_map = {row["id"]: row.get("nome", "") for row in dep_rows}
+
+    all_uids = set(uid_to_dep_ids.keys())
+    profiles = _fetch_profiles(svc, list(all_uids))
+    emails = _fetch_user_emails(svc, all_uids)
+
+    bundles: list[ManagerPdfBundle] = []
+    for uid, dep_ids in uid_to_dep_ids.items():
+        email = emails.get(uid, "")
+        if not email:
+            continue
+        bundles.append(
+            ManagerPdfBundle(
+                recipient=Recipient(
+                    user_id=uid,
+                    email=email,
+                    nome=_nome_from(uid, profiles, email),
+                    tipo_relatorio=TIPO_GESTOR,
+                ),
+                departamento_ids=dep_ids,
+                departamento_nomes=[dep_nome_map.get(d, d) for d in dep_ids],
+                grupo_ids_por_dept={d: dep_to_grupos.get(d, []) for d in dep_ids},
+            )
+        )
+    return bundles
+
+
 def _build_all_dept_groups(tenant_id: str) -> list[RecipientGroup]:
     """Retorna RecipientGroup para todos os departamentos ativos do tenant.
 

@@ -1031,156 +1031,179 @@ def dispatch_relatorio_semanal(
     tenant_nome = _load_tenant_nome(sb, tenant_id)
     branding = _load_branding(sb, tenant_id)
 
-    # Grupos de destinatários (gestores — para envio de PDF por departamento)
-    groups = get_recipient_groups(tenant_id)
-    if dept_ids_filter:
-        groups = [g for g in groups if g.departamento_id in dept_ids_filter]
-
-    # Todos os departamentos ativos — para o relatório executivo (independente
-    # de ter gestor)
-    from src.services.email.recipients import _build_all_dept_groups
+    # ── Todos os departamentos ativos — para o relatório executivo ───────────
+    from src.services.email.recipients import _build_all_dept_groups, get_manager_pdf_bundles
     all_dept_groups = _build_all_dept_groups(tenant_id)
     if dept_ids_filter:
         all_dept_groups = [
             g for g in all_dept_groups if g.departamento_id in dept_ids_filter]
 
-    if not groups and not all_dept_groups:
+    # Bundles agrupados por gestor — cada gestor recebe UM único e-mail com
+    # os PDFs de TODOS os departamentos aos quais está vinculado.
+    manager_bundles = get_manager_pdf_bundles(tenant_id)
+    if dept_ids_filter:
+        manager_bundles = [
+            b for b in manager_bundles
+            if any(d in dept_ids_filter for d in b.departamento_ids)
+        ]
+
+    if not manager_bundles and not all_dept_groups:
         result.skipped += 1
         result.errors.append(
             "Nenhum departamento ou grupo ativo encontrado para gerar os relatórios."
         )
         return result
 
-    _log(f"Iniciando disparo para {len(groups)} departamento(s)…")
+    _log(f"Iniciando disparo para {len(manager_bundles)} gestor(es) (agrupado por vínculo)…")
 
-    # Pré-carrega todas as tarefas uma única vez — evita N queries idênticas
-    # (uma por departamento) que antes buscavam o mesmo conjunto do banco.
+    # Pré-carrega todas as tarefas uma única vez — evita N queries ao banco.
     tarefas_index = _load_tarefas_all(sb, tenant_id, revisao_id)
 
-    for grp in groups:
-        _log(f"  → Processando departamento: {grp.departamento_nome}")
+    # Cache de PDFs por dep_id — cada PDF é gerado uma única vez mesmo que
+    # vários gestores compartilhem o mesmo departamento.
+    pdf_cache: dict[str, tuple] = {}  # dep_id → (pdf_bytes, pdf_name, payload)
+
+    def _get_or_build_pdf(dep_id: str, dep_nome: str, grupo_ids: list):
+        if dep_id in pdf_cache:
+            return pdf_cache[dep_id]
         try:
             tarefas = _load_tarefas(
-                sb, tenant_id, revisao_id, grp.grupo_ids,
+                sb, tenant_id, revisao_id, grupo_ids,
                 _tarefas_index=tarefas_index,
             )
-            # Não pula departamentos sem tarefas — podem ter equipamentos com
-            # 0% ainda sem início
-
-            payload, eq_list = _build_payload(
+            payload, _ = _build_payload(
                 tarefas=tarefas,
                 revisao=revisao,
-                departamento_nome=grp.departamento_nome,
+                departamento_nome=dep_nome,
                 tenant_nome=tenant_nome,
                 branding=branding,
                 sb=sb,
                 tenant_id=tenant_id,
-                grupo_ids=grp.grupo_ids,
+                grupo_ids=grupo_ids,
                 dias_travado=dias_travado,
                 dias_sem_update=dias_sem_update,
             )
-            pdf_bytes = build_weekly_pdf(payload)
-            pdf_name = (
-                f"relatorio_{grp.departamento_nome.lower().replace(' ', '_')}"
+            pdf_b = build_weekly_pdf(payload)
+            pdf_n = (
+                f"relatorio_{dep_nome.lower().replace(' ', '_')}"
                 f"_semana{payload.semana_atual}.pdf"
             )
-
-            # Valida integridade do PDF antes de tentar enviar.
             try:
                 from src.services.reporting.pdf_validator import (
-                    validate_pdf as _validate_pdf,
-                    PdfValidationError as _PdfValidationError,
-                )
-                _pdf_validator_ok = True
+                    validate_pdf as _vp, PdfValidationError as _VPErr)
+                _vp(pdf_b, context=f"relatorio_semanal.{dep_nome[:30]}")
             except ImportError:
-                _validate_pdf = None
-                _PdfValidationError = Exception
-                _pdf_validator_ok = False
+                pass
+            pdf_cache[dep_id] = (pdf_b, pdf_n, payload)
+            return pdf_cache[dep_id]
+        except Exception as exc:
+            _log(f"  ❌ Erro ao gerar PDF de {dep_nome}: {exc}")
+            return None
 
-            try:
-                if _validate_pdf is not None:
-                    _validate_pdf(
-                        pdf_bytes, context=f"relatorio_semanal.{grp.departamento_nome[:30]}")
-            except _PdfValidationError as pdf_err:
+    for bundle in manager_bundles:
+        rec = bundle.recipient
+        _log(f"  → Gestor: {rec.nome} <{rec.email}> — {len(bundle.departamento_ids)} depto(s): {', '.join(bundle.departamento_nomes)}")
+
+        dep_ids_ef = bundle.departamento_ids
+        dep_nomes_ef = bundle.departamento_nomes
+        if dept_ids_filter:
+            pairs = [(d, n) for d, n in zip(dep_ids_ef, dep_nomes_ef) if d in dept_ids_filter]
+            dep_ids_ef, dep_nomes_ef = (list(x) for x in zip(*pairs)) if pairs else ([], [])
+
+        if not dep_ids_ef:
+            _log("    ↳ Nenhum departamento no filtro — pulando.")
+            continue
+
+        attachments: list = []
+        payloads_bundle: list = []
+        for dep_id, dep_nome in zip(dep_ids_ef, dep_nomes_ef):
+            grupo_ids = bundle.grupo_ids_por_dept.get(dep_id, [])
+            built = _get_or_build_pdf(dep_id, dep_nome, grupo_ids)
+            if built is None:
                 result.failed += 1
-                msg = f"PDF inválido para {grp.departamento_nome}: {pdf_err}"
-                result.errors.append(msg)
-                _log(f"  ❌ {msg}")
+                result.errors.append(f"PDF inválido para {dep_nome} — não incluído no e-mail de {rec.email}")
                 continue
+            pdf_b, pdf_n, pay = built
+            attachments.append((pdf_b, pdf_n))
+            payloads_bundle.append(pay)
 
-            # ── Envio consolidado: um único e-mail por departamento ─────────
-            # Todos os gestores do departamento vão no mesmo To,
-            # evitando N e-mails idênticos com o mesmo PDF.
-            if grp.recipients:
-                all_emails = [rec.email for rec in grp.recipients]
-                nomes = ", ".join(rec.nome.split()[0] for rec in grp.recipients)
-                result.total_emails += 1
-                _log(f"    ↳ Enviando e-mail consolidado para {len(all_emails)} destinatário(s): {', '.join(all_emails)}")
-                if dry_run:
-                    _log("    ↳ [DRY RUN] — e-mail não enviado.")
-                    result.sent += 1
-                else:
-                    try:
-                        saudacao = nomes if len(grp.recipients) == 1 else f"equipe de {grp.departamento_nome}"
-                        html = build_html_body(
-                            destinatario_nome=saudacao,
-                            departamento_nome=grp.departamento_nome,
-                            revisao_titulo=payload.revisao_titulo,
-                            semana_atual=payload.semana_atual,
-                            semanas_total=payload.semanas_total,
-                            pct_geral=payload.pct_geral,
-                            n_alertas=payload.n_alertas_total,
-                            primary_color=payload.primary_color,
-                            equipamentos=eq_list,
-                            # Breakdown padronizado por equipamento
-                            n_travados=payload.n_travados,
-                            n_sem_inicio=payload.n_sem_inicio,
-                            n_parados=payload.n_parados,
-                            n_risco_prazo=payload.n_risco_prazo,
-                            total_equipamentos=payload.n_equipamentos,
-                            max_dias_parado=max([int(x.get("dias_parado") or 0) for x in (payload.parados_detalhe or [])] or [0]),
-                            top_parados=(payload.parados_detalhe or [])[:10],
-                        )
-                        subject = (
-                            f"[{payload.revisao_titulo}] Relatório Semanal — "
-                            f"{grp.departamento_nome} · Semana {payload.semana_atual}"
-                        )
-                        send_email_with_retry(EmailMessage(
-                            to=all_emails,
-                            subject=subject,
-                            html_body=html,
-                            attachments=[(pdf_bytes, pdf_name)],
-                        ), cfg=smtp_cfg,
-                            on_retry=lambda attempt, exc: _log(f"    ↳ ⚠️ Retry {attempt}: {exc}"))
-                        result.sent += 1
-                        _log("    ↳ ✅ Enviado.")
-                    except Exception as e:
-                        result.failed += 1
-                        msg = f"Falha ao enviar para {grp.departamento_nome}: {e}"
-                        result.errors.append(msg)
-                        _log(f"    ↳ ❌ {msg}")
-                        # Enfileira na dead-letter para reprocessamento manual
-                        try:
-                            from src.services.email.dead_letter import enqueue_failed
-                            for rec in grp.recipients:
-                                enqueue_failed(
-                                    tenant_id=tenant_id,
-                                    revisao_id=revisao_id,
-                                    recipient=rec.email,
-                                    subject=subject,
-                                    html_body=html,
-                                    pdf_bytes=pdf_bytes,
-                                    pdf_filename=pdf_name,
-                                    error=str(e),
-                                )
-                        except Exception:
-                            pass  # ignorado — operação opcional
+        if not attachments:
+            _log("    ↳ Nenhum PDF válido gerado — pulando gestor.")
+            continue
 
+        result.total_emails += 1
+        _log(f"    ↳ Enviando {len(attachments)} PDF(s) para {rec.email}")
+
+        if dry_run:
+            _log("    ↳ [DRY RUN] — e-mail não enviado.")
+            result.sent += 1
+            continue
+
+        p0 = payloads_bundle[0]
+        n_trav_b  = sum(getattr(p, "n_travados",   0) for p in payloads_bundle)
+        n_sem_b   = sum(getattr(p, "n_sem_inicio",  0) for p in payloads_bundle)
+        n_par_b   = sum(getattr(p, "n_parados",     0) for p in payloads_bundle)
+        n_risc_b  = sum(getattr(p, "n_risco_prazo", 0) for p in payloads_bundle)
+        n_equip_b = sum(getattr(p, "n_equipamentos", 0) for p in payloads_bundle)
+        pct_medio = round(sum(getattr(p, "pct_geral", 0) for p in payloads_bundle) / len(payloads_bundle))
+        dept_label = dep_nomes_ef[0] if len(dep_nomes_ef) == 1 else ", ".join(dep_nomes_ef)
+        top_par_b  = sorted(
+            [item for p in payloads_bundle for item in (p.parados_detalhe or [])],
+            key=lambda x: (-(int(x.get("dias_parado") or 0)), str(x.get("frota") or ""))
+        )[:10]
+        max_dias_b = max([int(x.get("dias_parado") or 0) for x in top_par_b] or [0])
+
+        try:
+            html = build_html_body(
+                destinatario_nome=rec.nome,
+                departamento_nome=dept_label,
+                revisao_titulo=p0.revisao_titulo,
+                semana_atual=p0.semana_atual,
+                semanas_total=p0.semanas_total,
+                pct_geral=pct_medio,
+                n_alertas=n_trav_b + n_sem_b + n_par_b + n_risc_b,
+                primary_color=p0.primary_color,
+                n_travados=n_trav_b,
+                n_sem_inicio=n_sem_b,
+                n_parados=n_par_b,
+                n_risco_prazo=n_risc_b,
+                total_equipamentos=n_equip_b,
+                max_dias_parado=max_dias_b,
+                top_parados=top_par_b,
+            )
+            subject = (
+                f"[{p0.revisao_titulo}] Relatório Semanal — "
+                f"{dept_label} · Semana {p0.semana_atual}"
+            )
+            send_email_with_retry(EmailMessage(
+                to=[rec.email],
+                subject=subject,
+                html_body=html,
+                attachments=attachments,
+            ), cfg=smtp_cfg,
+                on_retry=lambda attempt, exc: _log(f"    ↳ ⚠️ Retry {attempt}: {exc}"))
+            result.sent += 1
+            _log("    ↳ ✅ Enviado.")
         except Exception as e:
             result.failed += 1
-            msg = f"Erro no departamento {grp.departamento_nome}: {e}"
+            msg = f"Falha ao enviar para {rec.email}: {e}"
             result.errors.append(msg)
-            _log(f"  ❌ {msg}")
+            _log(f"    ↳ ❌ {msg}")
+            try:
+                from src.services.email.dead_letter import enqueue_failed
+                for pdf_b, pdf_fn in attachments:
+                    enqueue_failed(
+                        tenant_id=tenant_id,
+                        revisao_id=revisao_id,
+                        recipient=rec.email,
+                        subject=subject,
+                        html_body=html,
+                        pdf_bytes=pdf_b,
+                        pdf_filename=pdf_fn,
+                        error=str(e),
+                    )
+            except Exception:
+                pass
 
     # ── Relatório executivo para supervisores/admins ────────────────────────
     _log("  → Gerando relatório executivo para supervisores…")
