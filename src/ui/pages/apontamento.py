@@ -523,6 +523,61 @@ def _fragment_editor(
 
 # ── Ponto de entrada público ────────────────────────────────────────────
 
+_APT_RECENTES_KEY = "_apt_recentes"
+_APT_RECENTES_MAX = 5
+
+
+def _save_recente(revisao_id: str, revisao_titulo: str,
+                  grupo_id: str, grupo_nome: str,
+                  equipamento_id: str, eq_label: str) -> None:
+    """Salva equipamento na lista de recentes da sessão."""
+    recentes: list[dict] = list(st.session_state.get(_APT_RECENTES_KEY, []))
+    entry = {
+        "revisao_id": revisao_id, "revisao_titulo": revisao_titulo,
+        "grupo_id": grupo_id, "grupo_nome": grupo_nome,
+        "equipamento_id": equipamento_id, "eq_label": eq_label,
+    }
+    # Remove duplicata se já existe
+    recentes = [r for r in recentes if r["equipamento_id"] != equipamento_id]
+    recentes.insert(0, entry)
+    st.session_state[_APT_RECENTES_KEY] = recentes[:_APT_RECENTES_MAX]
+
+
+def _render_recentes() -> bool:
+    """Exibe atalhos de equipamentos recentes. Retorna True se o usuário clicou num."""
+    recentes: list[dict] = st.session_state.get(_APT_RECENTES_KEY, [])
+    if not recentes:
+        return False
+
+    st.markdown(
+        '<div style="font-size:0.68rem;font-weight:600;color:#8A9BAE;'
+        'letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px">'
+        '🕐 Acessados recentemente</div>',
+        unsafe_allow_html=True,
+    )
+    cols = st.columns(min(len(recentes), _APT_RECENTES_MAX))
+    for i, r in enumerate(recentes[:_APT_RECENTES_MAX]):
+        with cols[i]:
+            frota = r["eq_label"].split("—")[0].strip() if "—" in r["eq_label"] else r["eq_label"]
+            if st.button(
+                f"◉ {frota}\n{r['grupo_nome']}",
+                key=f"apt_recente_{r['equipamento_id']}",
+                use_container_width=True,
+                type="tertiary",
+                help=f"{r['eq_label']} · {r['grupo_nome']} · {r['revisao_titulo']}",
+            ):
+                st.query_params["grupo"] = r["grupo_id"]
+                st.query_params["eq"] = r["equipamento_id"]
+                st.session_state["_apt_revisao_id"] = r["revisao_id"]
+                st.session_state["_apt_equipamento_id"] = r["equipamento_id"]
+                st.session_state["_apt_grupo_nome"] = r["grupo_nome"]
+                st.session_state["_apt_eq_label"] = r["eq_label"]
+                st.session_state["_apt_revisao_titulo"] = r["revisao_titulo"]
+                st.rerun()
+    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+    return False
+
+
 def render_apontamento() -> None:
     _ph("◉", "Apontamento",
         "Registre o status de cada tarefa por equipamento, serviço e semana.")
@@ -530,6 +585,9 @@ def render_apontamento() -> None:
     tenant_id = current_tenant_id()
     ver = str(st.session_state.get("data_version", "0"))
     revisoes = _load_revisoes(tenant_id, ver, st.session_state.get("sb_access_token", ""))
+
+    # Atalhos de recentes (acima dos seletores)
+    _render_recentes()
 
     # Fragment 1: seletores (reroda apenas ao mudar revisão/grupo/equipamento)
     _fragment_seletores(revisoes)
@@ -539,6 +597,16 @@ def render_apontamento() -> None:
 
     if not revisao_id or not equipamento_id:
         return
+
+    # Salva nos recentes sempre que há um equipamento ativo
+    _save_recente(
+        revisao_id=revisao_id,
+        revisao_titulo=st.session_state.get("_apt_revisao_titulo") or "-",
+        grupo_id=st.session_state.get("_apt_prev_grupo_id") or "",
+        grupo_nome=st.session_state.get("_apt_grupo_nome") or "-",
+        equipamento_id=equipamento_id,
+        eq_label=st.session_state.get("_apt_eq_label") or "-",
+    )
 
     selection_summary(
         "Contexto do apontamento",

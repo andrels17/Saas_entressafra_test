@@ -623,7 +623,40 @@ def _fragment_home_live() -> None:
         _fragment_tendencia(tenant_id, rev["id"], ver, week, scope)
 
 
+def _render_greeting() -> None:
+    """Saudação personalizada com nome do usuário e horário do dia."""
+    from html import escape as _h
+    from datetime import datetime
+    from src.ui.core.sidebar_display import get_display_names
+    from src.utils.supabase_helpers import current_tenant_id
+
+    user_id = str(st.session_state.get("sb_user_id") or "")
+    tenant_id = current_tenant_id() or ""
+    _, user_name = get_display_names(tenant_id, user_id)
+
+    hour = datetime.now().hour
+    if hour < 12:
+        saudacao = "Bom dia"
+    elif hour < 18:
+        saudacao = "Boa tarde"
+    else:
+        saudacao = "Boa noite"
+
+    primeiro_nome = (_h(user_name.split()[0]) if user_name and user_name != "Usuário"
+                     else "")
+    greeting = f"{saudacao}, {primeiro_nome}!" if primeiro_nome else f"{saudacao}!"
+
+    st.markdown(
+        f'<div style="margin-bottom:4px">'
+        f'<span style="font-size:1.55rem;font-weight:800;color:#F5F5F5">{greeting}</span>'
+        f'</div>'
+        f'<div style="font-size:0.82rem;color:#8A9BAE;margin-bottom:16px">'
+        f'Aqui está o resumo da revisão ativa.</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def render_home_overview() -> None:
-    page_header("Home")
+    _render_greeting()
     st.caption(f"Atualização automática ativa a cada {_HOME_AUTO_REFRESH_EVERY}.")
     _fragment_home_live()
