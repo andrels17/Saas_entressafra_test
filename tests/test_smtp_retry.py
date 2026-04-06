@@ -28,8 +28,6 @@ if "src.utils.observability" not in sys.modules:
     obs = types.ModuleType("src.utils.observability")
     obs.log_error = lambda *a, **kw: None
     sys.modules["src.utils.observability"] = obs
-    sys.modules["src"] = types.ModuleType("src")
-    sys.modules["src.utils"] = types.ModuleType("src.utils")
 
 # Stub timezone
 if "src.utils.timezone" not in sys.modules:

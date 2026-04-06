@@ -25,6 +25,38 @@ from .styles import _inject_css
 from .summary_tab import render_summary_tab
 
 
+
+
+def _collect_matrix_changes(df_base, df_editado, svc_bool_cols: list[str], col_meta: dict[str, tuple[str, str]]):
+    """Compat helper para detectar alterações na matriz editável.
+
+    Retorna uma lista de tuplas (equipamento_id, servico_id, etapa, valor_bool).
+    A comparação é tolerante a DataFrames vazios, colunas desconhecidas e IDs
+    não-string, mantendo a assinatura esperada pelos testes legados.
+    """
+    if df_editado is None or getattr(df_editado, "empty", False):
+        return []
+
+    if df_base is None or getattr(df_base, "empty", False):
+        df_base = pd.DataFrame(index=df_editado.index)
+
+    changes = []
+    for col in svc_bool_cols or []:
+        meta = col_meta.get(col)
+        if not meta or col not in df_editado.columns:
+            continue
+        servico_id, etapa = meta
+        base_series = df_base[col] if col in df_base.columns else pd.Series(False, index=df_editado.index)
+        edit_series = df_editado[col]
+
+        for equipamento_id in df_editado.index:
+            old_val = bool(base_series.get(equipamento_id, False))
+            new_val = bool(edit_series.get(equipamento_id, False))
+            if old_val != new_val:
+                changes.append((str(equipamento_id), str(servico_id), str(etapa), new_val))
+    return changes
+
+
 @st.cache_data(ttl=60, show_spinner=False)
 def _build_evo_chart_data(
     tarefas_json: str,

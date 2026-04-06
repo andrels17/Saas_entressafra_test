@@ -29,20 +29,25 @@ MAX_FAILURES   = 5
 _STORE: DefaultDict[str, list[float]] = defaultdict(list)
 
 
-def _get_store():
+def _get_memory_store():
     return _STORE
 
 
+# Alias retrocompatível para testes/código legado.
+def _get_store():
+    return _get_memory_store()
+
+
 def _bucket(key: str):
-    return _STORE.setdefault(key, [])
+    return _get_memory_store().setdefault(key, [])
 
 
 def _prune(key: str, now: float | None = None,
            *, window_seconds: int = WINDOW_SECONDS) -> list[float]:
     now = now if now is not None else time.time()
     cutoff = now - window_seconds
-    bucket = [ts for ts in _STORE.get(key, []) if ts >= cutoff]
-    _STORE[key] = bucket
+    bucket = [ts for ts in _get_memory_store().get(key, []) if ts >= cutoff]
+    _get_memory_store()[key] = bucket
     return bucket
 
 
@@ -167,12 +172,12 @@ def _memory_check(key: str, *, max_failures: int,
 def _memory_record_failure(key: str) -> int:
     bucket = _prune(key)
     bucket.append(time.time())
-    _STORE[key] = bucket
+    _get_memory_store()[key] = bucket
     return len(bucket)
 
 
 def _memory_record_success(key: str) -> None:
-    _STORE.pop(key, None)
+    _get_memory_store().pop(key, None)
 
 
 # ── Interface pública ──────────────────────────────────────────────────────────

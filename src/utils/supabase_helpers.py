@@ -15,7 +15,7 @@ import streamlit as st
 
 try:
     from supabase import Client  # type: ignore
-except ModuleNotFoundError:
+except (ModuleNotFoundError, ImportError):
     class Client:  # type: ignore
         """Fallback apenas para tipagem quando supabase não estiver instalado."""
         pass

@@ -8,24 +8,23 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = ROOT / "src/ui/pages/notificacoes.py"
+MODULE_PATH = ROOT / "src/ui/pages/notificacoes/data.py"
 
 
-def _load_notificacoes_module():
+def _load_notificacoes_data_module():
     backups = {name: sys.modules.get(name) for name in [
         "streamlit",
-        "src.auth.roles",
-        "src.auth.scope",
-        "src.ui.core.styles",
-        "src.utils.supabase_helpers",
-        "src.utils.nav",
+        "src.db.supabase_client",
     ]}
 
     def _decorator(*args, **kwargs):
         def deco(fn):
             return fn
         if args and callable(args[0]) and len(args) == 1 and not kwargs:
-            return args[0]
+            fn = args[0]
+            fn.clear = lambda: None
+            return fn
+        deco.clear = lambda: None
         return deco
 
     streamlit_mod = types.ModuleType("streamlit")
@@ -33,32 +32,15 @@ def _load_notificacoes_module():
     streamlit_mod.cache_resource = _decorator
     streamlit_mod.fragment = _decorator
     streamlit_mod.session_state = {}
+    streamlit_mod.secrets = {}
     sys.modules["streamlit"] = streamlit_mod
 
-    roles_mod = types.ModuleType("src.auth.roles")
-    roles_mod.Role = type("Role", (), {"ADMIN_ROLES": tuple()})
-    sys.modules["src.auth.roles"] = roles_mod
-
-    scope_mod = types.ModuleType("src.auth.scope")
-    scope_mod.get_my_scope = lambda *a, **k: {}
-    sys.modules["src.auth.scope"] = scope_mod
-
-    styles_mod = types.ModuleType("src.ui.core.styles")
-    styles_mod.page_header = lambda *a, **k: None
-    sys.modules["src.ui.core.styles"] = styles_mod
-
-    sb_mod = types.ModuleType("src.utils.supabase_helpers")
-    sb_mod.current_role = lambda: None
-    sb_mod.current_tenant_id = lambda: None
-    sb_mod.sb_for_user = lambda: None
-    sys.modules["src.utils.supabase_helpers"] = sb_mod
-
-    nav_mod = types.ModuleType("src.utils.nav")
-    nav_mod.get_current_revisao = lambda: None
-    sys.modules["src.utils.nav"] = nav_mod
+    sb_client_mod = types.ModuleType("src.db.supabase_client")
+    sb_client_mod.get_supabase_anon = lambda: None
+    sys.modules["src.db.supabase_client"] = sb_client_mod
 
     try:
-        spec = importlib.util.spec_from_file_location("notificacoes_regression", MODULE_PATH)
+        spec = importlib.util.spec_from_file_location("notificacoes_data_regression", MODULE_PATH)
         module = importlib.util.module_from_spec(spec)
         assert spec.loader is not None
         spec.loader.exec_module(module)
@@ -71,11 +53,11 @@ def _load_notificacoes_module():
                 sys.modules[name] = original
 
 
-mod = _load_notificacoes_module()
+mod = _load_notificacoes_data_module()
 
 
 def test_build_alertas_classifies_no_progress_stale_and_deadline_risk(monkeypatch):
-    monkeypatch.setattr(mod, "_semana_atual", lambda _inicio, _total: 3)
+    monkeypatch.setattr(mod, "semana_atual", lambda _inicio, _total: 3)
 
     tarefas = [
         {
@@ -113,7 +95,7 @@ def test_build_alertas_classifies_no_progress_stale_and_deadline_risk(monkeypatc
     ]
     revisao = {"data_inicio": "2026-01-01", "semanas_total": 4}
 
-    alertas = mod._build_alertas(tarefas, revisao, dias_travado=5, dias_sem_update=5)
+    alertas = mod.build_alertas(tarefas, revisao, dias_travado=5, dias_sem_update=5)
 
     assert alertas["semana_atual"] == 3
     assert alertas["semanas_total"] == 4
@@ -142,7 +124,7 @@ def test_resumo_por_grupo_consolidates_all_categories():
         "risco_prazo": pd.DataFrame([{"Grupo": "Grupo B"}, {"Grupo": "Grupo B"}]),
     }
 
-    resumo = mod._resumo_por_grupo(alertas)
+    resumo = mod.resumo_por_grupo(alertas)
 
     assert list(resumo["Grupo"]) == ["Grupo B", "Grupo A"]
 
