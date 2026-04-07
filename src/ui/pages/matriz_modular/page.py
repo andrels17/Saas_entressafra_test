@@ -484,7 +484,7 @@ def _render_toolbar(base_ctx):
             sort_by = st.selectbox(
                 "Ordenar",
                 ["Nome", "% ↑ (mais atrasados)", "% ↓ (mais avançados)"],
-                index=1,
+                index=2,
                 key="mtz_sort_by",
             )
 
