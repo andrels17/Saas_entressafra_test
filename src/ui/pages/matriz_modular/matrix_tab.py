@@ -102,16 +102,17 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
     df_display = df.set_index('_equip_id', drop=True)
     svc_bool = [c for c in df_display.columns if c not in ('%', 'Equipamento')]
     tok_s, tc_s, pg, pm, eq_100s = sector_summary_metrics(df_display, svc_bool)
+    _ = pm
     c1s, c2s, c3s = st.columns([1, 1, 2])
-    c1s.metric('Geral (ponderado)', f'{pg}%')
-    c2s.metric('Médio (frotas)', f'{pm}%')
+    c1s.metric('Progresso geral', f'{pg}%')
+    c2s.metric('Frotas concluídas', f'{eq_100s}/{len(df)}')
     with c3s:
-        eq100_html = f' &nbsp;·&nbsp; <b style="color:#12B76A">{eq_100s}</b> 100%' if eq_100s > 0 else ''
         st.markdown(
             f'<div style="padding-top:8px;font-size:.82rem;color:rgba(255,255,255,.65)">'
-            f'{len(df)} eq &nbsp;·&nbsp; {len(svc_ids_v)} serviços &nbsp;·&nbsp; '
-            f'<b style="color:rgba(255,255,255,.9)">{tok_s}/{tc_s}</b> concluídas'
-            f'{eq100_html}'
+            f'{len(df)} frotas &nbsp;·&nbsp; {len(svc_ids_v)} serviços'
+            f'</div>'
+            f'<div style="padding-top:4px;font-size:.86rem;color:rgba(255,255,255,.82)">'
+            f'<b style="color:rgba(255,255,255,.94)">{tok_s}/{tc_s}</b> etapas concluídas'
             f'</div>'
             f'{_pct_bar_html(pg, height=4)}',
             unsafe_allow_html=True,
