@@ -54,7 +54,11 @@ from .data_access import (
 def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
                       ver: str = "0", _token: str = "") -> tuple[list, list, list, dict]:
     _ = token_key, ver
-    sb = _sb_from_token(_token)
+    try:
+        from src.db.supabase_client import get_supabase_service
+        sb = get_supabase_service()
+    except Exception:
+        sb = _sb_from_token(_token)
 
     def _fetch_all(query, page_size: int = 1000):
         rows = []
