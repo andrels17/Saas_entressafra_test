@@ -1236,8 +1236,13 @@ def dispatch_relatorio_semanal(
                         pdf_filename=pdf_fn,
                         error=str(e),
                     )
-            except Exception:
-                pass
+            except Exception as dl_exc:
+                import logging
+                logging.getLogger("saas.email.dispatcher").error(
+                    "dispatcher | falha ao enfileirar no dead-letter para %s "
+                    "(email %r será perdido): %s",
+                    rec.email, subject, dl_exc
+                )
 
     # ── Relatório executivo para supervisores/admins ────────────────────────
     _log("  → Gerando relatório executivo para supervisores…")
