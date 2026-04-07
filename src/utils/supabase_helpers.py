@@ -26,8 +26,11 @@ from src.db.supabase_client import get_supabase_anon
 def sb_for_user() -> Client:
     """Retorna cliente Supabase autenticado como o usuário atual.
 
-    Cria um cliente fresco a cada chamada para evitar vazamento de estado
-    entre sessões em ambiente multi-usuário (Streamlit Cloud).
+    Reutiliza a instância cacheada por token (via get_supabase_anon) em vez
+    de criar um cliente novo a cada chamada. O cache é keyed por (url, token),
+    portanto tokens distintos produzem instâncias distintas — sem vazamento de
+    estado entre usuários. Entradas expiram automaticamente pelo TTL de 1h ou
+    ao trocar de token (logout / refresh gera chave nova).
     """
     sb = get_supabase_anon()
     token = st.session_state.get("sb_access_token")
