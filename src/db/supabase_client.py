@@ -108,7 +108,7 @@ def get_supabase_anon() -> Client:
 
         token = _st.session_state.get("sb_access_token") or ""
     except Exception:
-        pass
+        pass  # contexto fora do Streamlit (scheduler, CI) — token vazio é esperado
 
     cache_key = (url, token)
     client = _anon_cache.get(cache_key)
@@ -117,8 +117,11 @@ def get_supabase_anon() -> Client:
         if token:
             try:
                 client.postgrest.auth(token)
-            except Exception:
-                pass
+            except Exception as exc:
+                import logging
+                logging.getLogger("saas.db.supabase_client").warning(
+                    "get_supabase_anon | falha ao aplicar token no PostgREST: %s", exc
+                )
         _anon_cache.set(cache_key, client)
     return client
 
