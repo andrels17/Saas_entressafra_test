@@ -84,11 +84,8 @@ def hard_logout() -> None:
             keys_to_remove = [k for k in list(_anon_cache.keys()) if k[1] == token]
             for k in keys_to_remove:
                 _anon_cache.pop(k, None)
-    except Exception as exc:
-        import logging
-        logging.getLogger("saas.auth.session").warning(
-            "logout | falha ao invalidar cache anon para token: %s", exc
-        )
+    except Exception:
+        pass
 
     # Limpa TODAS as chaves da sessão atual — incluindo com prefixo _ (estado de UI
     # de abas, filtros e scope) que não devem vazar entre sessões/usuários.
