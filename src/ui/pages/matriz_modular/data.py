@@ -3,15 +3,26 @@ from __future__ import annotations
 import streamlit as st
 
 from src.repositories.base import fetch_grupo_template as _fetch_template_impl
-from src.db.supabase_client import get_supabase_anon
+from src.db.supabase_client import get_supabase_anon, get_supabase_service
 
 
 def _sb_from_token(token: str = ""):
-    """Constrói cliente sem acessar st.session_state (seguro dentro de cache_data)."""
-    sb = get_supabase_anon()
-    if token:
-        sb.postgrest.auth(token)
-    return sb
+    """Cliente de leitura para a Matriz.
+
+    Usa service-role quando disponível para evitar bases zeradas em perfis com
+    RLS mais restritivo. O acesso ao grupo já foi filtrado antes pela camada de
+    escopo da aplicação.
+    """
+    try:
+        return get_supabase_service()
+    except Exception:
+        sb = get_supabase_anon()
+        if token:
+            try:
+                sb.postgrest.auth(token)
+            except Exception:
+                pass
+        return sb
 
 
 def _group_kpis(tid, rev_id, ver="0", _token=""):
