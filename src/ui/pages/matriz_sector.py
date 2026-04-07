@@ -75,16 +75,26 @@ def sector_progress_label(*, equipamentos: list[dict], svc_ids: list[str], task_
 
 
 def sector_summary_metrics(df_display: pd.DataFrame, svc_bool: list[str]) -> tuple[int, int, int, int]:
-    tok_s = int(df_display[svc_bool].sum(numeric_only=True).sum()) if svc_bool else 0
+    """Resume o setor contando corretamente colunas booleanas do data_editor.
+
+    As colunas D/R/M são convertidas para ``object`` em ``build_sector_frame`` para
+    funcionar melhor com ``st.data_editor``. Nessa situação, ``sum(numeric_only=True)``
+    ignora essas colunas e zera a contagem mesmo quando há checkboxes marcados.
+    """
+    if svc_bool and not df_display.empty:
+        svc_frame = df_display[svc_bool].applymap(lambda v: bool(v))
+        tok_s = int(svc_frame.to_numpy(dtype=int).sum())
+    else:
+        tok_s = 0
+
     tc_s = int(len(df_display) * max(len(svc_bool), 1))
     pg = round((tok_s / max(tc_s, 1)) * 100)
+
     if svc_bool and not df_display.empty:
-        pm = int(round(df_display.apply(
-            lambda rw: (int(rw[svc_bool].sum()) / max(len(svc_bool), 1)) * 100,
-            axis=1,
-        ).mean()))
+        pm = int(round(svc_frame.to_numpy(dtype=int).sum(axis=1).mean() / max(len(svc_bool), 1) * 100))
     else:
         pm = 0
+
     eq_100s = sum(1 for _, rw in df_display.iterrows() if int(rw.get("%", 0)) >= 100)
     return tok_s, tc_s, pg, pm, eq_100s
 
