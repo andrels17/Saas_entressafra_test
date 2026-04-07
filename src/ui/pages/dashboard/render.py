@@ -17,7 +17,7 @@ from src.auth.scope import get_my_scope
 from src.auth.permissions import can_view_all_data
 from src.domain.kpi import calc_global_kpis, calc_dept_kpis
 from src.ui.core.empty_state import empty_state
-from src.ui.core.plotly_theme import apply_dark_theme, DARK_LAYOUT
+from src.ui.core.plotly_theme import apply_dark_theme, DARK_LAYOUT, MUTED
 from src.ui.components.filters import multiselect_departamentos, multiselect_grupos
 from src.ui.components.feedback import notice_card, selection_summary
 from src.ui.components.actions import refresh_button
@@ -48,8 +48,6 @@ from .data_access import (
     _sb_from_token,
     _token_cache_key,
 )
-
-from collections import defaultdict
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -388,125 +386,6 @@ def _load_grupos(tenant_id: str, token_key: str = "", ver: str = "0", _token: st
         return []
 
 
-@st.cache_data(ttl=120, show_spinner=False)
-def _load_manager_scope_rows(tenant_id: str, token_key: str = "", ver: str = "0") -> list[dict]:
-    _ = token_key, ver
-    try:
-        from src.db.supabase_client import get_supabase_service
-        svc = get_supabase_service()
-    except Exception:
-        return []
-
-    try:
-        tu_rows = (
-            svc.table("tenant_users")
-            .select("user_id,role")
-            .eq("tenant_id", tenant_id)
-            .execute()
-            .data
-        ) or []
-    except Exception:
-        tu_rows = []
-
-    gestor_uids: set[str] = set()
-    for row in tu_rows:
-        uid = str(row.get("user_id") or "").strip()
-        role = str(row.get("role") or "").strip().lower()
-        if uid and role in {"gestor", "manager"}:
-            gestor_uids.add(uid)
-
-    scope_rows: list[dict] = []
-    for table in ("tenant_user_departamentos", "tenant_user_scope"):
-        try:
-            rows = (
-                svc.table(table)
-                .select("user_id,departamento_id,grupo_id")
-                .eq("tenant_id", tenant_id)
-                .execute()
-                .data
-            ) or []
-            scope_rows.extend(rows)
-        except Exception:
-            pass
-
-    if not scope_rows:
-        return []
-
-    if not gestor_uids:
-        gestor_uids = {
-            str(r.get("user_id") or "").strip()
-            for r in scope_rows
-            if str(r.get("user_id") or "").strip()
-        }
-
-    try:
-        grupos_rows = (
-            svc.table("equip_grupos")
-            .select("id,nome,departamento_id")
-            .eq("tenant_id", tenant_id)
-            .execute()
-            .data
-        ) or []
-    except Exception:
-        grupos_rows = []
-
-    try:
-        profile_rows = (
-            svc.table("user_profiles")
-            .select("user_id,nome")
-            .in_("user_id", sorted(gestor_uids) or ["__none__"])
-            .execute()
-            .data
-        ) or []
-    except Exception:
-        profile_rows = []
-
-    profile_map = {str(r.get("user_id")): (r.get("nome") or "") for r in profile_rows if r.get("user_id")}
-    grupo_dep_map: dict[str, str] = {}
-    grupos_by_dep: dict[str, list[str]] = defaultdict(list)
-    for row in grupos_rows:
-        gid = str(row.get("id") or "").strip()
-        dep_id = str(row.get("departamento_id") or "").strip()
-        if not gid:
-            continue
-        grupo_dep_map[gid] = dep_id
-        if dep_id:
-            grupos_by_dep[dep_id].append(gid)
-
-    seen: set[tuple[str, str]] = set()
-    out: list[dict] = []
-    for row in scope_rows:
-        uid = str(row.get("user_id") or "").strip()
-        if not uid or uid not in gestor_uids:
-            continue
-        dep_id = str(row.get("departamento_id") or "").strip()
-        gid = str(row.get("grupo_id") or "").strip()
-        gestor_nome = profile_map.get(uid) or f"Gestor {uid[:8]}"
-
-        group_ids: list[str]
-        if gid:
-            dep_id = dep_id or grupo_dep_map.get(gid, "")
-            group_ids = [gid]
-        elif dep_id:
-            group_ids = grupos_by_dep.get(dep_id, [])
-        else:
-            group_ids = []
-
-        for gid2 in group_ids:
-            key = (uid, gid2)
-            if not gid2 or key in seen:
-                continue
-            seen.add(key)
-            out.append({
-                "gestor_id": uid,
-                "gestor_nome": gestor_nome,
-                "departamento_id": dep_id or grupo_dep_map.get(gid2, ""),
-                "grupo_id": gid2,
-            })
-
-    return sorted(out, key=lambda x: (str(x.get("gestor_nome") or "").lower(), str(x.get("grupo_id") or "")))
-
-
 def _pct_bar_color(v: float) -> str:
     """Cor condicional padrão: verde >= 80 | amarelo >= 50 | vermelho < 50."""
     if v >= 80:
@@ -514,6 +393,140 @@ def _pct_bar_color(v: float) -> str:
     if v >= 50:
         return "#F59E0B"
     return "#EF4444"
+
+
+def _pct_status(v: float) -> str:
+    if v >= 80:
+        return "Avançado"
+    if v >= 50:
+        return "Atenção"
+    return "Crítico"
+
+
+def _risk_scale() -> list[list[float | str]]:
+    return [
+        [0.0, "#12B76A"],
+        [0.49, "#12B76A"],
+        [0.50, "#F59E0B"],
+        [0.79, "#F59E0B"],
+        [0.80, "#EF4444"],
+        [1.0, "#EF4444"],
+    ]
+
+
+def _apply_semantic_bar_style(fig: go.Figure, chart_df: pd.DataFrame, value_col: str, category_col: str) -> go.Figure:
+    if chart_df is None or chart_df.empty:
+        return fig
+    fig.update_traces(
+        marker_color=chart_df[value_col].apply(_pct_bar_color).tolist(),
+        marker_line_color="rgba(255,255,255,0.10)",
+        marker_line_width=1,
+        textfont=dict(color="#E8EDF5", size=12),
+        hoverlabel=dict(font=dict(color="#E8EDF5")),
+        customdata=chart_df[[category_col]].to_numpy(),
+    )
+    return fig
+
+
+def _build_gestor_rank_df(
+        dashboard_groups_filtered: pd.DataFrame,
+        gestor_options: list[dict],
+        top_n: int = 10) -> pd.DataFrame:
+    if dashboard_groups_filtered is None or dashboard_groups_filtered.empty or not gestor_options:
+        return pd.DataFrame(columns=["Categoria", "Valor", "label", "Grupos", "status"])
+
+    src = dashboard_groups_filtered.copy()
+    if "grupo_id" not in src.columns:
+        return pd.DataFrame(columns=["Categoria", "Valor", "label", "Grupos", "status"])
+    src["grupo_id"] = src["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None)
+
+    rows: list[dict] = []
+    for gestor in gestor_options:
+        gestor_nome = str(gestor.get("gestor_nome") or "—").strip() or "—"
+        gids = {
+            str(g.get("grupo_id") or "").strip()
+            for g in (gestor.get("grupos") or [])
+            if str(g.get("grupo_id") or "").strip()
+        }
+        if not gids:
+            continue
+        gdf = src[src["grupo_id"].isin(gids)].copy()
+        if gdf.empty:
+            continue
+        done_steps = pd.to_numeric(gdf.get("done_steps", 0), errors="coerce").fillna(0).sum()
+        expected_steps = pd.to_numeric(gdf.get("expected_steps", 0), errors="coerce").fillna(0).sum()
+        pct = float(round((done_steps / expected_steps) * 100, 0)) if expected_steps > 0 else 0.0
+        rows.append({
+            "Categoria": gestor_nome,
+            "Valor": max(0.0, min(100.0, pct)),
+            "label": f"{int(round(pct))}%",
+            "Grupos": int(gdf["grupo_id"].nunique()),
+            "status": _pct_status(pct),
+        })
+
+    if not rows:
+        return pd.DataFrame(columns=["Categoria", "Valor", "label", "Grupos", "status"])
+
+    out = pd.DataFrame(rows)
+    out = out.sort_values(["Valor", "Grupos", "Categoria"], ascending=[False, False, True]).head(top_n)
+    return out
+
+
+def _render_gestor_highlights(gestor_df: pd.DataFrame) -> None:
+    if gestor_df is None or gestor_df.empty:
+        return
+    top_df = gestor_df.sort_values(["Valor", "Categoria"], ascending=[False, True]).head(5).copy()
+    crit_df = gestor_df.sort_values(["Valor", "Categoria"], ascending=[True, True]).head(5).copy()
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("#### Gestores mais avançados")
+        data_table(
+            top_df[["Categoria", "Valor", "Grupos", "status"]].rename(columns={
+                "Categoria": "Gestor",
+                "Valor": "% Concluído",
+                "Grupos": "Grupos",
+                "status": "Faixa",
+            }),
+            column_config={
+                "% Concluído": st.column_config.ProgressColumn("% Concluído", min_value=0, max_value=100, format="%d%%"),
+            },
+        )
+    with c2:
+        st.markdown("#### Gestores mais críticos")
+        data_table(
+            crit_df[["Categoria", "Valor", "Grupos", "status"]].rename(columns={
+                "Categoria": "Gestor",
+                "Valor": "% Concluído",
+                "Grupos": "Grupos",
+                "status": "Faixa",
+            }),
+            column_config={
+                "% Concluído": st.column_config.ProgressColumn("% Concluído", min_value=0, max_value=100, format="%d%%"),
+            },
+        )
+
+    critical_count = int((pd.to_numeric(gestor_df["Valor"], errors="coerce").fillna(0) < 50).sum())
+    attention_count = int(((pd.to_numeric(gestor_df["Valor"], errors="coerce").fillna(0) >= 50) & (pd.to_numeric(gestor_df["Valor"], errors="coerce").fillna(0) < 80)).sum())
+    advanced_count = int((pd.to_numeric(gestor_df["Valor"], errors="coerce").fillna(0) >= 80).sum())
+    tone = "warning" if critical_count else ("info" if attention_count else "success")
+    notice_card(
+        "Leitura rápida dos gestores",
+        f"{advanced_count} avançado(s), {attention_count} em atenção e {critical_count} crítico(s). "
+        f"Use as mesmas cores do dashboard para leitura imediata: verde ≥ 80%, amarelo 50–79% e vermelho < 50%.",
+        tone=tone,
+    )
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _load_gestor_options(tenant_id: str, token_key: str = "", ver: str = "0", _token: str = "") -> list[dict]:
+    _ = token_key, ver, _token
+    try:
+        from src.ui.pages.notificacoes.data import load_manager_print_options
+        return load_manager_print_options(tenant_id, ver=str(ver), _token=_token) or []
+    except Exception as exc:
+        log_error(exc, context="dashboard._load_gestor_options")
+        return []
 
 
 def _render_pct_rank_chart(
@@ -529,12 +542,10 @@ def _render_pct_rank_chart(
 
     chart_df = chart_df[[category_col, value_col]].copy()
     chart_df[category_col] = chart_df[category_col].fillna("—").astype(str)
-    chart_df[value_col] = pd.to_numeric(
-        chart_df[value_col], errors="coerce").fillna(0).clip(0, 100)
+    chart_df[value_col] = pd.to_numeric(chart_df[value_col], errors="coerce").fillna(0).clip(0, 100)
     chart_df = chart_df.sort_values(value_col, ascending=False).head(top_n)
     chart_df = chart_df.sort_values(value_col, ascending=True)
     chart_df["label"] = chart_df[value_col].map(lambda v: f"{int(round(v))}%")
-    chart_df["color"] = chart_df[value_col].apply(_pct_bar_color)
 
     fig = px.bar(
         chart_df,
@@ -542,10 +553,9 @@ def _render_pct_rank_chart(
         y=category_col,
         orientation="h",
         text="label",
-        color="color",
-        color_discrete_map="identity",
         title=title,
     )
+    _apply_semantic_bar_style(fig, chart_df, value_col, category_col)
     fig.update_traces(
         textposition="outside",
         cliponaxis=False,
@@ -553,14 +563,11 @@ def _render_pct_rank_chart(
     apply_dark_theme(fig, height=max(380, 42 * len(chart_df) + 80))
     fig.update_layout(
         margin=dict(l=10, r=90, t=48, b=10),
-        xaxis=dict(range=[0, 110], title="% Concluído",
-                   tickfont=dict(color="#8A9BAE"), title_font=dict(color="#8A9BAE")),
-        yaxis=dict(title="", type="category",
-                   tickfont=dict(color="#8A9BAE")),
+        xaxis=dict(range=[0, 110], title="% Concluído", tickfont=dict(color=MUTED), title_font=dict(color=MUTED)),
+        yaxis=dict(title="", type="category", tickfont=dict(color=MUTED)),
         showlegend=False,
     )
-    st.plotly_chart(
-        fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
 
@@ -644,79 +651,31 @@ def _build_rank_df_from_equipment(
     return edf[["Categoria", "Valor", "label"]].sort_values(["Valor", "Categoria"], ascending=[False, True]).head(top_n)
 
 
-def _build_rank_df_from_managers(
-        dashboard_groups_filtered: pd.DataFrame,
-        manager_scope_rows: list[dict],
-        top_n: int = 10) -> pd.DataFrame:
-    if dashboard_groups_filtered is None or dashboard_groups_filtered.empty or not manager_scope_rows:
-        return pd.DataFrame(columns=["Categoria", "Valor", "label"])
-
-    scope_df = pd.DataFrame(manager_scope_rows).copy()
-    if scope_df.empty or "grupo_id" not in scope_df.columns:
-        return pd.DataFrame(columns=["Categoria", "Valor", "label"])
-
-    scope_df["grupo_id"] = scope_df["grupo_id"].map(lambda v: str(v).strip() if pd.notna(v) and str(v).strip() else None)
-    scope_df = scope_df.dropna(subset=["grupo_id"]).drop_duplicates(subset=["gestor_id", "grupo_id"])
-    if scope_df.empty:
-        return pd.DataFrame(columns=["Categoria", "Valor", "label"])
-
-    src = dashboard_groups_filtered.copy()
-    required = {"grupo_id", "done_steps", "expected_steps"}
-    if not required.issubset(set(src.columns)):
-        return pd.DataFrame(columns=["Categoria", "Valor", "label"])
-
-    src["grupo_id"] = src["grupo_id"].map(lambda v: str(v).strip() if pd.notna(v) and str(v).strip() else None)
-    src = src.dropna(subset=["grupo_id"])
-    src = src[["grupo_id", "done_steps", "expected_steps"]].copy()
-
-    merged = scope_df.merge(src, on="grupo_id", how="inner")
-    if merged.empty:
-        return pd.DataFrame(columns=["Categoria", "Valor", "label"])
-
-    agg = (
-        merged.groupby(["gestor_id", "gestor_nome"], dropna=False)
-        .agg(
-            done_steps=("done_steps", "sum"),
-            expected_steps=("expected_steps", "sum"),
-            grupos=("grupo_id", "nunique"),
-        )
-        .reset_index()
-    )
-    agg = agg[agg["expected_steps"] > 0]
-    if agg.empty:
-        return pd.DataFrame(columns=["Categoria", "Valor", "label"])
-
-    agg["Categoria"] = agg["gestor_nome"].fillna("—").astype(str)
-    agg["Valor"] = ((agg["done_steps"] / agg["expected_steps"]) * 100).round(0).clip(0, 100)
-    agg["label"] = agg["Valor"].map(lambda v: f"{int(round(v))}%")
-    return agg[["Categoria", "Valor", "label"]].sort_values(["Valor", "Categoria"], ascending=[False, True]).head(top_n)
-
-
 @st.cache_data(ttl=45, show_spinner=False)
-def _build_unified_rank_figure_cached(payload_key: str, datasets_payload: list[dict]):
+def _build_unified_rank_figure_cached(
+        payload_key: str,
+        dept_records: list[dict],
+        group_records: list[dict],
+        equip_records: list[dict],
+        gestor_records: list[dict]):
     _ = payload_key
-    datasets = []
-    for item in datasets_payload or []:
-        name = str(item.get("name") or "").strip()
-        records = item.get("records") or []
-        if name:
-            datasets.append((name, records))
-
-    if not datasets:
-        fig = go.Figure()
-        apply_dark_theme(fig, height=420)
-        return fig
-
+    datasets = [
+        ("Departamentos", dept_records),
+        ("Grupos", group_records),
+        ("Equipamentos", equip_records),
+        ("Gestores", gestor_records),
+    ]
     fig = go.Figure()
     for idx, (name, records) in enumerate(datasets):
         df = pd.DataFrame(records or [])
         if df.empty:
-            x, y, txt = [], [], []
+            x, y, txt, colors = [], [], [], []
         else:
             df = df.sort_values("Valor", ascending=True)
             x = df["Valor"].tolist()
             y = df["Categoria"].tolist()
             txt = df["label"].tolist()
+            colors = df["Valor"].apply(_pct_bar_color).tolist()
         fig.add_trace(
             go.Bar(
                 x=x,
@@ -724,9 +683,9 @@ def _build_unified_rank_figure_cached(payload_key: str, datasets_payload: list[d
                 orientation="h",
                 text=txt,
                 textposition="outside",
+                marker=dict(color=colors, line=dict(color="rgba(255,255,255,0.10)", width=1)),
                 name=name,
                 visible=(idx == 0),
-                cliponaxis=False,
                 hovertemplate="%{y}<br>% Concluído: %{x:.0f}%<extra></extra>",
             )
         )
@@ -743,16 +702,14 @@ def _build_unified_rank_figure_cached(payload_key: str, datasets_payload: list[d
             )
         )
 
-    max_items = max([len(records or []) for _, records in datasets] + [1])
-    default_name = datasets[0][0]
+    max_items = max([len(dept_records or []), len(group_records or []), len(equip_records or []), len(gestor_records or []), 1])
+
     apply_dark_theme(fig, height=max(420, 42 * max_items + 120))
     fig.update_layout(
-        title=f"Visão consolidada — {default_name}",
+        title="Visão consolidada — Departamentos",
         margin=dict(l=10, r=90, t=110, b=10),
-        xaxis=dict(range=[0, 110], title="% Concluído",
-                   tickfont=dict(color="#8A9BAE"), title_font=dict(color="#8A9BAE")),
-        yaxis=dict(title="", type="category",
-                   tickfont=dict(color="#8A9BAE")),
+        xaxis=dict(range=[0, 110], title="% Concluído", tickfont=dict(color=MUTED), title_font=dict(color=MUTED)),
+        yaxis=dict(title="", type="category", tickfont=dict(color=MUTED)),
         showlegend=False,
     )
     fig.update_layout(
@@ -782,38 +739,37 @@ def _render_unified_rank_chart(
         gid_to_dept: dict,
         dept_map: dict,
         equipment_source: pd.DataFrame,
-        top_n: int = 10,
-        manager_scope_rows: list[dict] | None = None,
-        include_managers: bool = False) -> None:
+        gestor_options: list[dict] | None = None,
+        top_n: int = 10) -> None:
     dept_df = _build_rank_df_from_departments(dashboard_groups_filtered, gid_to_dept, dept_map, top_n=top_n)
     group_df = _build_rank_df_from_groups(dashboard_groups_filtered, top_n=top_n)
     equip_df = _build_rank_df_from_equipment(equipment_source, top_n=top_n)
-    manager_df = (
-        _build_rank_df_from_managers(dashboard_groups_filtered, manager_scope_rows or [], top_n=top_n)
-        if include_managers else pd.DataFrame(columns=["Categoria", "Valor", "label"])
-    )
+    gestor_df = _build_gestor_rank_df(dashboard_groups_filtered, gestor_options or [], top_n=top_n)
 
-    datasets_payload = []
-    if not dept_df.empty:
-        datasets_payload.append({"name": "Departamentos", "records": dept_df.to_dict("records")})
-    if not group_df.empty:
-        datasets_payload.append({"name": "Grupos", "records": group_df.to_dict("records")})
-    if not equip_df.empty:
-        datasets_payload.append({"name": "Equipamentos", "records": equip_df.to_dict("records")})
-    if include_managers and not manager_df.empty:
-        datasets_payload.append({"name": "Gestores", "records": manager_df.to_dict("records")})
-
-    if not datasets_payload:
+    if dept_df.empty and group_df.empty and equip_df.empty and gestor_df.empty:
         st.info("Sem dados para exibir.")
         return
 
-    payload_key = str(hash(str(datasets_payload[:10]) + str(top_n)))
-    fig = _build_unified_rank_figure_cached(payload_key, datasets_payload)
+    payload_key = str(hash(
+        str(dept_df.to_dict("records")[:50])
+        + str(group_df.to_dict("records")[:50])
+        + str(equip_df.to_dict("records")[:50])
+        + str(gestor_df.to_dict("records")[:50])
+        + str(top_n)
+    ))
+    fig = _build_unified_rank_figure_cached(
+        payload_key,
+        dept_df.to_dict("records"),
+        group_df.to_dict("records"),
+        equip_df.to_dict("records"),
+        gestor_df.to_dict("records"),
+    )
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-    if include_managers and not manager_df.empty:
-        st.caption("Use o seletor no canto superior direito para alternar entre departamentos, grupos, equipamentos e gestores. Os rótulos exibem o % concluído em cada barra.")
-    else:
-        st.caption("Use o seletor no canto superior direito para alternar entre departamentos, grupos e equipamentos sem rerun.")
+    st.caption("Use o seletor no canto superior direito para alternar entre departamentos, grupos, equipamentos e gestores sem rerun.")
+
+    if gestor_df is not None and not gestor_df.empty:
+        _render_gestor_highlights(gestor_df)
+
 
 
 @st.fragment
@@ -1016,7 +972,6 @@ def _fragment_departamentos(
     chart_df = display[["Departamento", "% Concluído"]].copy()
     chart_df = chart_df.sort_values("% Concluído", ascending=True)
     chart_df["label"] = chart_df["% Concluído"].map(lambda v: f"{int(round(v))}%")
-    chart_df["color"] = chart_df["% Concluído"].apply(_pct_bar_color)
 
     fig = px.bar(
         chart_df,
@@ -1024,10 +979,9 @@ def _fragment_departamentos(
         y="Departamento",
         orientation="h",
         text="label",
-        color="color",
-        color_discrete_map="identity",
         title="Progresso por departamento — clique numa barra para filtrar",
     )
+    _apply_semantic_bar_style(fig, chart_df, "% Concluído", "Departamento")
     fig.update_traces(
         textposition="outside",
         cliponaxis=False,
@@ -1249,7 +1203,7 @@ def _fragment_heatmap(heat: pd.DataFrame) -> None:
         x="setor",
         y="grupo",
         z="calor_score",
-        color_continuous_scale="RdYlGn_r",
+        color_continuous_scale=_risk_scale(),
         labels={
             "setor": "Setor",
             "grupo": "Grupo",
@@ -1340,7 +1294,7 @@ def _fragment_tendencia(trend: pd.DataFrame) -> None:
         line_dash="serie",
         category_orders={"serie": ["Real", "Ideal"]},
         title="Evolução semanal da revisão",
-        color_discrete_map={"Real": "#22C55E", "Ideal": "#94A3B8"},
+        color_discrete_map={"Real": "#12B76A", "Ideal": MUTED},
         line_dash_map={"Real": "solid", "Ideal": "dash"},
     )
     fig.update_traces(hovertemplate="%{x}<br>%{fullData.name}: %{y:.1f}%<extra></extra>")
@@ -1460,7 +1414,7 @@ def render_dashboard() -> None:
         raw, raw_equipment, eq_meta, debug_meta = _load_base_cached(tenant_id, revisao_id, token, ver)
         departamentos = _load_departamentos(tenant_id, ver, token)
         grupos = _load_grupos(tenant_id, ver, token)
-        manager_scope_rows = _load_manager_scope_rows(tenant_id, token, ver) if can_view_all_data(role) else []
+        gestor_options = _load_gestor_options(tenant_id, token, ver) if can_view_all_data(role) else []
 
     if dep_scope_ids in (None, [] ) and grp_scope_ids not in (None, []):
         dep_scope_ids = sorted({str(g.get("departamento_id")) for g in grupos if g.get("id") in set(grp_scope_ids) and g.get("departamento_id")})
@@ -1627,13 +1581,6 @@ def render_dashboard() -> None:
             dashboard_groups_filtered["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(effective_group_set)
         ]
 
-    if manager_scope_rows:
-        allowed_group_ids = {str(g.get("id")) for g in grupos if g.get("id")}
-        manager_scope_rows = [
-            row for row in manager_scope_rows
-            if str(row.get("grupo_id") or "") in allowed_group_ids
-        ]
-
     if base_filtered.empty and dashboard_groups_filtered.empty:
         notice_card(
             "Nenhum resultado para os filtros",
@@ -1700,9 +1647,8 @@ def render_dashboard() -> None:
         gid_to_dept,
         dept_map,
         equipment_source_for_chart,
+        gestor_options=gestor_options,
         top_n=top_n,
-        manager_scope_rows=manager_scope_rows,
-        include_managers=can_view_all_data(role),
     )
 
     st.divider()
