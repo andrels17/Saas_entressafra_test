@@ -131,11 +131,8 @@ def get_user_scope(tenant_id: str, user_id: str | None, role: str | None = None,
     if access_token:
         try:
             sb.postgrest.auth(access_token)
-        except Exception as exc:
-            import logging
-            logging.getLogger("saas.auth.scope").warning(
-                "scope | falha ao aplicar token no PostgREST — escopo pode ficar incorreto: %s", exc
-            )
+        except Exception:
+            pass
 
     rows: list[dict] = []
     rows.extend(_load_scope_rows(sb, "tenant_user_departamentos", tenant_id, user_id))
