@@ -22,7 +22,7 @@ from src.domain.kpi import (
     calc_dept_kpis,
     count_etapas,
 )
-from src.repositories.base import safe_select
+from src.repositories.base import safe_select, safe_select_paginated
 from src.utils.observability import log_error
 from src.utils.supabase_helpers import sb_for_user
 from src.db.supabase_client import get_supabase_anon
@@ -107,7 +107,7 @@ def invalidate_kpi_cache() -> None:
 
 def _fetch_mv(tenant_id: str, revisao_id: str, _token: str = "") -> list[dict]:
     sb = _sb_from_token(_token)
-    return safe_select(
+    return safe_select_paginated(
         sb, "mv_revisao_grupo_kpis", "grupo_id,eq_count,svc_count,done_steps",
         tenant_id__eq=tenant_id, revisao_id__eq=revisao_id,
     )
@@ -164,7 +164,9 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
     # vinculados a grupos inativos sejam contabilizados corretamente.
     # O filtro ativo=True causava eq_count=0 quando equipamentos apontavam
     # para grupos com ativo=False, zerando todos os KPIs da Home.
-    grupos = safe_select(
+    # Usa paginação: tenants com muitos grupos ultrapassariam o limite de 1000
+    # linhas do Supabase, causando truncamento silencioso dos gids.
+    grupos = safe_select_paginated(
         sb,
         "equip_grupos",
         "id",
@@ -185,9 +187,10 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
     except Exception:
         pass
 
-    # Fallback para safe_select se RPC não disponível
+    # Fallback para safe_select_paginated se RPC não disponível.
+    # safe_select simples truncaria silenciosamente em tenants com >1000 equipamentos.
     if not eq_rows:
-        eq_rows = safe_select(
+        eq_rows = safe_select_paginated(
             sb,
             "equipamentos",
             "id,grupo_id",
@@ -204,8 +207,9 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
             grp_to_eq[gid].append(eid)
             eq_to_gid[eid] = gid
 
-    tpl_rows = safe_select(sb, "grupo_servicos", "grupo_id,servico_id",
-                           tenant_id__eq=tenant_id, grupo_id__in=gids)
+    # N grupos × M serviços/grupo pode facilmente exceder 1000 linhas.
+    tpl_rows = safe_select_paginated(sb, "grupo_servicos", "grupo_id,servico_id",
+                                     tenant_id__eq=tenant_id, grupo_id__in=gids)
     grp_to_services: dict[str, set[str]] = defaultdict(set)
     for r in tpl_rows:
         gid = str(r.get("grupo_id")) if r.get("grupo_id") else None
