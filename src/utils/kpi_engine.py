@@ -184,8 +184,12 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
             {"p_tenant_id": tenant_id}
         ).execute()
         eq_rows = rpc_result.data or []
-    except Exception:
-        pass
+    except Exception as exc:
+        import logging
+        logging.getLogger("saas.kpi_engine").warning(
+            "kpi_engine | RPC get_equipamentos_dashboard falhou, usando fallback direto "
+            "(tenant=%s): %s", tenant_id, exc
+        )
 
     # Fallback para safe_select_paginated se RPC não disponível.
     # safe_select simples truncaria silenciosamente em tenants com >1000 equipamentos.
