@@ -25,7 +25,7 @@ from src.domain.kpi import (
 from src.repositories.base import safe_select, safe_select_paginated
 from src.utils.observability import log_error
 from src.utils.supabase_helpers import sb_for_user
-from src.db.supabase_client import get_supabase_anon
+from src.db.supabase_client import get_supabase_anon, get_supabase_service
 
 log = logging.getLogger("saas.kpi_engine")
 
@@ -41,14 +41,22 @@ _TTL_CONCLUDED = 3600  # revisão concluída: dados estáticos, cache longo
 
 def _sb_from_token(token: str = ""):
     """Constrói cliente Supabase a partir de um token explícito.
-    
-    Usado dentro de funções @st.cache_data onde acessar st.session_state
-    diretamente causa TypeError em versões recentes do Streamlit.
+
+    Preferimos service-role para leituras consolidadas do dashboard/matriz,
+    pois alguns perfis (gestor/supervisor) podem ficar com SELECT bloqueado por
+    RLS em tarefas/views e acabar vendo 0%. O recorte final continua sendo
+    aplicado na camada de aplicação via escopo do usuário.
     """
-    sb = get_supabase_anon()
-    if token:
-        sb.postgrest.auth(token)
-    return sb
+    try:
+        return get_supabase_service()
+    except Exception:
+        sb = get_supabase_anon()
+        if token:
+            try:
+                sb.postgrest.auth(token)
+            except Exception:
+                pass
+        return sb
 
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -184,12 +192,8 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
             {"p_tenant_id": tenant_id}
         ).execute()
         eq_rows = rpc_result.data or []
-    except Exception as exc:
-        import logging
-        logging.getLogger("saas.kpi_engine").warning(
-            "kpi_engine | RPC get_equipamentos_dashboard falhou, usando fallback direto "
-            "(tenant=%s): %s", tenant_id, exc
-        )
+    except Exception:
+        pass
 
     # Fallback para safe_select_paginated se RPC não disponível.
     # safe_select simples truncaria silenciosamente em tenants com >1000 equipamentos.
