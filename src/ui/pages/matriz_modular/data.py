@@ -41,10 +41,15 @@ def _group_kpis(tid, rev_id, ver="0", _token=""):
     for _, row in df.iterrows():
         gid = row.get("grupo_id")
         if gid:
+            done_steps = int(row.get("done_steps", 0) or 0)
+            expected_steps = int(row.get("expected_steps", 0) or 0)
+            pct_row = int(round((done_steps / expected_steps) * 100)) if expected_steps > 0 else int(round(float(row.get("pct", 0) or 0)))
             out[gid] = {
                 "eq_count": int(row.get("eq_count", 0)),
                 "svc_count": int(row.get("svc_count", 0)),
-                "pct": int(row.get("pct", 0)),
+                "done_steps": done_steps,
+                "expected_steps": expected_steps,
+                "pct": pct_row,
             }
     return out
 

@@ -11,6 +11,7 @@ import streamlit as st
 from src.ui.core.styles import page_header as _ph
 from src.ui.pages.matriz_runtime import sector_set_open as _sector_set_open
 from src.utils.timezone import now_utc as _now_utc
+from src.utils.kpi_engine import invalidate_kpi_cache
 
 from .context import build_group_context, handle_toolbar_reload, load_matrix_base_context
 from .header import render_group_header
@@ -466,9 +467,20 @@ def _render_toolbar(base_ctx):
             else:
                 labels = [lbl for lbl, _ in rev_opts]
                 mapping = {lbl: rid for lbl, rid in rev_opts}
+                rev_id_anterior = str(st.session_state.get("matriz_revisao_id") or "")
                 cur = next((lbl for lbl, rid in rev_opts if rid == st.session_state["matriz_revisao_id"]), labels[0])
                 pick = st.selectbox("Revisao", labels, index=labels.index(cur), key="mtz_rev_pick")
-                st.session_state["matriz_revisao_id"] = mapping[pick]
+                novo_rev_id = str(mapping[pick])
+                if novo_rev_id != rev_id_anterior:
+                    st.session_state["matriz_revisao_id"] = novo_rev_id
+                    st.session_state["matriz_view"] = "select"
+                    try:
+                        invalidate_kpi_cache()
+                    except Exception:
+                        pass
+                    handle_toolbar_reload()
+                else:
+                    st.session_state["matriz_revisao_id"] = novo_rev_id
         with row1_c3:
             st.session_state["matriz_limit_eq"] = st.number_input(
                 "Limite eq.",

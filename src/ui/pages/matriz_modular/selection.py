@@ -10,6 +10,22 @@ from .styles import (
     _truncate_card_title,
 )
 
+def _resolve_group_pct(info: dict) -> int:
+    """Normaliza o percentual do card com arredondamento inteiro.
+
+    Prioriza done_steps/expected_steps para manter a seleção da Matriz
+    alinhada ao resumo e ao PDF, mesmo se um cache antigo trouxer `pct`
+    truncado.
+    """
+    try:
+        done_steps = int(info.get("done_steps", 0) or 0)
+        expected_steps = int(info.get("expected_steps", 0) or 0)
+        if expected_steps > 0:
+            return int(round((done_steps / expected_steps) * 100))
+        return int(round(float(info.get("pct", 0) or 0)))
+    except Exception:
+        return 0
+
 
 def render_selection_screen(*, tenant_id, revisao_id, grupos, search, status_filter, sort_by, data_version) -> None:
     """Renderiza a grade de seleção de grupos.
@@ -37,7 +53,7 @@ def render_selection_screen(*, tenant_id, revisao_id, grupos, search, status_fil
 
     if status_filter != "Todos":
         def _status_match(g):
-            p = int(kpis.get(g.get("id"), {}).get("pct", 0))
+            p = _resolve_group_pct(kpis.get(g.get("id"), {}) or {})
             eq = int(kpis.get(g.get("id"), {}).get("eq_count", 0))
             if status_filter.startswith("🔴"):
                 return p < 50 and eq > 0
@@ -52,9 +68,9 @@ def render_selection_screen(*, tenant_id, revisao_id, grupos, search, status_fil
         show_groups = [g for g in show_groups if _status_match(g)]
 
     if sort_by.startswith("% ↑"):
-        show_groups = sorted(show_groups, key=lambda g: kpis.get(g.get("id"), {}).get("pct", 0))
+        show_groups = sorted(show_groups, key=lambda g: _resolve_group_pct(kpis.get(g.get("id"), {}) or {}))
     elif sort_by.startswith("% ↓"):
-        show_groups = sorted(show_groups, key=lambda g: -kpis.get(g.get("id"), {}).get("pct", 0))
+        show_groups = sorted(show_groups, key=lambda g: -_resolve_group_pct(kpis.get(g.get("id"), {}) or {}))
     else:
         show_groups = sorted(show_groups, key=lambda g: (g.get("nome") or "").lower())
 
@@ -69,7 +85,7 @@ def render_selection_screen(*, tenant_id, revisao_id, grupos, search, status_fil
             gid = g.get("id")
             nome = g.get("nome") or str(gid)
             info = kpis.get(gid, {})
-            pct = int(info.get("pct", 0))
+            pct = _resolve_group_pct(info)
             eqc = int(info.get("eq_count", 0))
             svc = int(info.get("svc_count", 0))
             dept_lbl = dept_names.get(g.get("departamento_id"), "")
