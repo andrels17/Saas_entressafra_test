@@ -1327,24 +1327,34 @@ def _fragment_tendencia(trend: pd.DataFrame) -> None:
 
 
 def _groups_from_kpi_df(kdf: pd.DataFrame, gid_to_name: dict, gid_to_dept: dict) -> pd.DataFrame:
+    """Normaliza KPIs de grupo para o dashboard usando a mesma regra da Matriz/PDF.
+
+    Importante: não confiar na coluna ``pct`` já vinda da origem, pois ela pode
+    ter sido calculada por uma view/materialized view defasada. O dashboard deve
+    sempre derivar o percentual a partir de ``done_steps / expected_steps`` e
+    arredondar para inteiro sem casas decimais.
+    """
     if kdf is None or kdf.empty:
         return pd.DataFrame(columns=[
             "grupo", "grupo_id", "departamento_id", "pct_concluido", "done_steps", "expected_steps"
         ])
+
     tmp = kdf.copy()
     tmp["grupo_id"] = tmp["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None)
     tmp["departamento_id"] = tmp["grupo_id"].map(lambda v: gid_to_dept.get(str(v)) if v is not None else None)
     tmp["grupo"] = tmp["grupo_id"].map(lambda v: gid_to_name.get(str(v), str(v)) if v is not None else "—")
     tmp["done_steps"] = pd.to_numeric(tmp.get("done_steps", 0), errors="coerce").fillna(0).astype(int)
     tmp["expected_steps"] = pd.to_numeric(tmp.get("expected_steps", 0), errors="coerce").fillna(0).astype(int)
-    # Padroniza o dashboard com a mesma base da Matriz/PDF: done_steps / expected_steps,
-    # sem confiar no pct pré-calculado, que pode vir de uma fonte divergente.
-    tmp["pct_concluido"] = (
+
+    pct_series = (
         (tmp["done_steps"] / tmp["expected_steps"].replace(0, pd.NA) * 100)
         .round()
         .fillna(0)
         .clip(0, 100)
+        .astype(int)
     )
+    tmp["pct_concluido"] = pct_series
+
     return tmp[["grupo", "grupo_id", "departamento_id", "pct_concluido", "done_steps", "expected_steps"]].copy()
 
 
