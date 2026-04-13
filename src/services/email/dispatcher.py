@@ -1339,10 +1339,17 @@ def dispatch_relatorio_semanal(
 
                     payloads_por_departamento.append(p)
 
+                    dept_pct_consolidado = (
+                        max(0, min(100, round((int(p.done_steps or 0) / int(p.expected_steps or 1)) * 100)))
+                        if int(p.expected_steps or 0) > 0
+                        else max(0, min(100, round(float(p.pct_geral or 0))))
+                    )
+                    dept_pct_anterior = max(0, min(100, round(float(p.pct_semana_anterior or 0))))
+
                     dept_snapshots.append(DeptSnapshot(
                         nome=grp.departamento_nome,
-                        pct_geral=p.pct_geral,
-                        pct_anterior=p.pct_semana_anterior,
+                        pct_geral=dept_pct_consolidado,
+                        pct_anterior=dept_pct_anterior,
                         n_equipamentos=p.n_equipamentos,
                         n_concluidos=p.n_concluidos,
                         n_travados=p.n_travados,
@@ -1358,29 +1365,34 @@ def dispatch_relatorio_semanal(
                         _expected_steps=p.expected_steps,
                     ))
 
-                    # Tendência global executiva: usa a MESMA régua visual das demais telas,
-                    # agregando o percentual semanal já consolidado por departamento.
-                    # Isso evita que o executivo volte para 3% quando o dashboard já mostra 4%.
+                    # Tendência global executiva: agrega o acumulado por semana.
+                    # Heatmap: usa o avanço da semana sobre o total esperado do departamento.
                     evolucao_sorted = sorted(p.evolucao or [], key=lambda w: getattr(w, "semana", 0))
-                    prev_pct = 0
+                    prev_done = 0
+                    dept_expected_total = int(getattr(p, "expected_steps", 0) or 0)
 
                     for wk in evolucao_sorted:
                         sem = int(getattr(wk, "semana", 0) or 0)
                         if sem <= 0:
                             continue
 
-                        wk_pct = int(round(float(getattr(wk, "pct", 0) or 0)))
-                        acc = trend_acc.setdefault(sem, {"pct_sum": 0, "count": 0})
-                        acc["pct_sum"] += wk_pct
-                        acc["count"] += 1
+                        wk_done = int(getattr(wk, "concluidos", 0) or 0)
+                        acc = trend_acc.setdefault(sem, {"done": 0, "total": 0})
+                        acc["done"] += wk_done
+                        acc["total"] += dept_expected_total
 
-                        pct_incremental = max(0, wk_pct - prev_pct)
+                        delta_done = max(0, wk_done - prev_done)
+                        pct_incremental = (
+                            max(0, min(100, round(delta_done / max(dept_expected_total, 1) * 100)))
+                            if dept_expected_total > 0 else 0
+                        )
+
                         heatmap_semanal.append({
                             "departamento": grp.departamento_nome,
                             "semana": sem,
                             "pct": pct_incremental,
                         })
-                        prev_pct = wk_pct
+                        prev_done = wk_done
 
                     for par in (p.parados_detalhe or []):
                         dias = int(par.get("dias_parado") or 0)
@@ -1395,9 +1407,9 @@ def dispatch_relatorio_semanal(
                         f"    ↳ Aviso: erro ao montar snapshot de {grp.departamento_nome}: {e_g}")
 
             if dept_snapshots:
-                # Executivo: usa o MESMO percentual consolidado exibido nas demais telas.
-                # Em vez de reponderar aqui, tira a média dos percentuais departamentais já
-                # fechados/arrotondados pelo pipeline do dashboard.
+                # pct_global ponderado: sum(done_steps) / sum(expected_steps)
+                # idêntico à fórmula do kpi_engine — evita distorção por deptos
+                # de tamanhos diferentes
                 total_done_g = sum(getattr(s, "_done_steps", 0)
                                    for s in dept_snapshots)
                 total_expected_g = sum(
@@ -1405,7 +1417,11 @@ def dispatch_relatorio_semanal(
                         s,
                         "_expected_steps",
                         0) for s in dept_snapshots)
-                pct_global = round(sum(int(getattr(d, "pct_geral", 0) or 0) for d in dept_snapshots) / max(len(dept_snapshots), 1))
+                pct_global = (
+                    max(0, min(100, round(total_done_g / total_expected_g * 100)))
+                    if total_expected_g > 0
+                    else round(sum(int(d.pct_geral or 0) for d in dept_snapshots) / max(len(dept_snapshots), 1))
+                )
                 n_equip_total = sum(d.n_equipamentos for d in dept_snapshots)
                 n_equip_concl = sum(d.n_concluidos for d in dept_snapshots)
                 # Também no executivo o total representa equipamentos únicos
@@ -1414,13 +1430,13 @@ def dispatch_relatorio_semanal(
 
                 trend_semanal = []
                 for sem in sorted(trend_acc):
-                    count_sem = int(trend_acc[sem].get("count") or 0)
-                    pct_sum_sem = float(trend_acc[sem].get("pct_sum") or 0)
-                    pct_sem = max(0, min(100, round(pct_sum_sem / count_sem))) if count_sem > 0 else 0
+                    total_sem = int(trend_acc[sem].get("total") or 0)
+                    done_sem = int(trend_acc[sem].get("done") or 0)
+                    pct_sem = max(0, min(100, round(done_sem / total_sem * 100))) if total_sem > 0 else 0
                     trend_semanal.append({"semana": sem, "pct": pct_sem})
                 trend_semanal = trend_semanal[-4:]
                 if trend_semanal:
-                    trend_semanal[-1]["pct"] = int(pct_global)
+                    trend_semanal[-1]["pct"] = int(pct_global or 0)
 
                 exec_payload = RelatorioExecutivoPayload(
                     tenant_nome=tenant_nome or "AgroSafra",
