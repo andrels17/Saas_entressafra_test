@@ -1411,9 +1411,9 @@ def dispatch_relatorio_semanal(
                         "_expected_steps",
                         0) for s in dept_snapshots)
                 pct_global = (
-                    max(0, min(100, round(total_done_g / total_expected_g * 100)))
+                    max(0, min(100, round(total_done_g / total_expected_g * 100, 1)))
                     if total_expected_g > 0
-                    else round(sum(d.pct_geral for d in dept_snapshots) / max(len(dept_snapshots), 1))
+                    else round(sum(float(d.pct_geral or 0) for d in dept_snapshots) / max(len(dept_snapshots), 1), 1)
                 )
                 n_equip_total = sum(d.n_equipamentos for d in dept_snapshots)
                 n_equip_concl = sum(d.n_concluidos for d in dept_snapshots)
@@ -1423,13 +1423,13 @@ def dispatch_relatorio_semanal(
 
                 trend_semanal = []
                 for sem in sorted(trend_acc):
-                    total_sem = int(trend_acc[sem].get("total") or 0)
-                    done_sem = int(trend_acc[sem].get("done") or 0)
-                    pct_sem = max(
-                        0, min(
-                            100, round(
-                                done_sem / total_sem * 100))) if total_sem > 0 else 0
+                    total_sem = float(trend_acc[sem].get("total") or 0)
+                    done_sem = float(trend_acc[sem].get("done") or 0)
+                    pct_sem = round(max(0.0, min(100.0, (done_sem / total_sem * 100))) if total_sem > 0 else 0.0, 1)
                     trend_semanal.append({"semana": sem, "pct": pct_sem})
+
+                if trend_semanal:
+                    trend_semanal[-1]["pct"] = round(float(pct_global or trend_semanal[-1].get("pct") or 0), 1)
                 trend_semanal = trend_semanal[-4:]
 
                 exec_payload = RelatorioExecutivoPayload(
