@@ -183,23 +183,11 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
 
     serv_rows = []
     try:
-        # Mantém o dashboard alinhado com a Matriz/PDF: considera apenas
-        # serviços ativos. Em alguns tenants existem vínculos antigos em
-        # grupo_servicos apontando para serviços inativos, o que inflava o
-        # denominador e derrubava o percentual exibido nos gráficos.
-        try:
-            serv_rows = _fetch_all(
-                sb.table("servicos")
-                .select("id,nome,setor")
-                .eq("tenant_id", tenant_id)
-                .eq("ativo", True)
-            )
-        except Exception:
-            serv_rows = _fetch_all(
-                sb.table("servicos")
-                .select("id,nome,setor")
-                .eq("tenant_id", tenant_id)
-            )
+        serv_rows = _fetch_all(
+            sb.table("servicos")
+            .select("id,nome,setor")
+            .eq("tenant_id", tenant_id)
+        )
     except Exception as exc:
         log_error(exc, context="dashboard._load_base_cached", table="servicos")
 
@@ -277,7 +265,6 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
             task_map[(eid, sid)] = _merge_task(task_map.get((eid, sid)), t)
 
     group_services: dict[str, list[str]] = {}
-    active_service_ids = set(serv_map.keys())
     for row in grupo_servicos_rows:
         gid = row.get("grupo_id")
         sid = row.get("servico_id")
@@ -285,10 +272,6 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
             continue
         gid_s = str(gid)
         sid_s = str(sid)
-        # Ignora vínculos para serviços não carregados/ativos para manter a
-        # mesma base da Matriz e do PDF.
-        if sid_s not in active_service_ids:
-            continue
         group_services.setdefault(gid_s, [])
         if sid_s not in group_services[gid_s]:
             group_services[gid_s].append(sid_s)
@@ -1354,11 +1337,12 @@ def _groups_from_kpi_df(kdf: pd.DataFrame, gid_to_name: dict, gid_to_dept: dict)
     tmp["grupo"] = tmp["grupo_id"].map(lambda v: gid_to_name.get(str(v), str(v)) if v is not None else "—")
     tmp["done_steps"] = pd.to_numeric(tmp.get("done_steps", 0), errors="coerce").fillna(0).astype(int)
     tmp["expected_steps"] = pd.to_numeric(tmp.get("expected_steps", 0), errors="coerce").fillna(0).astype(int)
-    # Sempre recalcula o percentual a partir de done/expected para evitar
-    # divergências com valores pré-calculados defasados.
     tmp["pct_concluido"] = (
-        tmp["done_steps"] / tmp["expected_steps"].replace(0, pd.NA) * 100
-    ).round().fillna(0).clip(0, 100)
+        (tmp["done_steps"] / tmp["expected_steps"].replace(0, pd.NA) * 100)
+        .round(0)
+        .fillna(0)
+        .clip(0, 100)
+    )
     return tmp[["grupo", "grupo_id", "departamento_id", "pct_concluido", "done_steps", "expected_steps"]].copy()
 
 
@@ -1509,12 +1493,15 @@ def render_dashboard() -> None:
         # estiver desatualizada, mantém o filtro por departamento em vez de zerar o dashboard.
         base = apply_filters(base=raw_base, departamento_ids=dep_scope_ids, grupo_ids=None)
 
-    dashboard_groups = group_progress(base)
+    # Grupos no dashboard devem seguir a mesma fonte de verdade da Matriz/PDF.
+    # Antes usávamos group_progress(base) e só caíamos no KPI engine como fallback.
+    # Isso mantinha divergências quando a base do dashboard continha serviços/linhas
+    # diferentes da consolidação oficial. Agora, sempre que houver KPI consolidado,
+    # usamos ele como fonte principal para percentuais de grupos.
+    dashboard_groups = _groups_from_kpi_df(kpi_df, gid_to_name, gid_to_dept) if not kpi_df.empty else group_progress(base)
     base_overall = overall_from_base(base)
     kpi_overall = _overall_from_group_kpis(kpi_df) if not kpi_df.empty else {"pct": 0}
     use_kpi_fallback = bool((base.empty or float(base_overall.get("pct", 0) or 0) <= 0) and float(kpi_overall.get("pct", 0) or 0) > 0)
-    if use_kpi_fallback:
-        dashboard_groups = _groups_from_kpi_df(kpi_df, gid_to_name, gid_to_dept)
 
     st.markdown("### Filtros")
     c1, c2, c3 = st.columns([1.1, 1.4, 0.6])
