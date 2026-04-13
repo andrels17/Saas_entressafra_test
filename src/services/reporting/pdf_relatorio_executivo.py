@@ -143,7 +143,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         return f"+{d}p.p." if d > 0 else f"{d}p.p."
 
     def real_pct_dept(dept: DeptSnapshot) -> int:
-        return max(0, min(100, int(round(getattr(dept, "pct_geral", 0) or 0))))
+        return max(0, min(100, int(getattr(dept, "pct_geral", 0) or 0)))
 
     def real_delta_dept(dept: DeptSnapshot) -> int:
         return int(real_pct_dept(dept)) - int(getattr(dept, "pct_anterior", 0) or 0)
@@ -218,13 +218,11 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         n_atencao = sum(int(getattr(d, 'n_parados', 0) or 0) for d in deptos if 7 < int(
             getattr(d, 'max_dias_parado', 0) or 0) <= 14)
 
-    pct_global_real = max(0, min(100, int(round(payload.pct_global or 0))))
+    pct_global_real = max(0, min(100, int(payload.pct_global or 0)))
 
     trend_display = list(payload.trend_semanal or [])
     if not trend_display:
         trend_display = [{"semana": max(int(payload.semana_atual or 1), 1), "pct": pct_global_real}]
-    elif trend_display:
-        trend_display[-1]["pct"] = pct_global_real
 
     heatmap_display = list(payload.heatmap_semanal or [])
     if not heatmap_display:
