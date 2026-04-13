@@ -216,12 +216,21 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
             eq_to_gid[eid] = gid
 
     # N grupos × M serviços/grupo pode facilmente exceder 1000 linhas.
-    tpl_rows = safe_select_paginated(sb, "grupo_servicos", "grupo_id,servico_id",
-                                     tenant_id__eq=tenant_id, grupo_id__in=gids)
+    tpl_rows = safe_select_paginated(
+        sb,
+        "grupo_servicos",
+        "grupo_id,servico_id,servicos(id,ativo)",
+        tenant_id__eq=tenant_id,
+        grupo_id__in=gids,
+    )
     grp_to_services: dict[str, set[str]] = defaultdict(set)
     for r in tpl_rows:
         gid = str(r.get("grupo_id")) if r.get("grupo_id") else None
         sid = str(r.get("servico_id")) if r.get("servico_id") else None
+        sv = r.get("servicos") or {}
+        ativo = sv.get("ativo", True)
+        if str(ativo).lower() in {"false", "0", "none"} or ativo is False:
+            continue
         if gid and sid:
             grp_to_services[gid].add(sid)
 
