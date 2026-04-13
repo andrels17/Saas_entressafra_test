@@ -452,15 +452,11 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
         if not isinstance(df, pd.DataFrame) or df.empty or not sector_groups:
             return [Paragraph("Sem dados desta matriz.", small_style)]
 
-        equip_w = 4.0 * cm
+        equip_w = 3.8 * cm
         stage_pref_w = 0.80 * cm
-        stage_min_w = 0.72 * cm
-
-        # Usa a largura mínima real permitida para decidir a quebra horizontal.
-        # Assim evitamos separar um setor inteiro em outro bloco quando ele ainda
-        # cabe na mesma página com células um pouco mais compactas.
-        available_matrix_w = max(pw - equip_w, stage_min_w * 3)
-        max_matrix_cols = max(3, int(available_matrix_w // stage_min_w))
+        stage_min_w = 0.66 * cm
+        usable_matrix_w = max(pw - equip_w, stage_min_w * 3)
+        max_matrix_cols = max(3, int(usable_matrix_w // stage_min_w))
 
         chunks = []
         current_chunk = []
@@ -554,7 +550,12 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
 
             remaining = pw - equip_w
             matrix_cols = len(cols_meta) - 1
-            matrix_w = max(stage_min_w, min(stage_pref_w, remaining / max(matrix_cols, 1)))
+            matrix_w = min(stage_pref_w, remaining / max(matrix_cols, 1))
+            if matrix_w < stage_min_w:
+                matrix_w = stage_min_w
+            compact_matrix = matrix_cols >= 34
+            if compact_matrix:
+                matrix_w = min(matrix_w, 0.69 * cm)
             col_widths = [equip_w] + [matrix_w] * matrix_cols
             table = Table(data, colWidths=col_widths, repeatRows=3)
             table.hAlign = "LEFT"
@@ -588,6 +589,24 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
             ]
             for c1, r1, c2, r2 in spans[1:]:
                 style_cmds.append(("SPAN", (c1, r1), (c2, r2)))
+
+            if compact_matrix:
+                style_cmds.extend(
+                    [
+                        ("FONTSIZE", (1, 0), (-1, 0), 6.1),
+                        ("LEADING", (1, 0), (-1, 0), 6.5),
+                        ("FONTSIZE", (1, 1), (-1, 1), 5.5),
+                        ("LEADING", (1, 1), (-1, 1), 6.1),
+                        ("FONTSIZE", (1, 2), (-1, 2), 5.2),
+                        ("LEADING", (1, 2), (-1, 2), 5.8),
+                        ("LEFTPADDING", (1, 0), (-1, 2), 0.6),
+                        ("RIGHTPADDING", (1, 0), (-1, 2), 0.6),
+                        ("LEFTPADDING", (1, 3), (-1, -1), 1.2),
+                        ("RIGHTPADDING", (1, 3), (-1, -1), 1.2),
+                        ("TOPPADDING", (1, 3), (-1, -1), 4.0),
+                        ("BOTTOMPADDING", (1, 3), (-1, -1), 4.0),
+                    ]
+                )
 
             # ── Separadores de serviço (linha fina entre serviços, antes do separador de setor) ──
             n_rows_total = len(data)
