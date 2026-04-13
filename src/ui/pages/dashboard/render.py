@@ -1337,10 +1337,14 @@ def _groups_from_kpi_df(kdf: pd.DataFrame, gid_to_name: dict, gid_to_dept: dict)
     tmp["grupo"] = tmp["grupo_id"].map(lambda v: gid_to_name.get(str(v), str(v)) if v is not None else "—")
     tmp["done_steps"] = pd.to_numeric(tmp.get("done_steps", 0), errors="coerce").fillna(0).astype(int)
     tmp["expected_steps"] = pd.to_numeric(tmp.get("expected_steps", 0), errors="coerce").fillna(0).astype(int)
-    if "pct" in tmp.columns:
-        tmp["pct_concluido"] = pd.to_numeric(tmp["pct"], errors="coerce").fillna(0).clip(0, 100)
-    else:
-        tmp["pct_concluido"] = (tmp["done_steps"] / tmp["expected_steps"].replace(0, pd.NA) * 100).fillna(0).clip(0, 100)
+    # Padroniza o dashboard com a mesma base da Matriz/PDF: done_steps / expected_steps,
+    # sem confiar no pct pré-calculado, que pode vir de uma fonte divergente.
+    tmp["pct_concluido"] = (
+        (tmp["done_steps"] / tmp["expected_steps"].replace(0, pd.NA) * 100)
+        .round()
+        .fillna(0)
+        .clip(0, 100)
+    )
     return tmp[["grupo", "grupo_id", "departamento_id", "pct_concluido", "done_steps", "expected_steps"]].copy()
 
 
