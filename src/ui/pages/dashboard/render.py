@@ -1243,31 +1243,6 @@ def _fragment_tendencia(trend: pd.DataFrame) -> None:
         empty_message("Sem base suficiente para tendência semanal nesta revisão.")
         return
 
-    trend = trend.copy().sort_values("week_number")
-    alert = tendencia_alertas(trend)
-    status = alert.get("status", "sem_base")
-    tone_map = {
-        "acima": "success",
-        "atencao": "warning",
-        "abaixo": "warning",
-        "estagnado": "warning",
-        "sem_base": "info",
-    }
-    title_map = {
-        "acima": "Tendência saudável",
-        "atencao": "Tendência em atenção",
-        "abaixo": "Ritmo abaixo do ideal",
-        "estagnado": "Evolução estagnada",
-        "sem_base": "Sem base suficiente",
-    }
-    notice_card(
-        title_map.get(status, "Tendência semanal"),
-        f"{alert.get('mensagem', 'Sem leitura disponível.')} "
-        f"Delta atual: {alert.get('delta_atual', 0):+.1f} p.p. | "
-        f"Ganho última semana: {alert.get('ganho_ultima_semana', 0):+.1f} p.p.",
-        tone=tone_map.get(status, "info"),
-    )
-
     plot_df = trend.melt(
         id_vars=["week_number", "semana_label"],
         value_vars=["pct_real", "pct_ideal"],
