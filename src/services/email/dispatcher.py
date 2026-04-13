@@ -1400,20 +1400,20 @@ def dispatch_relatorio_semanal(
                         f"    ↳ Aviso: erro ao montar snapshot de {grp.departamento_nome}: {e_g}")
 
             if dept_snapshots:
-                # pct_global ponderado: sum(done_steps) / sum(expected_steps)
-                # idêntico à fórmula do kpi_engine — evita distorção por deptos
-                # de tamanhos diferentes
-                total_done_g = sum(getattr(s, "_done_steps", 0)
-                                   for s in dept_snapshots)
-                total_expected_g = sum(
-                    getattr(
-                        s,
-                        "_expected_steps",
-                        0) for s in dept_snapshots)
+                # Fonte única do progresso global do executivo:
+                # usa a média ponderada dos percentuais departamentais já
+                # consolidados pelo mesmo pipeline das demais telas/PDFs.
+                # Isso evita o caso em que o executivo reapura por done/expected
+                # e cai em 3,4%, enquanto o restante já arredondou para 4%.
+                total_peso_pct = sum(
+                    int(getattr(s, "pct_geral", 0) or 0) * max(int(getattr(s, "_expected_steps", 0) or 0), 1)
+                    for s in dept_snapshots
+                )
+                total_expected_g = sum(max(int(getattr(s, "_expected_steps", 0) or 0), 1) for s in dept_snapshots)
                 pct_global = (
-                    max(0, min(100, round(total_done_g / total_expected_g * 100, 1)))
+                    max(0, min(100, int(round(total_peso_pct / total_expected_g))))
                     if total_expected_g > 0
-                    else round(sum(float(d.pct_geral or 0) for d in dept_snapshots) / max(len(dept_snapshots), 1), 1)
+                    else int(round(sum(int(getattr(d, "pct_geral", 0) or 0) for d in dept_snapshots) / max(len(dept_snapshots), 1)))
                 )
                 n_equip_total = sum(d.n_equipamentos for d in dept_snapshots)
                 n_equip_concl = sum(d.n_concluidos for d in dept_snapshots)
@@ -1423,14 +1423,17 @@ def dispatch_relatorio_semanal(
 
                 trend_semanal = []
                 for sem in sorted(trend_acc):
-                    total_sem = float(trend_acc[sem].get("total") or 0)
-                    done_sem = float(trend_acc[sem].get("done") or 0)
-                    pct_sem = round(max(0.0, min(100.0, (done_sem / total_sem * 100))) if total_sem > 0 else 0.0, 1)
+                    total_sem = int(trend_acc[sem].get("total") or 0)
+                    done_sem = int(trend_acc[sem].get("done") or 0)
+                    pct_sem = max(
+                        0, min(
+                            100, int(round(done_sem / total_sem * 100)))) if total_sem > 0 else 0
                     trend_semanal.append({"semana": sem, "pct": pct_sem})
-
-                if trend_semanal:
-                    trend_semanal[-1]["pct"] = round(float(pct_global or trend_semanal[-1].get("pct") or 0), 1)
                 trend_semanal = trend_semanal[-4:]
+                if trend_semanal:
+                    trend_semanal[-1]["pct"] = pct_global
+                else:
+                    trend_semanal = [{"semana": max(int(sem_atual_rev or 1), 1), "pct": pct_global}]
 
                 exec_payload = RelatorioExecutivoPayload(
                     tenant_nome=tenant_nome or "AgroSafra",
