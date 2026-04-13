@@ -510,12 +510,6 @@ def _render_gestor_highlights(gestor_df: pd.DataFrame) -> None:
     attention_count = int(((pd.to_numeric(gestor_df["Valor"], errors="coerce").fillna(0) >= 50) & (pd.to_numeric(gestor_df["Valor"], errors="coerce").fillna(0) < 80)).sum())
     advanced_count = int((pd.to_numeric(gestor_df["Valor"], errors="coerce").fillna(0) >= 80).sum())
     tone = "warning" if critical_count else ("info" if attention_count else "success")
-    notice_card(
-        "Leitura rápida dos gestores",
-        f"{advanced_count} avançado(s), {attention_count} em atenção e {critical_count} crítico(s). "
-        f"Use as mesmas cores do dashboard para leitura imediata: verde ≥ 80%, amarelo 50–79% e vermelho < 50%.",
-        tone=tone,
-    )
 
 
 @st.cache_data(ttl=120, show_spinner=False)
