@@ -183,11 +183,23 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
 
     serv_rows = []
     try:
-        serv_rows = _fetch_all(
-            sb.table("servicos")
-            .select("id,nome,setor,ativo")
-            .eq("tenant_id", tenant_id)
-        )
+        # Mantém o dashboard alinhado com a Matriz/PDF: considera apenas
+        # serviços ativos. Em alguns tenants existem vínculos antigos em
+        # grupo_servicos apontando para serviços inativos, o que inflava o
+        # denominador e derrubava o percentual exibido nos gráficos.
+        try:
+            serv_rows = _fetch_all(
+                sb.table("servicos")
+                .select("id,nome,setor")
+                .eq("tenant_id", tenant_id)
+                .eq("ativo", True)
+            )
+        except Exception:
+            serv_rows = _fetch_all(
+                sb.table("servicos")
+                .select("id,nome,setor")
+                .eq("tenant_id", tenant_id)
+            )
     except Exception as exc:
         log_error(exc, context="dashboard._load_base_cached", table="servicos")
 
@@ -204,10 +216,6 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
     eq_map = {str(r.get("id")): r for r in eq_rows if r.get("id") is not None}
     grupo_map = {str(r.get("id")): r for r in grupo_rows if r.get("id") is not None}
     serv_map = {str(r.get("id")): r for r in serv_rows if r.get("id") is not None}
-    active_service_ids = {
-        str(r.get("id")) for r in serv_rows
-        if r.get("id") is not None and bool(r.get("ativo", True))
-    }
 
     def _status_rank(status: str | None) -> int:
         s = str(status or "").strip().lower()
@@ -244,8 +252,6 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
     for t in task_rows:
         eid = str(t.get("equipamento_id")) if t.get("equipamento_id") is not None else None
         sid = str(t.get("servico_id")) if t.get("servico_id") is not None else None
-        if sid is not None and active_service_ids and sid not in active_service_ids:
-            continue
         eq = eq_map.get(eid, {})
         gid = eq.get("grupo_id")
         gid_s = str(gid) if gid is not None else None
@@ -271,6 +277,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
             task_map[(eid, sid)] = _merge_task(task_map.get((eid, sid)), t)
 
     group_services: dict[str, list[str]] = {}
+    active_service_ids = set(serv_map.keys())
     for row in grupo_servicos_rows:
         gid = row.get("grupo_id")
         sid = row.get("servico_id")
@@ -278,7 +285,9 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
             continue
         gid_s = str(gid)
         sid_s = str(sid)
-        if active_service_ids and sid_s not in active_service_ids:
+        # Ignora vínculos para serviços não carregados/ativos para manter a
+        # mesma base da Matriz e do PDF.
+        if sid_s not in active_service_ids:
             continue
         group_services.setdefault(gid_s, [])
         if sid_s not in group_services[gid_s]:
@@ -1345,12 +1354,11 @@ def _groups_from_kpi_df(kdf: pd.DataFrame, gid_to_name: dict, gid_to_dept: dict)
     tmp["grupo"] = tmp["grupo_id"].map(lambda v: gid_to_name.get(str(v), str(v)) if v is not None else "—")
     tmp["done_steps"] = pd.to_numeric(tmp.get("done_steps", 0), errors="coerce").fillna(0).astype(int)
     tmp["expected_steps"] = pd.to_numeric(tmp.get("expected_steps", 0), errors="coerce").fillna(0).astype(int)
+    # Sempre recalcula o percentual a partir de done/expected para evitar
+    # divergências com valores pré-calculados defasados.
     tmp["pct_concluido"] = (
-        (tmp["done_steps"] / tmp["expected_steps"].replace(0, pd.NA) * 100)
-        .round(0)
-        .fillna(0)
-        .clip(0, 100)
-    )
+        tmp["done_steps"] / tmp["expected_steps"].replace(0, pd.NA) * 100
+    ).round().fillna(0).clip(0, 100)
     return tmp[["grupo", "grupo_id", "departamento_id", "pct_concluido", "done_steps", "expected_steps"]].copy()
 
 
