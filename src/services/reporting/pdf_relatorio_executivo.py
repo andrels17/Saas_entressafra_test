@@ -218,6 +218,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         n_atencao = sum(int(getattr(d, 'n_parados', 0) or 0) for d in deptos if 7 < int(
             getattr(d, 'max_dias_parado', 0) or 0) <= 14)
 
+    # O PDF apenas reflete o consolidado oficial recebido no payload.
     pct_global_real = max(0, min(100, int(payload.pct_global or 0)))
 
     trend_display = list(payload.trend_semanal or [])
