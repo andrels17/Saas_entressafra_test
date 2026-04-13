@@ -864,27 +864,16 @@ def _build_payload(
                 "flag_alerta": alerta_eq,
             })
 
-    # Topo: usa SEMPRE a mesma fórmula do dashboard sobre a base normalizada.
-    # O kpi_engine permanece apenas como fallback defensivo quando a base do
-    # dashboard vier vazia/zerada por algum motivo.
+    # Topo: usa SEMPRE e somente a mesma base consolidada do dashboard.
+    # Não usa fallback do kpi_engine aqui, para evitar divergência entre
+    # dashboard, relatório departamental e executivo por e-mail.
     dashboard_pct = int(round(float(overall.get("pct") or 0)))
     dashboard_n_equip = int(overall.get("total") or len(all_equipamentos))
 
-    snapshot_pct = int(snapshot_kpi.get("pct_geral") or 0)
-    snapshot_n_equip = int(snapshot_kpi.get("n_equipamentos") or 0)
-    snapshot_done = int(snapshot_kpi.get("done_steps_total") or 0)
-    snapshot_expected = int(snapshot_kpi.get("expected_steps_total") or 0)
-
-    use_kpi_fallback = bool(
-        (base is None or base.empty or dashboard_pct <= 0)
-        and snapshot_expected > 0
-        and snapshot_pct > 0
-    )
-
-    pct_geral_snapshot = snapshot_pct if use_kpi_fallback else dashboard_pct
-    n_equipamentos = snapshot_n_equip if use_kpi_fallback and snapshot_n_equip > 0 else dashboard_n_equip
-    done_steps_total = snapshot_done if use_kpi_fallback and snapshot_expected > 0 else int(done_steps_total_dash)
-    expected_steps_total = snapshot_expected if use_kpi_fallback and snapshot_expected > 0 else int(expected_steps_total_dash)
+    pct_geral_snapshot = dashboard_pct
+    n_equipamentos = dashboard_n_equip
+    done_steps_total = int(done_steps_total_dash)
+    expected_steps_total = int(expected_steps_total_dash)
 
     n_concluidos = max(n_concluidos_local, int(overall.get("concl") or 0))
     n_travados = max(n_travados_local, int(overall.get("trav") or 0))
@@ -1339,9 +1328,11 @@ def dispatch_relatorio_semanal(
 
                     payloads_por_departamento.append(p)
 
-                    # Usa exatamente o percentual já consolidado pelo mesmo caminho do dashboard,
-                    # evitando divergência entre executivo por e-mail e sistema.
-                    dept_pct_dashboard = int(p.pct_geral or 0)
+                    dept_pct_dashboard = (
+                        max(0, min(100, round(int(p.done_steps or 0) / max(int(p.expected_steps or 0), 1) * 100)))
+                        if int(p.expected_steps or 0) > 0
+                        else int(p.pct_geral or 0)
+                    )
                     dept_pct_anterior_dashboard = int(p.pct_semana_anterior or 0)
                     if p.evolucao and len(p.evolucao) >= 2:
                         try:
