@@ -864,8 +864,8 @@ def _build_payload(
                 "flag_alerta": alerta_eq,
             })
 
-    # Topo: usa SEMPRE e somente a mesma base consolidada do dashboard.
-    # Não usa fallback do kpi_engine aqui, para evitar divergência entre
+    # Topo: usa sempre e somente a mesma base consolidada do dashboard.
+    # Não aplica fallback do kpi_engine aqui, para evitar divergência entre
     # dashboard, relatório departamental e executivo por e-mail.
     dashboard_pct = int(round(float(overall.get("pct") or 0)))
     dashboard_n_equip = int(overall.get("total") or len(all_equipamentos))
@@ -1328,11 +1328,8 @@ def dispatch_relatorio_semanal(
 
                     payloads_por_departamento.append(p)
 
-                    dept_pct_dashboard = (
-                        max(0, min(100, round(int(p.done_steps or 0) / max(int(p.expected_steps or 0), 1) * 100)))
-                        if int(p.expected_steps or 0) > 0
-                        else int(p.pct_geral or 0)
-                    )
+                    # Usa exatamente o percentual já consolidado pelo mesmo caminho do dashboard.
+                    dept_pct_dashboard = int(p.pct_geral or 0)
                     dept_pct_anterior_dashboard = int(p.pct_semana_anterior or 0)
                     if p.evolucao and len(p.evolucao) >= 2:
                         try:
