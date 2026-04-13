@@ -26,6 +26,13 @@ from .summary_tab import render_summary_tab
 
 
 
+def _round_pct(value) -> int:
+    try:
+        return int(round(float(value or 0)))
+    except Exception:
+        return 0
+
+
 
 def _collect_matrix_changes(df_base, df_editado, svc_bool_cols: list[str], col_meta: dict[str, tuple[str, str]]):
     """Compat helper para detectar alterações na matriz editável.
@@ -396,7 +403,7 @@ def _render_altair_evo(pc: pd.DataFrame, ps: pd.DataFrame, meta: pd.Series) -> N
 
     base = alt.Chart(df_melt).encode(
         x=alt.X("Semana:Q", axis=alt.Axis(tickMinStep=1, title="Semana")),
-        y=alt.Y("valor:Q", axis=alt.Axis(title="%", format=".1f"), scale=alt.Scale(domain=[0, 100])),
+        y=alt.Y("valor:Q", axis=alt.Axis(title="%", format=".0f"), scale=alt.Scale(domain=[0, 100])),
         color=alt.Color("série:N", scale=color_scale, legend=alt.Legend(orient="bottom", title=None)),
     )
 
@@ -408,7 +415,7 @@ def _render_altair_evo(pc: pd.DataFrame, ps: pd.DataFrame, meta: pd.Series) -> N
             tooltip=[
                 alt.Tooltip("Semana:Q", title="Semana"),
                 alt.Tooltip("série:N", title="Série"),
-                alt.Tooltip("valor:Q", title="%", format=".1f"),
+                alt.Tooltip("valor:Q", title="%", format=".0f"),
                 alt.Tooltip("delta:Q", title="vs meta", format="+.1f"),
             ],
         )
@@ -650,14 +657,14 @@ def _render_evolucao_tab(group_ctx, base_ctx):
         pct_atual = float(pc["Cumulativo (%)"].iloc[-1]) if not pc.empty else 0
         sem_atual = int(pc.index[-1]) if not pc.empty else 0
         meta_atual = float(meta.iloc[-1]) if len(meta) > 0 else 0
-        delta_vs_meta = round(pct_atual - meta_atual, 1)
+        delta_vs_meta = _round_pct(pct_atual - meta_atual)
 
         mk1, mk2, mk3, mk4 = st.columns(4)
-        mk1.metric("Progresso atual", f"{pct_atual:.1f}%")
+        mk1.metric("Progresso atual", f"{_round_pct(pct_atual)}%")
         mk2.metric(
             "Meta (semana atual)",
-            f"{meta_atual:.1f}%",
-            delta=f"{delta_vs_meta:+.1f}%",
+            f"{_round_pct(meta_atual)}%",
+            delta=f"{delta_vs_meta:+d}%",
             delta_color="normal" if delta_vs_meta >= 0 else "inverse",
         )
         mk3.metric("Semanas decorridas", str(sem_atual))
@@ -698,8 +705,8 @@ def _render_analytics_tab(group_ctx, analytics_data):
     a1.metric("Progresso geral", f"{analytics_data['progresso_atual_pct']:.0f}%")
     a2.metric(
         "Meta esperada",
-        f"{analytics_data['expected_pct_now']:.1f}%",
-        delta=f"{analytics_data['delta_vs_expected_now']:+.1f}%",
+        f"{_round_pct(analytics_data['expected_pct_now'])}%",
+        delta=f"{_round_pct(analytics_data['delta_vs_expected_now']):+d}%",
         delta_color="normal" if analytics_data["delta_vs_expected_now"] >= 0 else "inverse",
     )
     a3.metric("Setores risco alto", sum(1 for item in analytics_data["analytics_sector_intelligence"] if item.get("risk") == "alto"))
