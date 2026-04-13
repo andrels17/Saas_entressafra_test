@@ -1339,10 +1339,8 @@ def dispatch_relatorio_semanal(
 
                     payloads_por_departamento.append(p)
 
-                    # Executivo deve refletir exatamente o consolidado exibido
-                    # no dashboard/semanal para o departamento. Não reapurar por
-                    # done_steps/expected_steps aqui, pois isso gera divergência
-                    # com percentuais já consolidados como 6% vs 7%.
+                    # Usa exatamente o percentual já consolidado pelo mesmo caminho do dashboard,
+                    # evitando divergência entre executivo por e-mail e sistema.
                     dept_pct_dashboard = int(p.pct_geral or 0)
                     dept_pct_anterior_dashboard = int(p.pct_semana_anterior or 0)
                     if p.evolucao and len(p.evolucao) >= 2:
