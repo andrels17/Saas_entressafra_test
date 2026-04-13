@@ -215,23 +215,24 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
             grp_to_eq[gid].append(eid)
             eq_to_gid[eid] = gid
 
-    # N grupos × M serviços/grupo pode facilmente exceder 1000 linhas.
-    tpl_rows = safe_select_paginated(
+    # Considera apenas serviços ativos para manter consistência com a Matriz/PDF.
+    active_service_rows = safe_select_paginated(
         sb,
-        "grupo_servicos",
-        "grupo_id,servico_id,servicos(id,ativo)",
+        "servicos",
+        "id",
         tenant_id__eq=tenant_id,
-        grupo_id__in=gids,
+        ativo__eq=True,
     )
+    active_service_ids = {str(r.get("id")) for r in active_service_rows if r.get("id")}
+
+    # N grupos × M serviços/grupo pode facilmente exceder 1000 linhas.
+    tpl_rows = safe_select_paginated(sb, "grupo_servicos", "grupo_id,servico_id",
+                                     tenant_id__eq=tenant_id, grupo_id__in=gids)
     grp_to_services: dict[str, set[str]] = defaultdict(set)
     for r in tpl_rows:
         gid = str(r.get("grupo_id")) if r.get("grupo_id") else None
         sid = str(r.get("servico_id")) if r.get("servico_id") else None
-        sv = r.get("servicos") or {}
-        ativo = sv.get("ativo", True)
-        if str(ativo).lower() in {"false", "0", "none"} or ativo is False:
-            continue
-        if gid and sid:
+        if gid and sid and (not active_service_ids or sid in active_service_ids):
             grp_to_services[gid].add(sid)
 
     # Exclui equipamentos ocultos nesta revisão
@@ -257,7 +258,7 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
             try:
                 trows = (
                     sb.table("tarefas_servico")
-                    .select("equipamento_id,etapa_d,etapa_r,etapa_m")
+                    .select("equipamento_id,servico_id,etapa_d,etapa_r,etapa_m")
                     .eq("tenant_id", tenant_id)
                     .eq("revisao_id", revisao_id)
                     .range(start, start + page_size - 1)
@@ -272,8 +273,9 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
                 break
             for t in trows:
                 eid = str(t.get("equipamento_id")) if t.get("equipamento_id") else None
+                sid = str(t.get("servico_id")) if t.get("servico_id") else None
                 gid = eq_to_gid.get(eid)
-                if gid:
+                if gid and (not active_service_ids or sid in active_service_ids):
                     done_by_gid[gid] += (
                         int(bool(t.get("etapa_d"))) +
                         int(bool(t.get("etapa_r"))) +
