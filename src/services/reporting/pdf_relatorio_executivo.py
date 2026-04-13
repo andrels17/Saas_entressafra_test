@@ -143,9 +143,11 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         return f"+{d}p.p." if d > 0 else f"{d}p.p."
 
     def real_pct_dept(dept: DeptSnapshot) -> int:
-        # No executivo, o percentual exibido precisa ser exatamente o mesmo
-        # percentual já consolidado nas demais telas/PDFs do departamento.
-        return max(0, min(100, int(round(float(getattr(dept, "pct_geral", 0) or 0)))))
+        expected = int(getattr(dept, "_expected_steps", 0) or 0)
+        done = int(getattr(dept, "_done_steps", 0) or 0)
+        if expected > 0:
+            return max(0, min(100, int(round(done / expected * 100))))
+        return max(0, min(100, int(getattr(dept, "pct_geral", 0) or 0)))
 
     def real_delta_dept(dept: DeptSnapshot) -> int:
         return int(real_pct_dept(dept)) - int(getattr(dept, "pct_anterior", 0) or 0)
@@ -220,16 +222,12 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         n_atencao = sum(int(getattr(d, 'n_parados', 0) or 0) for d in deptos if 7 < int(
             getattr(d, 'max_dias_parado', 0) or 0) <= 14)
 
-    pct_global_real = max(0, min(100, int(round(float(payload.pct_global or 0)))))
+    pct_global_real = int(round(payload.pct_global or 0))
 
-    trend_display = [
-        {"semana": int(item.get("semana") or 0), "pct": max(0, min(100, int(round(float(item.get("pct") or 0)))))}
-        for item in (payload.trend_semanal or [])
-        if int(item.get("semana") or 0) > 0
-    ]
+    trend_display = list(payload.trend_semanal or [])
     if not trend_display:
         trend_display = [{"semana": max(int(payload.semana_atual or 1), 1), "pct": pct_global_real}]
-    else:
+    elif trend_display:
         trend_display[-1]["pct"] = pct_global_real
 
     heatmap_display = list(payload.heatmap_semanal or [])
