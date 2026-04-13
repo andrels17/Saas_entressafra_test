@@ -455,9 +455,12 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
         equip_w = 4.0 * cm
         stage_pref_w = 0.80 * cm
         stage_min_w = 0.72 * cm
-        max_matrix_cols = max(3, int((pw - equip_w) // stage_pref_w))
-        if max_matrix_cols < 3:
-            max_matrix_cols = 3
+
+        # Usa a largura mínima real permitida para decidir a quebra horizontal.
+        # Assim evitamos separar um setor inteiro em outro bloco quando ele ainda
+        # cabe na mesma página com células um pouco mais compactas.
+        available_matrix_w = max(pw - equip_w, stage_min_w * 3)
+        max_matrix_cols = max(3, int(available_matrix_w // stage_min_w))
 
         chunks = []
         current_chunk = []
