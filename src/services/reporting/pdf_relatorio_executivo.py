@@ -143,11 +143,9 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         return f"+{d}p.p." if d > 0 else f"{d}p.p."
 
     def real_pct_dept(dept: DeptSnapshot) -> int:
-        expected = int(getattr(dept, "_expected_steps", 0) or 0)
-        done = int(getattr(dept, "_done_steps", 0) or 0)
-        if expected > 0:
-            return max(0, min(100, int(round(done / expected * 100))))
-        return max(0, min(100, int(getattr(dept, "pct_geral", 0) or 0)))
+        # No executivo, o percentual exibido precisa ser exatamente o mesmo
+        # percentual já consolidado nas demais telas/PDFs do departamento.
+        return max(0, min(100, int(round(float(getattr(dept, "pct_geral", 0) or 0)))))
 
     def real_delta_dept(dept: DeptSnapshot) -> int:
         return int(real_pct_dept(dept)) - int(getattr(dept, "pct_anterior", 0) or 0)
@@ -222,18 +220,17 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         n_atencao = sum(int(getattr(d, 'n_parados', 0) or 0) for d in deptos if 7 < int(
             getattr(d, 'max_dias_parado', 0) or 0) <= 14)
 
-    total_done_exec = sum(int(getattr(d, "_done_steps", 0) or 0) for d in deptos)
-    total_expected_exec = sum(int(getattr(d, "_expected_steps", 0) or 0) for d in deptos)
-    pct_global_real = round(float(payload.pct_global or 0), 1)
-    if pct_global_real <= 0 and total_expected_exec > 0:
-        pct_global_real = round(max(0.0, min(100.0, total_done_exec / total_expected_exec * 100)), 1)
+    pct_global_real = max(0, min(100, int(round(float(payload.pct_global or 0)))))
 
-    trend_display = list(payload.trend_semanal or [])
+    trend_display = [
+        {"semana": int(item.get("semana") or 0), "pct": max(0, min(100, int(round(float(item.get("pct") or 0)))))}
+        for item in (payload.trend_semanal or [])
+        if int(item.get("semana") or 0) > 0
+    ]
     if not trend_display:
         trend_display = [{"semana": max(int(payload.semana_atual or 1), 1), "pct": pct_global_real}]
-    elif trend_display:
-        trend_display = sorted(trend_display, key=lambda r: int(r.get("semana", 0)))
-        trend_display[-1]["pct"] = round(float(pct_global_real), 1)
+    else:
+        trend_display[-1]["pct"] = pct_global_real
 
     heatmap_display = list(payload.heatmap_semanal or [])
     if not heatmap_display:
@@ -271,7 +268,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     c.setFillColor(WHITE)
     c.setFont('Helvetica-Bold', 9)
     c.drawRightString(w - 18 * mm, h - 31 * mm,
-                      f"{pct_global_real:.1f}% concluído")
+                      f"{pct_global_real}% concluído")
 
     y = h - 40 * mm
     y = mini_kpi_row(y, [
@@ -425,7 +422,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
     cx0, cy0 = 24 * mm, y - chart_h + 8 * mm
     cw, ch = w - 48 * mm, chart_h - 16 * mm
     trend = sorted(trend_display, key=lambda r: int(r.get('semana', 0)))[-4:]
-    values = [float(r.get('pct', 0) or 0) for r in trend]
+    values = [int(r.get('pct', 0) or 0) for r in trend]
     if values:
         vmin = min(values)
         vmax = max(values)
@@ -450,7 +447,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
         n = len(trend)
         pts = []
         for i, row in enumerate(trend):
-            pct_val = float(row.get('pct', 0) or 0)
+            pct_val = int(row.get('pct', 0) or 0)
             px = cx0 + (cw * i / max(n - 1, 1))
             norm = (pct_val - y_min) / max((y_max - y_min), 1)
             py = cy0 + ch * max(0, min(1, norm))
@@ -467,7 +464,7 @@ def build_executive_pdf(payload: RelatorioExecutivoPayload) -> bytes:
             c.drawCentredString(px, cy0 - 4.5 * mm, f"Sem.{sem}")
             c.setFillColor(BLUE)
             c.setFont('Helvetica-Bold', 6.5)
-            c.drawCentredString(px, py + 3.5 * mm, f"{pct:.1f}%")
+            c.drawCentredString(px, py + 3.5 * mm, f"{pct}%")
     else:
         c.setFillColor(MUTED)
         c.setFont('Helvetica', 8)
