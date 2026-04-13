@@ -1328,8 +1328,21 @@ def dispatch_relatorio_semanal(
 
                     payloads_por_departamento.append(p)
 
-                    # Usa exatamente o percentual já consolidado pelo mesmo caminho do dashboard.
-                    dept_pct_dashboard = int(p.pct_geral or 0)
+                    # O gráfico "Visão consolidada — Departamentos" do dashboard
+                    # agrega os grupos do departamento a partir do KPI consolidado
+                    # por grupo (kpi_df -> _groups_from_kpi_df -> _build_rank_df_from_departments).
+                    # Para o executivo bater exatamente com essa visão, priorizamos
+                    # aqui o mesmo consolidado por grupo e só usamos p.pct_geral como fallback.
+                    dept_snapshot_kpi = _calc_snapshot_from_kpi_engine(
+                        tenant_id=tenant_id,
+                        revisao_id=revisao.get("id", ""),
+                        grupo_ids=grp.grupo_ids,
+                    )
+                    dept_pct_dashboard = int(
+                        dept_snapshot_kpi.get("pct_geral")
+                        if dept_snapshot_kpi.get("expected_steps_total", 0)
+                        else (p.pct_geral or 0)
+                    )
                     dept_pct_anterior_dashboard = int(p.pct_semana_anterior or 0)
                     if p.evolucao and len(p.evolucao) >= 2:
                         try:
