@@ -185,7 +185,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
     try:
         serv_rows = _fetch_all(
             sb.table("servicos")
-            .select("id,nome,setor")
+            .select("id,nome,setor,ativo")
             .eq("tenant_id", tenant_id)
         )
     except Exception as exc:
@@ -204,6 +204,10 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
     eq_map = {str(r.get("id")): r for r in eq_rows if r.get("id") is not None}
     grupo_map = {str(r.get("id")): r for r in grupo_rows if r.get("id") is not None}
     serv_map = {str(r.get("id")): r for r in serv_rows if r.get("id") is not None}
+    active_service_ids = {
+        str(r.get("id")) for r in serv_rows
+        if r.get("id") is not None and bool(r.get("ativo", True))
+    }
 
     def _status_rank(status: str | None) -> int:
         s = str(status or "").strip().lower()
@@ -240,6 +244,8 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
     for t in task_rows:
         eid = str(t.get("equipamento_id")) if t.get("equipamento_id") is not None else None
         sid = str(t.get("servico_id")) if t.get("servico_id") is not None else None
+        if sid is not None and active_service_ids and sid not in active_service_ids:
+            continue
         eq = eq_map.get(eid, {})
         gid = eq.get("grupo_id")
         gid_s = str(gid) if gid is not None else None
@@ -272,6 +278,8 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
             continue
         gid_s = str(gid)
         sid_s = str(sid)
+        if active_service_ids and sid_s not in active_service_ids:
+            continue
         group_services.setdefault(gid_s, [])
         if sid_s not in group_services[gid_s]:
             group_services[gid_s].append(sid_s)
@@ -1327,34 +1335,22 @@ def _fragment_tendencia(trend: pd.DataFrame) -> None:
 
 
 def _groups_from_kpi_df(kdf: pd.DataFrame, gid_to_name: dict, gid_to_dept: dict) -> pd.DataFrame:
-    """Normaliza KPIs de grupo para o dashboard usando a mesma regra da Matriz/PDF.
-
-    Importante: não confiar na coluna ``pct`` já vinda da origem, pois ela pode
-    ter sido calculada por uma view/materialized view defasada. O dashboard deve
-    sempre derivar o percentual a partir de ``done_steps / expected_steps`` e
-    arredondar para inteiro sem casas decimais.
-    """
     if kdf is None or kdf.empty:
         return pd.DataFrame(columns=[
             "grupo", "grupo_id", "departamento_id", "pct_concluido", "done_steps", "expected_steps"
         ])
-
     tmp = kdf.copy()
     tmp["grupo_id"] = tmp["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None)
     tmp["departamento_id"] = tmp["grupo_id"].map(lambda v: gid_to_dept.get(str(v)) if v is not None else None)
     tmp["grupo"] = tmp["grupo_id"].map(lambda v: gid_to_name.get(str(v), str(v)) if v is not None else "—")
     tmp["done_steps"] = pd.to_numeric(tmp.get("done_steps", 0), errors="coerce").fillna(0).astype(int)
     tmp["expected_steps"] = pd.to_numeric(tmp.get("expected_steps", 0), errors="coerce").fillna(0).astype(int)
-
-    pct_series = (
+    tmp["pct_concluido"] = (
         (tmp["done_steps"] / tmp["expected_steps"].replace(0, pd.NA) * 100)
-        .round()
+        .round(0)
         .fillna(0)
         .clip(0, 100)
-        .astype(int)
     )
-    tmp["pct_concluido"] = pct_series
-
     return tmp[["grupo", "grupo_id", "departamento_id", "pct_concluido", "done_steps", "expected_steps"]].copy()
 
 
