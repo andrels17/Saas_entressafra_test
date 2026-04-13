@@ -1339,11 +1339,11 @@ def dispatch_relatorio_semanal(
 
                     payloads_por_departamento.append(p)
 
-                    dept_pct_dashboard = (
-                        max(0, min(100, round(int(p.done_steps or 0) / max(int(p.expected_steps or 0), 1) * 100)))
-                        if int(p.expected_steps or 0) > 0
-                        else int(p.pct_geral or 0)
-                    )
+                    # Executivo deve refletir exatamente o consolidado exibido
+                    # no dashboard/semanal para o departamento. Não reapurar por
+                    # done_steps/expected_steps aqui, pois isso gera divergência
+                    # com percentuais já consolidados como 6% vs 7%.
+                    dept_pct_dashboard = int(p.pct_geral or 0)
                     dept_pct_anterior_dashboard = int(p.pct_semana_anterior or 0)
                     if p.evolucao and len(p.evolucao) >= 2:
                         try:
