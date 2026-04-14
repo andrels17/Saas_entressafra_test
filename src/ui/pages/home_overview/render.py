@@ -466,46 +466,67 @@ def _fragment_home_live() -> None:
                     for d in deps if d.get("id")}
 
     # ── Header da revisão ───────────────────────────────────────────────────
+    greeting = _render_greeting()
+    titulo = rev.get("titulo", "Revisão")
+
+    # Linha 1: saudação + título da revisão + botão Atualizar
     h1_col, h2_col = st.columns([0.82, 0.18])
     with h1_col:
-        st.markdown(f"## {rev.get('titulo', 'Revisão')}")
-        st.caption(
-            f"Semana {week}/{semanas_total}"
-            + (f" • Início {rev_start.date()}" if rev_start else "")
+        st.markdown(
+            f'<div style="margin-bottom:2px">'
+            f'<span style="font-size:1.1rem;color:#8A9BAE;font-weight:400">{greeting}</span>'
+            f'&nbsp;&nbsp;'
+            f'<span style="font-size:1.55rem;font-weight:800;color:#F5F5F5">{titulo}</span>'
+            f'</div>',
+            unsafe_allow_html=True,
         )
-        status_badge(rev.get("status"))
-
-        # ── Badge de prazo ───────────────────────────────────────────────────
-        try:
-            from src.domain.kpi import calc_prazo
-            prazo = calc_prazo(
-                data_inicio=rev.get("data_inicio"),
-                data_fim=rev.get("data_fim"),
-            )
-            if prazo["status_prazo"] != "sem_prazo":
-                dr = prazo["dias_restantes"]
-                if dr < 0:
-                    prazo_label = f"⚠️ {abs(dr)} dias em atraso"
-                    prazo_color = "red"
-                elif dr == 0:
-                    prazo_label = "⚠️ Vence hoje"
-                    prazo_color = "orange"
-                elif dr <= 7:
-                    prazo_label = f"⏰ {dr} dias restantes"
-                    prazo_color = "orange"
-                else:
-                    prazo_label = f"📅 {dr} dias restantes"
-                    prazo_color = "green"
-                st.badge(prazo_label, color=prazo_color)
-        except Exception:
-            pass  # badge de prazo é opcional — não bloqueia renderização
 
     with h2_col:
-        if refresh_button("home_refresh_btn", help="Atualiza KPIs, rankings e snapshots visíveis."):
+        if refresh_button(
+            "home_refresh_btn",
+            help=f"Atualiza KPIs, rankings e snapshots visíveis.\nAtualização automática a cada {_HOME_AUTO_REFRESH_EVERY}.",
+        ):
             bump_data_version()
             st.session_state["home_pulse"] = True
             st.toast("Atualizado", icon=":material/refresh:")
             st.rerun()
+
+    # Linha 2: semana, status e prazo numa linha só
+    meta_parts = [f"Semana {week}/{semanas_total}"]
+    if rev_start:
+        meta_parts.append(f"Início {rev_start.date()}")
+    status_str = rev.get("status") or ""
+    if status_str:
+        meta_parts.append(status_str.capitalize())
+
+    prazo_label = None
+    prazo_color = "green"
+    try:
+        from src.domain.kpi import calc_prazo
+        prazo = calc_prazo(
+            data_inicio=rev.get("data_inicio"),
+            data_fim=rev.get("data_fim"),
+        )
+        if prazo["status_prazo"] != "sem_prazo":
+            dr = prazo["dias_restantes"]
+            if dr < 0:
+                prazo_label = f"⚠️ {abs(dr)} dias em atraso"
+                prazo_color = "red"
+            elif dr == 0:
+                prazo_label = "⚠️ Vence hoje"
+                prazo_color = "orange"
+            elif dr <= 7:
+                prazo_label = f"⏰ {dr} dias restantes"
+                prazo_color = "orange"
+            else:
+                prazo_label = f"📅 {dr} dias restantes"
+                prazo_color = "green"
+    except Exception:
+        pass  # badge de prazo é opcional — não bloqueia renderização
+
+    st.caption(" • ".join(meta_parts))
+    if prazo_label:
+        st.badge(prazo_label, color=prazo_color)
 
     # ── Carrega KPIs ────────────────────────────────────────────────────────
     _tok_kpi = st.session_state.get("sb_access_token", "") or ""
@@ -617,19 +638,17 @@ def _fragment_home_live() -> None:
         _fragment_tendencia(tenant_id, rev["id"], ver, week, scope)
 
 
-def _render_greeting() -> None:
-    """Saudação personalizada com nome do usuário e horário do dia."""
+def _render_greeting() -> str:
+    """Retorna a saudacao personalizada com nome do usuario e horario do dia."""
     from html import escape as _h
     from src.ui.core.sidebar_display import get_display_names
     from src.utils.supabase_helpers import current_tenant_id
-    from src.utils.timezone import now_brt  # <-- importação adicionada
- 
+    from src.utils.timezone import now_brt
+
     user_id = str(st.session_state.get("sb_user_id") or "")
     tenant_id = current_tenant_id() or ""
     _, user_name = get_display_names(tenant_id, user_id)
- 
-    # now_brt() retorna datetime aware em UTC-3 (Brasília / Fortaleza),
-    # independente do fuso do servidor onde o app está rodando.
+
     hour = now_brt().hour
     if hour < 12:
         saudacao = "Bom dia"
@@ -637,19 +656,10 @@ def _render_greeting() -> None:
         saudacao = "Boa tarde"
     else:
         saudacao = "Boa noite"
- 
-    primeiro_nome = (_h(user_name.split()[0]) if user_name and user_name != "Usuário"
+
+    primeiro_nome = (_h(user_name.split()[0]) if user_name and user_name != "Usuario"
                      else "")
-    greeting = f"{saudacao}, {primeiro_nome}!" if primeiro_nome else f"{saudacao}!"
- 
-    st.markdown(
-        f'<div style="margin-bottom:4px">'
-        f'<span style="font-size:1.55rem;font-weight:800;color:#F5F5F5">{greeting}</span>'
-        f'</div>'
-        f'<div style="font-size:0.82rem;color:#8A9BAE;margin-bottom:16px">'
-        f'Aqui está o resumo da revisão ativa.</div>',
-        unsafe_allow_html=True,
-    )
+    return f"{saudacao}, {primeiro_nome}!" if primeiro_nome else f"{saudacao}!"
 
 
 def render_home_overview() -> None:
@@ -661,6 +671,4 @@ def render_home_overview() -> None:
         bump_data_version()
         st.rerun()
 
-    _render_greeting()
-    st.caption(f"Atualização automática ativa a cada {_HOME_AUTO_REFRESH_EVERY}.")
     _fragment_home_live()
