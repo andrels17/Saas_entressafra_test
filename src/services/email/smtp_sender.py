@@ -130,7 +130,7 @@ def _load_config_from_secrets() -> SmtpConfig:
 def _build_mime(msg: EmailMessage, cfg: SmtpConfig) -> MIMEMultipart:
     """Constrói o objeto MIME a partir de um EmailMessage."""
     mime = MIMEMultipart("mixed")
-    mime["From"] = f"{cfg.from_name} <{cfg.user}>"
+    mime["From"] = cfg.from_name
     mime["To"] = ", ".join(msg.to)
     mime["Subject"] = msg.subject
     if msg.cc:
