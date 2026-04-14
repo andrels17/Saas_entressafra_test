@@ -1369,16 +1369,6 @@ def render_dashboard() -> None:
             st.toast("Atualizado", icon=":material/refresh:")
             st.rerun()
 
-    selection_summary(
-        "Contexto da revisão",
-        {
-            "Revisão": rev.get("titulo") or "Revisão ativa",
-            "Status": rev.get("status") or "-",
-            "Período": f"{rev.get('data_inicio') or '-'} -> {rev.get('data_fim') or '-'}",
-        },
-        caption="Os filtros abaixo refinam apenas a visualização atual do dashboard.",
-    )
-
     ver = str(st.session_state.get("data_version", "0"))
     token = st.session_state.get("sb_access_token", "")
     with st.spinner("", show_time=False):
@@ -1521,15 +1511,6 @@ def render_dashboard() -> None:
             effective_group_ids = grp_ids if grp_ids else None
         else:
             effective_group_ids = None
-
-    selection_summary(
-        "Filtro aplicado",
-        {
-            "Departamentos": len(dept_selected_ids) if dept_selected_ids else "Todos",
-            "Grupos": len(group_selected_ids) if group_selected_ids else "Todos",
-            "Ranking": f"Top {top_n}",
-        },
-    )
 
     base_filtered = apply_filters(base, effective_dept_ids, effective_group_ids)
     dashboard_groups_filtered = dashboard_groups.copy()
