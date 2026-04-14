@@ -1243,6 +1243,50 @@ def dispatch_relatorio_semanal(
 
         exec_recs = get_executive_recipients(tenant_id)
         if exec_recs:
+            # Mapa de percentuais por departamento alinhado à lógica do dashboard:
+            # usa KPIs de grupo calculados do RAW (prefer_mv=False) e agrega
+            # done_steps/expected_steps por departamento, exatamente como a UI.
+            exec_dept_pct_map: dict[str, int] = {}
+            try:
+                from src.utils.kpi_engine import get_group_kpis
+
+                gid_to_exec_dept: dict[str, str] = {}
+                for _g in all_dept_groups:
+                    dep_id_s = str(_g.departamento_id) if _g.departamento_id is not None else None
+                    for _gid in (_g.grupo_ids or []):
+                        if dep_id_s:
+                            gid_to_exec_dept[str(_gid)] = dep_id_s
+
+                kpi_exec_df = get_group_kpis(
+                    tenant_id,
+                    revisao_id,
+                    ver="email_exec_dashboard",
+                    prefer_mv=False,
+                )
+
+                if kpi_exec_df is not None and not kpi_exec_df.empty:
+                    _tmp = kpi_exec_df.copy()
+                    _tmp["grupo_id"] = _tmp["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None)
+                    _tmp["departamento_id"] = _tmp["grupo_id"].map(
+                        lambda v: gid_to_exec_dept.get(str(v)) if v is not None else None
+                    )
+                    _tmp = _tmp.dropna(subset=["departamento_id"]).copy()
+                    if not _tmp.empty:
+                        _tmp["done_steps"] = pd.to_numeric(_tmp.get("done_steps", 0), errors="coerce").fillna(0)
+                        _tmp["expected_steps"] = pd.to_numeric(_tmp.get("expected_steps", 0), errors="coerce").fillna(0)
+                        _agg = (
+                            _tmp.groupby("departamento_id", dropna=True)
+                            .agg(done_steps=("done_steps", "sum"), expected_steps=("expected_steps", "sum"))
+                            .reset_index()
+                        )
+                        _agg = _agg[_agg["expected_steps"] > 0].copy()
+                        exec_dept_pct_map = {
+                            str(row["departamento_id"]): int(round((float(row["done_steps"]) / max(float(row["expected_steps"]), 1)) * 100))
+                            for _, row in _agg.iterrows()
+                        }
+            except Exception as exec_kpi_exc:
+                _log(f"    ↳ Aviso: não foi possível alinhar executivo ao dashboard por KPI raw: {exec_kpi_exc}")
+
             # Constrói DeptSnapshot para cada grupo de departamento já
             # processado
             dept_snapshots: list[DeptSnapshot] = []
@@ -1328,20 +1372,11 @@ def dispatch_relatorio_semanal(
 
                     payloads_por_departamento.append(p)
 
-                    # O gráfico "Visão consolidada — Departamentos" do dashboard
-                    # agrega os grupos do departamento a partir do KPI consolidado
-                    # por grupo (kpi_df -> _groups_from_kpi_df -> _build_rank_df_from_departments).
-                    # Para o executivo bater exatamente com essa visão, priorizamos
-                    # aqui o mesmo consolidado por grupo e só usamos p.pct_geral como fallback.
-                    dept_snapshot_kpi = _calc_snapshot_from_kpi_engine(
-                        tenant_id=tenant_id,
-                        revisao_id=revisao.get("id", ""),
-                        grupo_ids=grp.grupo_ids,
-                    )
+                    # Percentual do departamento alinhado ao dashboard:
+                    # agrega KPIs de grupo calculados do raw por departamento.
+                    # Fallback: usa o payload semanal já calculado.
                     dept_pct_dashboard = int(
-                        dept_snapshot_kpi.get("pct_geral")
-                        if dept_snapshot_kpi.get("expected_steps_total", 0)
-                        else (p.pct_geral or 0)
+                        exec_dept_pct_map.get(str(grp.departamento_id), int(p.pct_geral or 0))
                     )
                     dept_pct_anterior_dashboard = int(p.pct_semana_anterior or 0)
                     if p.evolucao and len(p.evolucao) >= 2:
