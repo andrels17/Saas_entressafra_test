@@ -17,7 +17,7 @@ from datetime import date
 from src.utils.timezone import now_brt as _now_brt
 
 from src.ui.components.filters import select_equipamento, select_grupo, select_revisao
-from src.ui.components.feedback import notice_card, selection_summary
+from src.ui.components.feedback import notice_card
 from src.ui.components.actions import download_action, primary_action_button
 from src.ui.components.forms import validation_summary
 from src.ui.core.styles import page_header as _ph
@@ -606,17 +606,6 @@ def render_apontamento() -> None:
         grupo_nome=st.session_state.get("_apt_grupo_nome") or "-",
         equipamento_id=equipamento_id,
         eq_label=st.session_state.get("_apt_eq_label") or "-",
-    )
-
-    selection_summary(
-        "Contexto do apontamento",
-        {
-            "Revisão": st.session_state.get("_apt_revisao_titulo") or "-",
-            "Grupo": st.session_state.get("_apt_grupo_nome") or "-",
-            "Equipamento": st.session_state.get("_apt_eq_label") or "-",
-            "Semana sugerida": st.session_state.get("_apt_semana_default") or "-",
-        },
-        caption="As alterações abaixo serão salvas apenas para o equipamento selecionado.",
     )
 
     st.divider()
