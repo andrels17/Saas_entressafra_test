@@ -334,7 +334,7 @@ def _calc_snapshot_from_kpi_engine(
     """
     try:
         from src.utils.kpi_engine import get_group_kpis
-        kdf = get_group_kpis(tenant_id, revisao_id, "0", prefer_mv=True)
+        kdf = get_group_kpis(tenant_id, revisao_id, "0", prefer_mv=False)
         if kdf is None or getattr(kdf, "empty", True):
             return {}
 
@@ -636,53 +636,14 @@ def _build_payload(
         "pct": 0.0, "total": 0, "concl": 0, "pend": 0, "andamento": 0, "trav": 0, "na": 0
     }
 
-    # Snapshot consolidado do dashboard de departamentos:
-    # usa KPIs de grupo calculados do RAW (prefer_mv=False) para o mesmo
-    # conjunto de grupos do departamento. Isso amarra o "Progresso geral"
-    # do relatório semanal à mesma origem da visão consolidada do dashboard.
-    snapshot_kpi = {}
-    try:
-        from src.utils.kpi_engine import get_group_kpis
-
-        kdf = get_group_kpis(
-            tenant_id,
-            revisao.get("id", ""),
-            ver="weekly_pdf_dashboard",
-            prefer_mv=False,
-        )
-        if kdf is not None and not getattr(kdf, "empty", True):
-            gids = {str(g) for g in (grupo_ids or []) if g}
-            _tmp = kdf.copy()
-            if "grupo_id" in _tmp.columns:
-                _tmp["grupo_id"] = _tmp["grupo_id"].astype(str)
-                _tmp = _tmp[_tmp["grupo_id"].isin(gids)].copy()
-                if not _tmp.empty:
-                    for col in ("pct", "done_steps", "expected_steps", "eq_count"):
-                        if col in _tmp.columns:
-                            _tmp[col] = pd.to_numeric(_tmp[col], errors="coerce").fillna(0)
-                        else:
-                            _tmp[col] = 0
-                    _done = int(_tmp["done_steps"].sum())
-                    _expected = int(_tmp["expected_steps"].sum())
-                    _pct = max(0, min(100, round(_done / max(_expected, 1) * 100))) if _expected > 0 else 0
-                    _eq = int(_tmp["eq_count"].sum()) if "eq_count" in _tmp.columns else 0
-                    _group_pct_map = {
-                        str(row["grupo_id"]): int(round(float(row.get("pct", 0) or 0)))
-                        for _, row in _tmp.iterrows()
-                    }
-                    snapshot_kpi = {
-                        "pct_geral": _pct,
-                        "done_steps_total": _done,
-                        "expected_steps_total": _expected,
-                        "n_equipamentos": _eq,
-                        "group_pct_map": _group_pct_map,
-                    }
-    except Exception:
-        snapshot_kpi = _calc_snapshot_from_kpi_engine(
-            tenant_id=tenant_id,
-            revisao_id=revisao.get("id", ""),
-            grupo_ids=grupo_ids,
-        )
+    # Snapshot consolidado do kpi_engine para fallback.
+    # Prioridade do PDF: usar o MESMO cálculo do dashboard sobre a base
+    # normalizada; só cair no kpi_engine quando a base vier vazia/zerada.
+    snapshot_kpi = _calc_snapshot_from_kpi_engine(
+        tenant_id=tenant_id,
+        revisao_id=revisao.get("id", ""),
+        grupo_ids=grupo_ids,
+    )
 
     dashboard_group_pct_map: dict[str, int] = {}
     if base is not None and not base.empty:
@@ -903,9 +864,9 @@ def _build_payload(
                 "flag_alerta": alerta_eq,
             })
 
-    # Topo do relatório semanal: prioriza a mesma leitura consolidada usada
-    # pela visão de departamentos do dashboard (snapshot_kpi em RAW).
-    # Fallback: usa a base normalizada local já calculada para o relatório.
+    # Topo do relatório semanal:
+    # prioriza o snapshot consolidado por grupo em RAW para alinhar com o dashboard,
+    # mas mantém a base local como fallback seguro para não quebrar a geração do PDF.
     dashboard_pct = int(round(float(overall.get("pct") or 0)))
     dashboard_n_equip = int(overall.get("total") or len(all_equipamentos))
 
@@ -1289,6 +1250,50 @@ def dispatch_relatorio_semanal(
 
         exec_recs = get_executive_recipients(tenant_id)
         if exec_recs:
+            # Mapa de percentuais por departamento alinhado à lógica do dashboard:
+            # usa KPIs de grupo calculados do RAW (prefer_mv=False) e agrega
+            # done_steps/expected_steps por departamento, exatamente como a UI.
+            exec_dept_pct_map: dict[str, int] = {}
+            try:
+                from src.utils.kpi_engine import get_group_kpis
+
+                gid_to_exec_dept: dict[str, str] = {}
+                for _g in all_dept_groups:
+                    dep_id_s = str(_g.departamento_id) if _g.departamento_id is not None else None
+                    for _gid in (_g.grupo_ids or []):
+                        if dep_id_s:
+                            gid_to_exec_dept[str(_gid)] = dep_id_s
+
+                kpi_exec_df = get_group_kpis(
+                    tenant_id,
+                    revisao_id,
+                    ver="email_exec_dashboard",
+                    prefer_mv=False,
+                )
+
+                if kpi_exec_df is not None and not kpi_exec_df.empty:
+                    _tmp = kpi_exec_df.copy()
+                    _tmp["grupo_id"] = _tmp["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None)
+                    _tmp["departamento_id"] = _tmp["grupo_id"].map(
+                        lambda v: gid_to_exec_dept.get(str(v)) if v is not None else None
+                    )
+                    _tmp = _tmp.dropna(subset=["departamento_id"]).copy()
+                    if not _tmp.empty:
+                        _tmp["done_steps"] = pd.to_numeric(_tmp.get("done_steps", 0), errors="coerce").fillna(0)
+                        _tmp["expected_steps"] = pd.to_numeric(_tmp.get("expected_steps", 0), errors="coerce").fillna(0)
+                        _agg = (
+                            _tmp.groupby("departamento_id", dropna=True)
+                            .agg(done_steps=("done_steps", "sum"), expected_steps=("expected_steps", "sum"))
+                            .reset_index()
+                        )
+                        _agg = _agg[_agg["expected_steps"] > 0].copy()
+                        exec_dept_pct_map = {
+                            str(row["departamento_id"]): int(round((float(row["done_steps"]) / max(float(row["expected_steps"]), 1)) * 100))
+                            for _, row in _agg.iterrows()
+                        }
+            except Exception as exec_kpi_exc:
+                _log(f"    ↳ Aviso: não foi possível alinhar executivo ao dashboard por KPI raw: {exec_kpi_exc}")
+
             # Constrói DeptSnapshot para cada grupo de departamento já
             # processado
             dept_snapshots: list[DeptSnapshot] = []
@@ -1374,8 +1379,12 @@ def dispatch_relatorio_semanal(
 
                     payloads_por_departamento.append(p)
 
-                    # Usa exatamente o percentual já consolidado pelo mesmo caminho do dashboard.
-                    dept_pct_dashboard = int(p.pct_geral or 0)
+                    # Percentual do departamento alinhado ao dashboard:
+                    # agrega KPIs de grupo calculados do raw por departamento.
+                    # Fallback: usa o payload semanal já calculado.
+                    dept_pct_dashboard = int(
+                        exec_dept_pct_map.get(str(grp.departamento_id), int(p.pct_geral or 0))
+                    )
                     dept_pct_anterior_dashboard = int(p.pct_semana_anterior or 0)
                     if p.evolucao and len(p.evolucao) >= 2:
                         try:
