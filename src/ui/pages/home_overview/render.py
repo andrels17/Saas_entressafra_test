@@ -21,7 +21,6 @@ from src.auth.permissions import can_view_all_data
 from src.ui.core.plotly_theme import apply_dark_theme
 from src.domain.kpi import calc_global_kpis, calc_dept_kpis
 from src.ui.core.styles import page_header
-from src.ui.components.feedback import selection_summary
 from src.ui.components.actions import refresh_button, primary_action_button
 from src.ui.components.tables import data_table
 from src.ui.components.states import empty_message, loading_block
@@ -507,18 +506,6 @@ def _fragment_home_live() -> None:
             st.session_state["home_pulse"] = True
             st.toast("Atualizado", icon=":material/refresh:")
             st.rerun()
-
-    selection_summary(
-        "Contexto da visão",
-        {
-            "Revisão": rev.get("titulo") or "-",
-            "Status": rev.get("status") or "-",
-            "Semana": f"{week}/{semanas_total}",
-            "Grupos": len(grupos),
-            "Departamentos": len(deps),
-        },
-        caption="A Home consolida a mesma revisão ativa usada nas páginas operacionais.",
-    )
 
     # ── Carrega KPIs ────────────────────────────────────────────────────────
     _tok_kpi = st.session_state.get("sb_access_token", "") or ""
