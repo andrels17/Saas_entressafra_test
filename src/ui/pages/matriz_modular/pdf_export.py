@@ -148,7 +148,7 @@ def _merge_sector_tables(sector_tables):
     return base.fillna(""), sector_groups
 
 
-def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_revisao=None, tarefas_servico_df=None, revisao_id=None) -> bytes:
+def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_revisao=None, tarefas_servico_df=None, revisao_id=None, semana_impressa=None) -> bytes:
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
     from reportlab.lib.pagesizes import A4, landscape
@@ -734,11 +734,19 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
 
     semana_impressao = None
 
+    # prioridade 0: semana explícita de impressão (ex.: semana atual da revisão + 1)
+    if semana_impressa is not None and str(semana_impressa).strip() != "":
+        try:
+            semana_impressao = int(pd.to_numeric([semana_impressa], errors="coerce")[0])
+        except Exception:
+            semana_impressao = None
+
     # prioridade 1: tabela tarefa_servicos da revisão atual
-    try:
-        semana_impressao = _extract_semana_from_tarefas_servico(tarefas_servico_df, revisao_id)
-    except Exception:
-        semana_impressao = None
+    if not semana_impressao:
+        try:
+            semana_impressao = _extract_semana_from_tarefas_servico(tarefas_servico_df, revisao_id)
+        except Exception:
+            semana_impressao = None
 
     # prioridade 2: semana explícita vinda do chamador
     if not semana_impressao:
