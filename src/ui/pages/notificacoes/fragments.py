@@ -617,10 +617,15 @@ def fragment_zip_impressao(tenant_id: str, revisao_id: str, revisao: dict, seman
         st.warning("Marque pelo menos um grupo para gerar os PDFs.")
         return
 
-    selection_signature = tuple(sorted(
-        (str(item.get("gestor_id") or ""), str(item.get("grupo_id") or ""))
-        for item in selected
-    ))
+    selection_signature = (
+        tuple(sorted(
+            (str(item.get("gestor_id") or ""), str(item.get("grupo_id") or ""))
+            for item in selected
+        )),
+        str(data_version),
+        int(semana_atual or 0),
+        str(revisao_id),
+    )
     docs_sig_key = f"ntf_print_docs_sig_{revisao_id}"
     docs_state_key = f"ntf_print_docs_{revisao_id}"
     if st.session_state.get(docs_sig_key) != selection_signature:
