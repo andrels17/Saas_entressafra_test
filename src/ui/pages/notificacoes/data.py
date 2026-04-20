@@ -421,6 +421,7 @@ def _build_group_pdf_same_as_matriz(
     grupo_id: str,
     grupo_nome: str,
     revisao: dict,
+    semana_impressao: int | None = None,
     token: str = "",
 ) -> bytes | None:
     """Gera exatamente o mesmo PDF da aba Matriz -> Exportações para um grupo."""
@@ -482,7 +483,17 @@ def _build_group_pdf_same_as_matriz(
         semana_revisao=semana_revisao,
         tarefas_servico_df=tarefas_df.copy() if isinstance(tarefas_df, pd.DataFrame) else None,
         revisao_id=revisao_id,
+        semana_impressa=semana_impressao,
     )
+
+
+def _resolve_semana_impressao(semana_atual: int | None) -> int | None:
+    """Retorna a semana a ser exibida/impressa no checklist."""
+    try:
+        semana = int(semana_atual or 0)
+    except Exception:
+        return None
+    return semana + 1 if semana > 0 else None
 
 
 def build_manager_print_documents(
@@ -496,6 +507,7 @@ def build_manager_print_documents(
     """Gera os PDFs individuais para download/impressão por grupo selecionado."""
     docs: list[dict] = []
     seen: set[tuple[str, str]] = set()
+    semana_impressao = _resolve_semana_impressao(semana_atual)
 
     for item in selections or []:
         gid = str(item.get("grupo_id") or "").strip()
@@ -515,13 +527,14 @@ def build_manager_print_documents(
             grupo_id=gid,
             grupo_nome=grupo_nome,
             revisao=revisao,
+            semana_impressao=semana_impressao,
             token=_token,
         )
         if not pdf_bytes:
             continue
 
         fname = (
-            f"Semana_{int(semana_atual or 1):02d}__"
+            f"Semana_{int(semana_impressao or semana_atual or 1):02d}__"
             f"{_slugify(gestor_nome)}__"
             f"{_slugify(grupo_nome)}.pdf"
         )
