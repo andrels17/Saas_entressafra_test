@@ -415,6 +415,72 @@ def _extract_semana_revisao(*dfs):
     return None
 
 
+
+
+def _load_payload_fresh_for_print(tid: str, gid: str, rid: str, lim: int, token: str = "") -> dict:
+    """Carrega payload da matriz sem reaproveitar cache, para impressão.
+
+    Evita reutilizar uma lista antiga de equipamentos no fluxo de impressão
+    quando a composição do grupo mudou recentemente.
+    """
+    try:
+        from src.ui.pages.matriz_modular.data import _fetch_template, _sb_from_token
+    except Exception:
+        return {"eqs": [], "s2s": {}, "all_s": [], "tarefas": []}
+
+    _sb = _sb_from_token(token)
+    try:
+        _eqs = (
+            _sb.table("equipamentos")
+            .select("id,frota,modelo")
+            .eq("tenant_id", tid)
+            .eq("grupo_id", gid)
+            .eq("ativo", True)
+            .order("frota")
+            .limit(int(lim))
+            .execute()
+            .data
+        ) or []
+    except Exception:
+        _eqs = []
+
+    if not _eqs:
+        return {"eqs": [], "s2s": {}, "all_s": [], "tarefas": []}
+
+    try:
+        from src.utils.eq_oculto import get_ocultos
+        _ocultos = get_ocultos(_sb, tid, rid)
+        if _ocultos:
+            _eqs = [e for e in _eqs if e.get("id") not in _ocultos]
+    except Exception:
+        pass
+
+    if not _eqs:
+        return {"eqs": [], "s2s": {}, "all_s": [], "tarefas": []}
+
+    _s2s, _all_s = _fetch_template(_sb, tid, gid)
+    if not _all_s:
+        return {"eqs": _eqs, "s2s": {}, "all_s": [], "tarefas": []}
+
+    try:
+        _tarefas = (
+            _sb.table("tarefas_servico")
+            .select(
+                "id,equipamento_id,servico_id,revisao_id,status,semana,observacao,"
+                "etapa_d,etapa_r,etapa_m,dt_inicio,dt_etapa_d,dt_etapa_r,dt_etapa_m,updated_at"
+            )
+            .eq("tenant_id", tid)
+            .eq("revisao_id", rid)
+            .in_("equipamento_id", [e["id"] for e in _eqs])
+            .execute()
+            .data
+        ) or []
+    except Exception:
+        _tarefas = []
+
+    return {"eqs": _eqs, "s2s": _s2s, "all_s": _all_s, "tarefas": _tarefas}
+
+
 def _build_group_pdf_same_as_matriz(
     tid: str,
     revisao_id: str,
@@ -437,13 +503,12 @@ def _build_group_pdf_same_as_matriz(
     except Exception:
         return None
 
-    payload = _load_payload(
-        tid,
-        grupo_id,
-        revisao_id,
-        10000,
-        st.session_state.get("data_version", "0"),
-        token,
+    payload = _load_payload_fresh_for_print(
+        tid=tid,
+        gid=grupo_id,
+        rid=revisao_id,
+        lim=10000,
+        token=token,
     ) or {}
 
     eqs = payload.get("eqs") or []
@@ -488,7 +553,6 @@ def _build_group_pdf_same_as_matriz(
 
 
 def _resolve_semana_impressao(semana_atual: int | None) -> int | None:
-    """Retorna a semana a ser exibida/impressa no checklist."""
     try:
         semana = int(semana_atual or 0)
     except Exception:

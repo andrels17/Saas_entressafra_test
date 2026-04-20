@@ -654,7 +654,7 @@ def fragment_zip_impressao(tenant_id: str, revisao_id: str, revisao: dict, seman
             st.download_button(
                 "⬇️ Baixar ZIP para impressão",
                 data=zip_bytes,
-                file_name=f"matrizes_impressao_semana_{int(semana_atual or 1):02d}.zip",
+                file_name=f"matrizes_impressao_semana_{int((semana_atual or 0) + 1 if semana_atual else 1):02d}.zip",
                 mime="application/zip",
                 use_container_width=True,
                 type="primary",
