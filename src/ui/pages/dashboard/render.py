@@ -1266,7 +1266,7 @@ def _fragment_tendencia(trend: pd.DataFrame) -> None:
         color_discrete_map={"Real": "#12B76A", "Ideal": MUTED},
         line_dash_map={"Real": "solid", "Ideal": "dash"},
     )
-    fig.update_traces(hovertemplate="%{x}<br>%{fullData.name}: %{y:.1f}%<extra></extra>")
+    fig.update_traces(hovertemplate="%{x}<br>%{fullData.name}: %{y:.0f}%<extra></extra>")
     apply_dark_theme(fig, height=360, xaxis_title="Semana", yaxis_title="% Concluído")
     fig.update_layout(
         margin=dict(l=10, r=10, t=48, b=10),
