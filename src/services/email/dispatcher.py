@@ -867,17 +867,17 @@ def _build_payload(
     # Topo do relatório semanal:
     # prioriza o snapshot consolidado por grupo em RAW para alinhar com o dashboard,
     # mas mantém a base local como fallback seguro para não quebrar a geração do PDF.
-    dashboard_pct = int(round(float(overall.get("pct") or 0)))
+    dashboard_pct = float(round(float(overall.get("pct") or 0), 2))
     dashboard_n_equip = int(overall.get("total") or len(all_equipamentos))
 
-    snapshot_pct = int(snapshot_kpi.get("pct_geral") or 0)
+    snapshot_pct = float(round(float(snapshot_kpi.get("pct_geral") or 0), 2))
     snapshot_n_equip = int(snapshot_kpi.get("n_equipamentos") or 0)
     snapshot_done = int(snapshot_kpi.get("done_steps_total") or 0)
     snapshot_expected = int(snapshot_kpi.get("expected_steps_total") or 0)
 
     use_snapshot = bool(snapshot_expected > 0)
 
-    pct_geral_snapshot = snapshot_pct if use_snapshot else dashboard_pct
+    pct_geral_snapshot = float(snapshot_pct if use_snapshot else dashboard_pct)
     n_equipamentos = snapshot_n_equip if use_snapshot and snapshot_n_equip > 0 else dashboard_n_equip
     done_steps_total = snapshot_done if use_snapshot else int(done_steps_total_dash)
     expected_steps_total = snapshot_expected if use_snapshot else int(expected_steps_total_dash)
@@ -889,8 +889,8 @@ def _build_payload(
     n_sem_inicio = n_sem_inicio_local
 
     evolucao: list[SemanaSnapshot] = []
-    pct_semana_anterior = 0
-    pct_semana_atual = pct_geral_snapshot
+    pct_semana_anterior = 0.0
+    pct_semana_atual = float(pct_geral_snapshot)
 
     if expected_steps_total > 0 or pct_geral_snapshot > 0:
         # Tendência semanal FINAL:
@@ -906,15 +906,15 @@ def _build_payload(
             cumulative_done += done_sem
 
             pct_sem = (
-                max(0, min(100, round(cumulative_done / max(expected_steps_total, 1) * 100)))
-                if expected_steps_total > 0 else 0
+                max(0.0, min(100.0, round(cumulative_done / max(expected_steps_total, 1) * 100, 2)))
+                if expected_steps_total > 0 else 0.0
             )
 
             evolucao.append(SemanaSnapshot(
                 semana=sem,
                 concluidos=cumulative_done,
                 total=expected_steps_total,
-                pct=pct_sem,
+                pct=int(round(pct_sem)),
             ))
 
         if not evolucao:
@@ -931,7 +931,7 @@ def _build_payload(
                 semana=evolucao[-1].semana,
                 concluidos=evolucao[-1].concluidos,
                 total=evolucao[-1].total,
-                pct=int(evolucao[-2].pct or 0),
+                pct=int(round(float(evolucao[-2].pct or 0))),
             )
 
         # O último ponto deve bater exatamente com o KPI do topo.
@@ -940,11 +940,11 @@ def _build_payload(
                 semana=evolucao[-1].semana,
                 concluidos=evolucao[-1].concluidos,
                 total=evolucao[-1].total,
-                pct=int(pct_geral_snapshot or evolucao[-1].pct or 0),
+                pct=int(round(float(pct_geral_snapshot or evolucao[-1].pct or 0))),
             )
 
-        pct_semana_atual = int(evolucao[-1].pct or 0)
-        pct_semana_anterior = int(evolucao[-2].pct or 0) if len(evolucao) >= 2 else 0
+        pct_semana_atual = float(int(round(float(evolucao[-1].pct or 0))))
+        pct_semana_anterior = float(int(round(float(evolucao[-2].pct or 0)))) if len(evolucao) >= 2 else 0.0
 
     parados_detalhe = sorted(
         parados_detalhe,
@@ -968,15 +968,15 @@ def _build_payload(
         semana_atual=semana_atual,
         semanas_total=semanas_total,
         data_inicio=data_inicio,
-        pct_geral=pct_geral_snapshot,
+        pct_geral=int(round(pct_geral_snapshot)),
         n_equipamentos=n_equipamentos,
         n_concluidos=n_concluidos,
         n_alertas_total=n_alertas_total,
         done_steps=done_steps_total,
         expected_steps=expected_steps_total,
         evolucao=evolucao,
-        pct_semana_anterior=int(pct_semana_anterior or 0),
-        pct_semana_atual=int(pct_semana_atual or 0),
+        pct_semana_anterior=int(round(pct_semana_anterior or 0)),
+        pct_semana_atual=int(round(pct_semana_atual or 0)),
         criticos=criticos,
         todos_equipamentos=all_equipamentos,
         n_travados=n_travados,
@@ -1175,13 +1175,7 @@ def dispatch_relatorio_semanal(
         n_par_b   = sum(getattr(p, "n_parados",     0) for p in payloads_bundle)
         n_risc_b  = sum(getattr(p, "n_risco_prazo", 0) for p in payloads_bundle)
         n_equip_b = sum(getattr(p, "n_equipamentos", 0) for p in payloads_bundle)
-        done_steps_bundle = sum(int(getattr(p, "done_steps", 0) or 0) for p in payloads_bundle)
-        expected_steps_bundle = sum(int(getattr(p, "expected_steps", 0) or 0) for p in payloads_bundle)
-        pct_medio = (
-            max(0, min(100, round(done_steps_bundle / max(expected_steps_bundle, 1) * 100)))
-            if expected_steps_bundle > 0
-            else round(sum(getattr(p, "pct_geral", 0) for p in payloads_bundle) / len(payloads_bundle))
-        )
+        pct_medio = round(sum(getattr(p, "pct_geral", 0) for p in payloads_bundle) / len(payloads_bundle))
         dept_label = dep_nomes_ef[0] if len(dep_nomes_ef) == 1 else ", ".join(dep_nomes_ef)
         top_par_b  = sorted(
             [item for p in payloads_bundle for item in (p.parados_detalhe or [])],
@@ -1459,16 +1453,11 @@ def dispatch_relatorio_semanal(
                         f"    ↳ Aviso: erro ao montar snapshot de {grp.departamento_nome}: {e_g}")
 
             if dept_snapshots:
-                # Consolidado executivo ponderado pelo total esperado de etapas.
-                # Isso mantém o e-mail executivo alinhado ao KPI real do dashboard
-                # e evita distorções de média simples entre departamentos com pesos diferentes.
-                done_steps_exec = sum(int(getattr(d, "_done_steps", 0) or 0) for d in dept_snapshots)
-                expected_steps_exec = sum(int(getattr(d, "_expected_steps", 0) or 0) for d in dept_snapshots)
-                pct_global = (
-                    max(0, min(100, round(done_steps_exec / max(expected_steps_exec, 1) * 100)))
-                    if expected_steps_exec > 0
-                    else round(sum(int(d.pct_geral or 0) for d in dept_snapshots) / max(len(dept_snapshots), 1))
-                )
+                # Fonte única do executivo: mesma leitura consolidada exibida no dashboard
+                # por departamento. O progresso global executivo deve bater com o
+                # "progresso médio" das demais telas, então usamos a média simples
+                # dos percentuais departamentais já consolidados.
+                pct_global = round(sum(int(d.pct_geral or 0) for d in dept_snapshots) / max(len(dept_snapshots), 1))
                 n_equip_total = sum(d.n_equipamentos for d in dept_snapshots)
                 n_equip_concl = sum(d.n_concluidos for d in dept_snapshots)
                 # Também no executivo o total representa equipamentos únicos
@@ -1483,26 +1472,15 @@ def dispatch_relatorio_semanal(
                     if int(getattr(w, "semana", 0) or 0) > 0
                 })
                 for sem in semanas_exec:
-                    done_sem = 0
-                    total_sem = 0
-                    for p in payloads_por_departamento:
-                        expected_dep = int(getattr(p, "expected_steps", 0) or 0)
-                        if expected_dep <= 0:
-                            continue
-                        wk = next(
-                            (w for w in (p.evolucao or []) if int(getattr(w, "semana", 0) or 0) == sem),
-                            None,
-                        )
-                        if wk is None:
-                            continue
-                        done_sem += int(getattr(wk, "concluidos", 0) or 0)
-                        total_sem += expected_dep
-                    if total_sem <= 0:
+                    semana_pcts = [
+                        int(getattr(w, "pct", 0) or 0)
+                        for p in payloads_por_departamento
+                        for w in (p.evolucao or [])
+                        if int(getattr(w, "semana", 0) or 0) == sem
+                    ]
+                    if not semana_pcts:
                         continue
-                    trend_semanal.append({
-                        "semana": sem,
-                        "pct": max(0, min(100, round(done_sem / max(total_sem, 1) * 100))),
-                    })
+                    trend_semanal.append({"semana": sem, "pct": round(sum(semana_pcts) / len(semana_pcts))})
                 if trend_semanal:
                     trend_semanal[-1]["pct"] = int(pct_global or trend_semanal[-1]["pct"] or 0)
                 trend_semanal = trend_semanal[-4:]
