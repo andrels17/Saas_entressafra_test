@@ -673,15 +673,22 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
         info = Table(
             [
                 [
-                    Paragraph("<b>Departamento:</b> _________________________________________________", body_style),
+                    Paragraph("<b>Semana impressa:</b> " + (f"Semana {semana_impressao}" if semana_impressao else "—"), body_style),
+                    Paragraph("<b>Data de emissão:</b> " + str(emitido or "—"), body_style),
+                    Paragraph("<b>Revisão:</b> " + str(titulo or "—"), body_style),
+                ],
+                [
+                    Paragraph("<b>Grupo:</b> " + str(grupo_nome or "—"), body_style),
+                    Paragraph("<b>Departamento:</b> __________________________________", body_style),
                     Paragraph("<b>Data:</b> ______/______/________", body_style),
                 ],
                 [
                     Paragraph("<b>Responsável:</b> _________________________________________________", body_style),
                     Paragraph("<b>Turno:</b> ____________________________________", body_style),
+                    Paragraph("", body_style),
                 ],
             ],
-            colWidths=[pw * 0.62, pw * 0.38],
+            colWidths=[pw * 0.34, pw * 0.33, pw * 0.33],
         )
         info.hAlign = "LEFT"
         info.setStyle(TableStyle([
@@ -973,17 +980,10 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
     checklist_info = Table(
         [
             [
-                Paragraph("<b>Semana impressa:</b> " + (f"Semana {semana_impressao}" if semana_impressao else "—"), body_style),
-                Paragraph("<b>Data de emissão:</b> " + str(emitido or "—"), body_style),
-                Paragraph("<b>Revisão:</b> " + str(titulo or "—"), body_style),
-            ],
-            [
-                Paragraph("<b>Grupo:</b> " + str(grupo_nome or "—"), body_style),
                 Paragraph("<b>Status geral:</b> (   ) OK   (   ) Pendente   (   ) Crítico", body_style),
-                Paragraph("<b>Responsável:</b> ________________________________________", body_style),
             ],
         ],
-        colWidths=[pw * 0.26, pw * 0.38, pw * 0.36],
+        colWidths=[pw],
     )
     checklist_info.hAlign = "LEFT"
     checklist_info.setStyle(TableStyle([
