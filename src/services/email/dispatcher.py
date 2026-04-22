@@ -1175,7 +1175,13 @@ def dispatch_relatorio_semanal(
         n_par_b   = sum(getattr(p, "n_parados",     0) for p in payloads_bundle)
         n_risc_b  = sum(getattr(p, "n_risco_prazo", 0) for p in payloads_bundle)
         n_equip_b = sum(getattr(p, "n_equipamentos", 0) for p in payloads_bundle)
-        pct_medio = round(sum(getattr(p, "pct_geral", 0) for p in payloads_bundle) / len(payloads_bundle))
+        done_steps_bundle = sum(int(getattr(p, "done_steps", 0) or 0) for p in payloads_bundle)
+        expected_steps_bundle = sum(int(getattr(p, "expected_steps", 0) or 0) for p in payloads_bundle)
+        pct_medio = (
+            max(0, min(100, round(done_steps_bundle / max(expected_steps_bundle, 1) * 100)))
+            if expected_steps_bundle > 0
+            else round(sum(getattr(p, "pct_geral", 0) for p in payloads_bundle) / len(payloads_bundle))
+        )
         dept_label = dep_nomes_ef[0] if len(dep_nomes_ef) == 1 else ", ".join(dep_nomes_ef)
         top_par_b  = sorted(
             [item for p in payloads_bundle for item in (p.parados_detalhe or [])],
@@ -1453,11 +1459,16 @@ def dispatch_relatorio_semanal(
                         f"    ↳ Aviso: erro ao montar snapshot de {grp.departamento_nome}: {e_g}")
 
             if dept_snapshots:
-                # Fonte única do executivo: mesma leitura consolidada exibida no dashboard
-                # por departamento. O progresso global executivo deve bater com o
-                # "progresso médio" das demais telas, então usamos a média simples
-                # dos percentuais departamentais já consolidados.
-                pct_global = round(sum(int(d.pct_geral or 0) for d in dept_snapshots) / max(len(dept_snapshots), 1))
+                # Consolidado executivo ponderado pelo total esperado de etapas.
+                # Isso mantém o e-mail executivo alinhado ao KPI real do dashboard
+                # e evita distorções de média simples entre departamentos com pesos diferentes.
+                done_steps_exec = sum(int(getattr(d, "_done_steps", 0) or 0) for d in dept_snapshots)
+                expected_steps_exec = sum(int(getattr(d, "_expected_steps", 0) or 0) for d in dept_snapshots)
+                pct_global = (
+                    max(0, min(100, round(done_steps_exec / max(expected_steps_exec, 1) * 100)))
+                    if expected_steps_exec > 0
+                    else round(sum(int(d.pct_geral or 0) for d in dept_snapshots) / max(len(dept_snapshots), 1))
+                )
                 n_equip_total = sum(d.n_equipamentos for d in dept_snapshots)
                 n_equip_concl = sum(d.n_concluidos for d in dept_snapshots)
                 # Também no executivo o total representa equipamentos únicos
@@ -1472,15 +1483,26 @@ def dispatch_relatorio_semanal(
                     if int(getattr(w, "semana", 0) or 0) > 0
                 })
                 for sem in semanas_exec:
-                    semana_pcts = [
-                        int(getattr(w, "pct", 0) or 0)
-                        for p in payloads_por_departamento
-                        for w in (p.evolucao or [])
-                        if int(getattr(w, "semana", 0) or 0) == sem
-                    ]
-                    if not semana_pcts:
+                    done_sem = 0
+                    total_sem = 0
+                    for p in payloads_por_departamento:
+                        expected_dep = int(getattr(p, "expected_steps", 0) or 0)
+                        if expected_dep <= 0:
+                            continue
+                        wk = next(
+                            (w for w in (p.evolucao or []) if int(getattr(w, "semana", 0) or 0) == sem),
+                            None,
+                        )
+                        if wk is None:
+                            continue
+                        done_sem += int(getattr(wk, "concluidos", 0) or 0)
+                        total_sem += expected_dep
+                    if total_sem <= 0:
                         continue
-                    trend_semanal.append({"semana": sem, "pct": round(sum(semana_pcts) / len(semana_pcts))})
+                    trend_semanal.append({
+                        "semana": sem,
+                        "pct": max(0, min(100, round(done_sem / max(total_sem, 1) * 100))),
+                    })
                 if trend_semanal:
                     trend_semanal[-1]["pct"] = int(pct_global or trend_semanal[-1]["pct"] or 0)
                 trend_semanal = trend_semanal[-4:]
