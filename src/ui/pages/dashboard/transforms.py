@@ -399,7 +399,7 @@ def build_inteligencia(
 
     total_valid = len(valid)
     etapas_ok = float(valid["ok_count"].sum())
-    pct = max(0.0, min(100.0, round(etapas_ok / max(total_valid * 3, 1) * 100)))
+    pct = max(0.0, min(100.0, round(etapas_ok / max(total_valid * 3, 1) * 100, 2)))
     pend = int((valid["state"] == "pendente").sum())
     trav = int((valid["state"] == "travado").sum())
     andamento = int((valid["state"] == "em_andamento").sum())
@@ -508,21 +508,26 @@ def build_tendencia_semanal(
     if pd.isna(end) and "data_fim" in valid.columns:
         end = pd.to_datetime(valid["data_fim"], errors="coerce").dropna().max()
 
-    updated = None
-    if "updated_at" in valid.columns:
-        updated = pd.to_datetime(valid["updated_at"], errors="coerce")
+    dt_real = None
+    if any(col in valid.columns for col in ("dt_etapa_d", "dt_etapa_r", "dt_etapa_m")):
+        dt_m = pd.to_datetime(valid.get("dt_etapa_m"), errors="coerce") if "dt_etapa_m" in valid.columns else pd.Series(pd.NaT, index=valid.index)
+        dt_r = pd.to_datetime(valid.get("dt_etapa_r"), errors="coerce") if "dt_etapa_r" in valid.columns else pd.Series(pd.NaT, index=valid.index)
+        dt_d = pd.to_datetime(valid.get("dt_etapa_d"), errors="coerce") if "dt_etapa_d" in valid.columns else pd.Series(pd.NaT, index=valid.index)
+        dt_real = dt_m.combine_first(dt_r).combine_first(dt_d)
+    elif "updated_at" in valid.columns:
+        dt_real = pd.to_datetime(valid["updated_at"], errors="coerce")
 
     expected_total = int(len(valid) * 3)
     if expected_total <= 0:
         return pd.DataFrame(columns=cols)
 
     if pct_atual is None:
-        pct_atual = round(float(valid["ok_count"].sum()) / expected_total * 100, 1)
+        pct_atual = round(float(valid["ok_count"].sum()) / expected_total * 100, 2)
     pct_atual = float(max(0.0, min(100.0, pct_atual)))
 
     observed_weeks = 0
-    if updated is not None and updated.notna().any():
-        upd = updated.dropna().dt.tz_localize(None).dt.normalize()
+    if dt_real is not None and dt_real.notna().any():
+        upd = dt_real.dropna().dt.tz_localize(None).dt.normalize()
         if pd.notna(start):
             observed_series = (((upd - start.normalize()).dt.days).clip(lower=0) // 7) + 1
             observed_weeks = int(observed_series.max()) if not observed_series.empty else 0
@@ -541,16 +546,17 @@ def build_tendencia_semanal(
 
     rows: list[dict[str, float | int | str]] = []
 
-    if updated is not None and updated.notna().any():
+    if dt_real is not None and dt_real.notna().any():
         vt = valid.copy()
-        vt = vt[updated.notna()].copy()
-        vt["updated_at"] = pd.to_datetime(vt["updated_at"], errors="coerce").dt.tz_localize(None).dt.normalize()
+        vt["dt_real"] = dt_real
+        vt = vt[vt["dt_real"].notna()].copy()
+        vt["dt_real"] = pd.to_datetime(vt["dt_real"], errors="coerce").dt.tz_localize(None).dt.normalize()
         if pd.notna(start):
-            vt["week_number"] = (((vt["updated_at"] - start.normalize()).dt.days).clip(lower=0) // 7) + 1
+            vt["week_number"] = (((vt["dt_real"] - start.normalize()).dt.days).clip(lower=0) // 7) + 1
         else:
-            ordered_days = sorted(vt["updated_at"].dropna().unique())
+            ordered_days = sorted(vt["dt_real"].dropna().unique())
             day_to_week = {day: idx + 1 for idx, day in enumerate(ordered_days)}
-            vt["week_number"] = vt["updated_at"].map(day_to_week)
+            vt["week_number"] = vt["dt_real"].map(day_to_week)
 
         weekly_done = (
             vt.groupby("week_number", dropna=False)["ok_count"]
@@ -566,56 +572,56 @@ def build_tendencia_semanal(
         real_points = {}
         for week in range(1, actual_week + 1):
             cumulative_done += float(done_map.get(week, 0.0))
-            pct_real = round(max(0.0, min(100.0, cumulative_done / expected_total * 100)), 1)
+            pct_real = round(max(0.0, min(100.0, cumulative_done / expected_total * 100)), 2)
             real_points[week] = pct_real
 
         if real_points:
-            real_points[actual_week] = round(pct_atual, 1)
+            real_points[actual_week] = round(pct_atual, 2)
             for week in range(1, actual_week):
-                next_value = real_points.get(week + 1, round(pct_atual, 1))
-                real_points[week] = round(min(real_points.get(week, 0.0), next_value), 1)
+                next_value = real_points.get(week + 1, round(pct_atual, 2))
+                real_points[week] = round(min(real_points.get(week, 0.0), next_value), 2)
 
         last_known = 0.0
         for week in range(1, total_weeks + 1):
             if week <= actual_week:
                 last_known = float(real_points.get(week, last_known))
-                pct_real = round(last_known, 1)
+                pct_real = round(last_known, 2)
             else:
                 pct_real = None
-            pct_ideal = round(max(0.0, min(100.0, week / max(total_weeks, 1) * 100)), 1)
+            pct_ideal = round(max(0.0, min(100.0, week / max(total_weeks, 1) * 100)), 2)
             rows.append({
                 "week_number": week,
                 "semana_label": f"S{week}",
                 "pct_real": pct_real,
                 "pct_ideal": pct_ideal,
-                "delta_pct": round((pct_real if pct_real is not None else last_known) - pct_ideal, 1) if pct_real is not None else None,
+                "delta_pct": round((pct_real if pct_real is not None else last_known) - pct_ideal, 2) if pct_real is not None else None,
             })
     else:
         for w in range(1, total_weeks + 1):
             if w < actual_week:
-                pct_real = round(pct_atual * (w / max(actual_week, 1)), 1)
+                pct_real = round(pct_atual * (w / max(actual_week, 1)), 2)
             elif w == actual_week:
-                pct_real = round(pct_atual, 1)
+                pct_real = round(pct_atual, 2)
             else:
                 pct_real = None
-            pct_ideal = round(max(0.0, min(100.0, w / max(total_weeks, 1) * 100)), 1)
+            pct_ideal = round(max(0.0, min(100.0, w / max(total_weeks, 1) * 100)), 2)
             rows.append({
                 "week_number": w,
                 "semana_label": f"S{w}",
                 "pct_real": pct_real,
                 "pct_ideal": pct_ideal,
-                "delta_pct": round(pct_real - pct_ideal, 1) if pct_real is not None else None,
+                "delta_pct": round(pct_real - pct_ideal, 2) if pct_real is not None else None,
             })
 
     trend = pd.DataFrame(rows, columns=cols)
     if not trend.empty:
         trend["pct_real"] = pd.to_numeric(trend["pct_real"], errors="coerce").clip(0, 100)
         trend["pct_ideal"] = pd.to_numeric(trend["pct_ideal"], errors="coerce").fillna(0).clip(0, 100)
-        trend["delta_pct"] = (trend["pct_real"] - trend["pct_ideal"]).round(1)
+        trend["delta_pct"] = (trend["pct_real"] - trend["pct_ideal"]).round(2)
         non_null_real = trend["pct_real"].dropna()
         if not non_null_real.empty:
-            trend.loc[non_null_real.index[-1], "pct_real"] = round(pct_atual, 1)
-            trend["delta_pct"] = (trend["pct_real"] - trend["pct_ideal"]).round(1)
+            trend.loc[non_null_real.index[-1], "pct_real"] = round(pct_atual, 2)
+            trend["delta_pct"] = (trend["pct_real"] - trend["pct_ideal"]).round(2)
     return trend
 
 
