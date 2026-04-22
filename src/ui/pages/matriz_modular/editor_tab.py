@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 import streamlit as st
 
 from src.ui.components.confirmations import confirmation_panel
@@ -10,6 +12,7 @@ from src.ui.core.cache import bump_data_version
 from src.ui.core.cache_matrix import invalidate_matriz_cache
 from src.services.dashboard_cache_service import refresh_dashboard_cache
 from src.ui.pages.matriz_runtime import risk_color as _risk_color
+from src.utils.weeks import apontamento_datetime_iso, effective_week_for_apontamento
 
 
 def _invalidate_after_editor_write(sb, tenant_id, revisao_id) -> None:
@@ -28,6 +31,8 @@ def render_editor_tab(
     eq_label_short,
     task_map,
     semana_sugerida,
+    rev_data_inicio: date | None = None,
+    rev_semanas_total: int | None = None,
     eq_ocultos_set: set | None = None,
 ) -> None:
     st.markdown("### ✏️ Edição rápida por célula")
@@ -136,7 +141,7 @@ def render_editor_tab(
 
     task_rows_ed = (
         sb.table("tarefas_servico")
-        .select("id,status,semana,observacao,etapa_d,etapa_r,etapa_m")
+        .select("id,status,semana,observacao,etapa_d,etapa_r,etapa_m,dt_etapa_d,dt_etapa_r,dt_etapa_m")
         .eq("tenant_id", tenant_id)
         .eq("revisao_id", revisao_id)
         .eq("equipamento_id", equip_sel)
@@ -202,18 +207,42 @@ def render_editor_tab(
     with cM:
         etapa_m = st.checkbox("✅ Montou (M)", value=cur_m, key="mat_ed_m")
     with cSem:
-        semana_default = int(task_ed.get("semana") or semana_sugerida)
+        semana_default = max(1, int(task_ed.get("semana") or semana_sugerida or 1))
         nsem = st.number_input(
             "📅 Semana",
-            min_value=0,
+            min_value=1,
             value=semana_default,
             step=1,
             key="mat_sem",
             help=(
                 f"Semana sugerida automaticamente: {semana_sugerida}. "
-                "Altere se precisar registrar em outra semana."
+                "Se nenhuma data for informada, o sistema grava o primeiro dia da semana operacional."
             ),
         )
+
+    dt_col1, dt_col2 = st.columns([0.9, 1.1])
+    with dt_col1:
+        usar_data_especifica = st.toggle(
+            "Usar data específica",
+            value=False,
+            key="mat_use_specific_date",
+            help="Quando ativado, a data escolhida será gravada no banco e a semana será recalculada a partir dela.",
+        )
+    with dt_col2:
+        data_base = task_ed.get("dt_etapa_m") or task_ed.get("dt_etapa_r") or task_ed.get("dt_etapa_d")
+        data_default = None
+        if data_base:
+            try:
+                data_default = date.fromisoformat(str(data_base)[:10])
+            except Exception:
+                data_default = None
+        data_apontamento = st.date_input(
+            "🗓️ Data do apontamento",
+            value=data_default,
+            key="mat_specific_date",
+            disabled=not usar_data_especifica,
+            help="Se vazia, o sistema usa o primeiro dia da semana operacional selecionada.",
+        ) if usar_data_especifica else None
 
     st.caption("Marcar D+R+M atualiza o status para Concluído automaticamente.")
 
@@ -258,6 +287,18 @@ def render_editor_tab(
                 validation_summary(quick_errors, title="Corrija o formulário da tarefa")
             else:
                 try:
+                    effective_week = effective_week_for_apontamento(
+                        data_apontamento=data_apontamento if usar_data_especifica else None,
+                        semana_operacional=int(nsem),
+                        data_inicio=rev_data_inicio,
+                        semanas_total=rev_semanas_total,
+                    )
+                    step_dt = apontamento_datetime_iso(
+                        data_apontamento=data_apontamento if usar_data_especifica else None,
+                        semana_operacional=int(nsem),
+                        data_inicio=rev_data_inicio,
+                        semanas_total=rev_semanas_total,
+                    )
                     (
                         sb.table("tarefas_servico")
                         .update(
@@ -265,8 +306,11 @@ def render_editor_tab(
                                 "etapa_d": bool(etapa_d),
                                 "etapa_r": bool(etapa_r),
                                 "etapa_m": bool(etapa_m),
+                                "dt_etapa_d": step_dt if bool(etapa_d) else None,
+                                "dt_etapa_r": step_dt if bool(etapa_r) else None,
+                                "dt_etapa_m": step_dt if bool(etapa_m) else None,
                                 "status": effective_status,
-                                "semana": int(nsem) if int(nsem) > 0 else None,
+                                "semana": effective_week,
                                 "observacao": nobs.strip() or None,
                                 "updated_by": current_user_id() or None,
                             }
@@ -397,6 +441,8 @@ def render_bulk_editor(
     eqs,
     eq_label_short,
     semana_sugerida,
+    rev_data_inicio: date | None = None,
+    rev_semanas_total: int | None = None,
 ) -> None:
     """Aba de edição em lote — marca D/R/M para todos os equipamentos de um serviço."""
     st.markdown("### ⚡ Edição em lote por serviço")
@@ -427,8 +473,21 @@ def render_bulk_editor(
     with bc3: bulk_m = st.checkbox("✅ Montou (M)", key="bulk_ed_m")
     with bc4:
         bulk_sem = st.number_input(
-            "📅 Semana", min_value=0, value=int(semana_sugerida), step=1, key="bulk_sem",
+            "📅 Semana", min_value=1, value=max(1, int(semana_sugerida or 1)), step=1, key="bulk_sem",
+            help="Sem data manual, o sistema grava o primeiro dia da semana operacional selecionada.",
         )
+
+    bdt1, bdt2 = st.columns([0.9, 1.1])
+    with bdt1:
+        bulk_use_date = st.toggle("Usar data específica", value=False, key="bulk_use_date")
+    with bdt2:
+        bulk_data_apontamento = st.date_input(
+            "🗓️ Data do apontamento",
+            value=None,
+            key="bulk_specific_date",
+            disabled=not bulk_use_date,
+            help="Se preenchida, a data escolhida prevalece e a semana será recalculada a partir dela.",
+        ) if bulk_use_date else None
 
     if not any([bulk_d, bulk_r, bulk_m]):
         st.info("Selecione pelo menos uma etapa para aplicar em lote.")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from html import escape as _h
 
-from datetime import datetime, timezone
+from datetime import date
 
 import pandas as pd
 import streamlit as st
@@ -25,6 +25,7 @@ from src.ui.pages.matriz_sector import (
 from src.utils import nav
 from src.utils.supabase_helpers import normalize_id, current_user_id
 from src.utils.timezone import now_utc as _now_utc
+from src.utils.weeks import apontamento_datetime_iso, effective_week_for_apontamento
 
 from .data import _group_kpis, _load_payload
 from .insights import _sector_priority_sort_key
@@ -87,7 +88,7 @@ def _invalidate_after_matrix_write() -> None:
         pass
 
 
-def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_v, svc_names_v, eqs, task_map, eq_label_short, rev_start, atraso_dias, semana_lote):
+def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_v, svc_names_v, eqs, task_map, eq_label_short, rev_start, atraso_dias, semana_lote, usar_data_especifica=False, data_apontamento=None, rev_data_inicio: date | None = None, rev_semanas_total: int | None = None):
     df, col_meta, obs_map = build_sector_frame(
         equipamentos=eqs,
         svc_ids=svc_ids_v,
@@ -246,7 +247,18 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
             st.rerun()
 
         if confirm_now:
-            now_iso = datetime.now(timezone.utc).isoformat()
+            step_dt = apontamento_datetime_iso(
+                data_apontamento=data_apontamento if usar_data_especifica else None,
+                semana_operacional=int(semana_lote),
+                data_inicio=rev_data_inicio,
+                semanas_total=rev_semanas_total,
+            )
+            effective_week = effective_week_for_apontamento(
+                data_apontamento=data_apontamento if usar_data_especifica else None,
+                semana_operacional=int(semana_lote),
+                data_inicio=rev_data_inicio,
+                semanas_total=rev_semanas_total,
+            )
             missing = 0
             payload_updates = []
             for eid, sid, field, nv in pending_changes:
@@ -258,9 +270,9 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
                 upd = {'id': tid, field: bool(nv), 'updated_by': current_user_id() or None}
                 dtf = {'etapa_d': 'dt_etapa_d', 'etapa_r': 'dt_etapa_r', 'etapa_m': 'dt_etapa_m'}.get(field)
                 if dtf:
-                    upd[dtf] = now_iso if nv else None
-                if nv and not t.get('semana') and int(semana_lote) > 0:
-                    upd['semana'] = int(semana_lote)
+                    upd[dtf] = step_dt if nv else None
+                if nv:
+                    upd['semana'] = effective_week
                 payload_updates.append(upd)
 
             pb = st.empty()
@@ -290,7 +302,7 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
                         st.rerun()
 
 
-def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_disp, semana_sugerida, group_rev_start, setor_to_services, tarefas, eqs, task_map, eq_label_short) -> None:
+def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_disp, semana_sugerida, group_rev_start, setor_to_services, tarefas, eqs, task_map, eq_label_short, rev_data_inicio: date | None = None, rev_semanas_total: int | None = None) -> None:
     # ── W: Ctrl+S — clica no primeiro botão "Salvar alterações" visível ──
     st.markdown(
         """<script>
@@ -332,17 +344,33 @@ def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_di
     with fc3:
         semana_lote = st.number_input(
             '📅 Semana do apontamento',
-            min_value=0,
+            min_value=1,
             max_value=99,
-            value=int(semana_sugerida),
+            value=max(1, int(semana_sugerida or 1)),
             step=1,
             key='mtz_semana_lote',
             help=(
-                f'Semana sugerida automaticamente ({semana_sugerida}) com base na data de início da revisão. '
-                'Altere se estiver registrando uma etapa de outra semana. '
-                'Aplicada apenas em tarefas que ainda não têm semana definida.'
+                f'Semana sugerida automaticamente ({semana_sugerida}). '
+                'Se nenhuma data for informada, o sistema grava o primeiro dia desta semana operacional.'
             ),
         )
+
+    dtc1, dtc2 = st.columns([0.9, 1.1])
+    with dtc1:
+        usar_data_especifica = st.toggle(
+            'Usar data específica',
+            value=False,
+            key='mtz_use_specific_date',
+            help='Quando ativado, a data escolhida será gravada no banco e a semana será recalculada a partir dela.',
+        )
+    with dtc2:
+        data_apontamento = st.date_input(
+            '🗓️ Data do apontamento',
+            value=None,
+            key='mtz_specific_date',
+            disabled=not usar_data_especifica,
+            help='Se vazia, o sistema usa o primeiro dia da semana operacional selecionada.',
+        ) if usar_data_especifica else None
 
     rev_start = group_rev_start
     chip_target = st.session_state.pop('mtz_chip_jump', None)
@@ -466,6 +494,10 @@ def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_di
                 rev_start=rev_start,
                 atraso_dias=atraso_dias,
                 semana_lote=semana_lote,
+                usar_data_especifica=usar_data_especifica,
+                data_apontamento=data_apontamento,
+                rev_data_inicio=rev_data_inicio,
+                rev_semanas_total=rev_semanas_total,
             )
             st.markdown('</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)

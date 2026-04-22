@@ -916,6 +916,8 @@ def _render_matriz_section(base_ctx, group_ctx) -> None:
         eqs=group_ctx.eqs,
         task_map=group_ctx.task_map,
         eq_label_short=group_ctx.eq_label_short,
+        rev_data_inicio=(pd.to_datetime((group_ctx.rev_row or {}).get("data_inicio"), errors="coerce").date() if (group_ctx.rev_row or {}).get("data_inicio") else None),
+        rev_semanas_total=int((group_ctx.rev_row or {}).get("semanas_total") or 0) or None,
     )
 
 
@@ -956,6 +958,8 @@ def _render_editor_section(base_ctx, group_ctx) -> None:
             eq_label_short=group_ctx.eq_label_short,
             task_map=group_ctx.task_map,
             semana_sugerida=group_ctx.semana_sugerida,
+            rev_data_inicio=(pd.to_datetime((group_ctx.rev_row or {}).get("data_inicio"), errors="coerce").date() if (group_ctx.rev_row or {}).get("data_inicio") else None),
+            rev_semanas_total=int((group_ctx.rev_row or {}).get("semanas_total") or 0) or None,
             eq_ocultos_set=group_ctx.eq_ocultos_set,
         )
     else:
@@ -968,6 +972,8 @@ def _render_editor_section(base_ctx, group_ctx) -> None:
             eqs=group_ctx.eqs,
             eq_label_short=group_ctx.eq_label_short,
             semana_sugerida=group_ctx.semana_sugerida,
+            rev_data_inicio=(pd.to_datetime((group_ctx.rev_row or {}).get("data_inicio"), errors="coerce").date() if (group_ctx.rev_row or {}).get("data_inicio") else None),
+            rev_semanas_total=int((group_ctx.rev_row or {}).get("semanas_total") or 0) or None,
         )
 
 
