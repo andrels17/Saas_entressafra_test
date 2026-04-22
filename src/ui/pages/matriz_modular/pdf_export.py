@@ -673,22 +673,15 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
         info = Table(
             [
                 [
-                    Paragraph("<b>Semana impressa:</b> " + (f"Semana {semana_impressao}" if semana_impressao else "—"), body_style),
-                    Paragraph("<b>Data de emissão:</b> " + str(emitido or "—"), body_style),
-                    Paragraph("<b>Revisão:</b> " + str(titulo or "—"), body_style),
-                ],
-                [
-                    Paragraph("<b>Grupo:</b> " + str(grupo_nome or "—"), body_style),
-                    Paragraph("<b>Departamento:</b> __________________________________", body_style),
+                    Paragraph("<b>Departamento:</b> _________________________________________________", body_style),
                     Paragraph("<b>Data:</b> ______/______/________", body_style),
                 ],
                 [
                     Paragraph("<b>Responsável:</b> _________________________________________________", body_style),
                     Paragraph("<b>Turno:</b> ____________________________________", body_style),
-                    Paragraph("", body_style),
                 ],
             ],
-            colWidths=[pw * 0.34, pw * 0.33, pw * 0.33],
+            colWidths=[pw * 0.62, pw * 0.38],
         )
         info.hAlign = "LEFT"
         info.setStyle(TableStyle([
@@ -711,8 +704,7 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
 
         headers = [
             Paragraph("Frota", header_style),
-            Paragraph("Descrição do material", header_style),
-            Paragraph("Quantidade", header_style),
+            Paragraph("Motivo do atraso", header_style),
             Paragraph("Setor", header_style),
         ]
         rows = [headers]
@@ -721,14 +713,13 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                 Paragraph("", body_style),
                 Paragraph("", body_style),
                 Paragraph("", body_style),
-                Paragraph("", body_style),
             ])
 
         table = Table(
             rows,
-            colWidths=[pw * 0.14, pw * 0.46, pw * 0.14, pw * 0.26],
+            colWidths=[pw * 0.14, pw * 0.66, pw * 0.20],
             repeatRows=1,
-            rowHeights=[0.72 * cm] + [0.92 * cm] * 12,
+            rowHeights=[0.72 * cm] + [0.96 * cm] * 12,
         )
         table.hAlign = "LEFT"
         table.setStyle(TableStyle([
@@ -745,18 +736,7 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, palette["panel"]]),
         ]))
 
-        notes.hAlign = "LEFT"
-        notes.setStyle(TableStyle([
-            ("GRID", (0, 0), (-1, -1), 0.7, palette["line_dark"]),
-            ("BOX", (0, 0), (-1, -1), 1.0, palette["line_dark"]),
-            ("BACKGROUND", (0, 0), (-1, 0), palette["panel"]),
-            ("LEFTPADDING", (0, 0), (-1, -1), 6),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-            ("TOPPADDING", (0, 0), (-1, -1), 6),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-        ]))
-
-        return [title, Spacer(1, 0.05 * cm), subtitle, Spacer(1, 0.15 * cm), info, Spacer(1, 0.12 * cm), table, Spacer(1, 0.18 * cm), notes]
+        return [title, Spacer(1, 0.05 * cm), subtitle, Spacer(1, 0.15 * cm), info, Spacer(1, 0.12 * cm), table]
 
     resumo_cols = ["Equipamento", "Concluidos", "Total", "%"]
     if isinstance(resumo_df, pd.DataFrame) and all(c in resumo_df.columns for c in resumo_cols):
@@ -973,10 +953,17 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
     checklist_info = Table(
         [
             [
+                Paragraph("<b>Semana impressa:</b> " + (f"Semana {semana_impressao}" if semana_impressao else "—"), body_style),
+                Paragraph("<b>Data de emissão:</b> " + str(emitido or "—"), body_style),
+                Paragraph("<b>Revisão:</b> " + str(titulo or "—"), body_style),
+            ],
+            [
+                Paragraph("<b>Grupo:</b> " + str(grupo_nome or "—"), body_style),
                 Paragraph("<b>Status geral:</b> (   ) OK   (   ) Pendente   (   ) Crítico", body_style),
+                Paragraph("<b>Responsável:</b> ________________________________________", body_style),
             ],
         ],
-        colWidths=[pw],
+        colWidths=[pw * 0.26, pw * 0.38, pw * 0.36],
     )
     checklist_info.hAlign = "LEFT"
     checklist_info.setStyle(TableStyle([
