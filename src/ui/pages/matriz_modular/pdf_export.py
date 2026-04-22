@@ -666,6 +666,98 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                 blocks.append(Spacer(1, 0.34 * cm))
         return blocks
 
+    def _build_prioridade_manual_table():
+        title = Paragraph("Prioridade por Departamento x Materiais", section_style)
+        subtitle = Paragraph("Preenchimento manual para priorização de materiais por departamento.", body_style)
+
+        info = Table(
+            [
+                [
+                    Paragraph("<b>Departamento:</b> _________________________________________________", body_style),
+                    Paragraph("<b>Data:</b> ______/______/________", body_style),
+                ],
+                [
+                    Paragraph("<b>Responsável:</b> _________________________________________________", body_style),
+                    Paragraph("<b>Turno:</b> ____________________________________", body_style),
+                ],
+            ],
+            colWidths=[pw * 0.62, pw * 0.38],
+        )
+        info.hAlign = "LEFT"
+        info.setStyle(TableStyle([
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+
+        header_style = ParagraphStyle(
+            "manual_head",
+            parent=small_style,
+            fontSize=8.2,
+            leading=9.2,
+            alignment=TA_LEFT,
+            textColor=colors.white,
+            fontName="Helvetica-Bold",
+        )
+
+        headers = [
+            Paragraph("Frota", header_style),
+            Paragraph("Descrição do material", header_style),
+            Paragraph("Quantidade", header_style),
+            Paragraph("Setor", header_style),
+        ]
+        rows = [headers]
+        for _ in range(12):
+            rows.append([
+                Paragraph("", body_style),
+                Paragraph("", body_style),
+                Paragraph("", body_style),
+                Paragraph("", body_style),
+            ])
+
+        table = Table(
+            rows,
+            colWidths=[pw * 0.14, pw * 0.46, pw * 0.14, pw * 0.26],
+            repeatRows=1,
+            rowHeights=[0.72 * cm] + [0.92 * cm] * 12,
+        )
+        table.hAlign = "LEFT"
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), palette["header"]),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("GRID", (0, 0), (-1, -1), 0.75, palette["line_dark"]),
+            ("BOX", (0, 0), (-1, -1), 1.0, palette["line_dark"]),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, palette["panel"]]),
+        ]))
+
+        notes = Table(
+            [
+                [Paragraph("Observações / materiais críticos", small_style)],
+                [Paragraph("<br/><br/>____________________________________________________________________________________________________________<br/><br/>____________________________________________________________________________________________________________<br/><br/>____________________________________________________________________________________________________________", body_style)],
+            ],
+            colWidths=[pw],
+        )
+        notes.hAlign = "LEFT"
+        notes.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.7, palette["line_dark"]),
+            ("BOX", (0, 0), (-1, -1), 1.0, palette["line_dark"]),
+            ("BACKGROUND", (0, 0), (-1, 0), palette["panel"]),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ]))
+
+        return [title, Spacer(1, 0.05 * cm), subtitle, Spacer(1, 0.15 * cm), info, Spacer(1, 0.12 * cm), table, Spacer(1, 0.18 * cm), notes]
+
     resumo_cols = ["Equipamento", "Concluidos", "Total", "%"]
     if isinstance(resumo_df, pd.DataFrame) and all(c in resumo_df.columns for c in resumo_cols):
         rv = resumo_df[resumo_cols].copy()
@@ -870,28 +962,42 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
         story.append(block)
 
 
-    story.append(Spacer(1, 0.35 * cm))
-    story.append(HRFlowable(width="100%", thickness=0.55, color=palette["line_dark"], spaceAfter=6, spaceBefore=2))
+    story.append(PageBreak())
+    for block in _build_prioridade_manual_table():
+        story.append(block)
+
+    story.append(PageBreak())
     story.append(Paragraph("Controle de checklist impresso", section_style))
     story.append(Spacer(1, 0.08 * cm))
 
     checklist_info = Table(
-        [[
-            Paragraph("<b>Semana impressa:</b> " + (f"Semana {semana_impressao}" if semana_impressao else "—"), body_style),
-            Paragraph("<b>Data de emissão:</b> " + str(emitido or "—"), body_style),
-        ]],
-        colWidths=[pw * 0.50, pw * 0.50],
+        [
+            [
+                Paragraph("<b>Semana impressa:</b> " + (f"Semana {semana_impressao}" if semana_impressao else "—"), body_style),
+                Paragraph("<b>Data de emissão:</b> " + str(emitido or "—"), body_style),
+                Paragraph("<b>Revisão:</b> " + str(titulo or "—"), body_style),
+            ],
+            [
+                Paragraph("<b>Grupo:</b> " + str(grupo_nome or "—"), body_style),
+                Paragraph("<b>Status geral:</b> (   ) OK   (   ) Pendente   (   ) Crítico", body_style),
+                Paragraph("<b>Responsável:</b> ________________________________________", body_style),
+            ],
+        ],
+        colWidths=[pw * 0.26, pw * 0.38, pw * 0.36],
     )
     checklist_info.hAlign = "LEFT"
     checklist_info.setStyle(TableStyle([
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+        ("BOX", (0, 0), (-1, -1), 0.85, palette["line_dark"]),
+        ("GRID", (0, 0), (-1, -1), 0.55, palette["line"]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]))
     story.append(checklist_info)
-    story.append(Spacer(1, 0.10 * cm))
+    story.append(Spacer(1, 0.16 * cm))
 
     assinatura = Table(
         [
@@ -901,34 +1007,34 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                 Paragraph("Assinatura", small_style),
             ],
             [
-                Paragraph("<br/><br/>________________________________________", body_style),
-                Paragraph("<br/><br/>____________/____________/____________", body_style),
-                Paragraph("<br/><br/>________________________________________", body_style),
+                Paragraph("<br/><br/><br/>________________________________________", body_style),
+                Paragraph("<br/><br/><br/>______/______/________", body_style),
+                Paragraph("<br/><br/><br/>________________________________________", body_style),
             ],
             [
-                Paragraph("Observações", small_style),
-                "", 
+                Paragraph("Pendências / observações", small_style),
+                "",
                 "",
             ],
             [
-                Paragraph("<br/><br/>__________________________________________________________________________________", body_style),
+                Paragraph("<br/><br/>________________________________________________________________________________________________<br/><br/>________________________________________________________________________________________________<br/><br/>________________________________________________________________________________________________", body_style),
                 "",
                 "",
             ],
         ],
-        colWidths=[pw * 0.38, pw * 0.22, pw * 0.40],
+        colWidths=[pw * 0.36, pw * 0.24, pw * 0.40],
     )
     assinatura.hAlign = "LEFT"
     assinatura.setStyle(TableStyle([
         ("SPAN", (0, 2), (2, 2)),
         ("SPAN", (0, 3), (2, 3)),
         ("BACKGROUND", (0, 0), (-1, 0), palette["panel"]),
-        ("GRID", (0, 0), (-1, -1), 0.65, palette["line_dark"]),
+        ("GRID", (0, 0), (-1, -1), 0.75, palette["line_dark"]),
         ("BOX", (0, 0), (-1, -1), 1.0, palette["line_dark"]),
         ("LEFTPADDING", (0, 0), (-1, -1), 6),
         ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
     ]))
     story.append(assinatura)
