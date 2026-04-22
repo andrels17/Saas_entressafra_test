@@ -512,6 +512,68 @@ def _render_gestor_highlights(gestor_df: pd.DataFrame) -> None:
     tone = "warning" if critical_count else ("info" if attention_count else "success")
 
 
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _load_weekly_trend_view(
+        tenant_id: str,
+        revisao_id: str,
+        semanas_total: int | None = None,
+        token_key: str = "",
+        ver: str = "0",
+        _token: str = "") -> pd.DataFrame:
+    _ = token_key, ver
+    sb = _sb_from_token(_token)
+    cols = ["week_number", "semana_label", "pct_real", "pct_ideal", "delta_pct"]
+    try:
+        rows = (
+            sb.table("v_evolucao_semanal_revisao")
+            .select("semana_operacional,pct_cum")
+            .eq("tenant_id", tenant_id)
+            .eq("revisao_id", revisao_id)
+            .order("semana_operacional")
+            .execute()
+            .data or []
+        )
+    except Exception as exc:
+        log_error(exc, context="dashboard._load_weekly_trend_view", table="v_evolucao_semanal_revisao")
+        return pd.DataFrame(columns=cols)
+
+    if not rows:
+        return pd.DataFrame(columns=cols)
+
+    df = pd.DataFrame(rows)
+    if df.empty or "semana_operacional" not in df.columns:
+        return pd.DataFrame(columns=cols)
+
+    df["semana_operacional"] = pd.to_numeric(df["semana_operacional"], errors="coerce")
+    df["pct_cum"] = pd.to_numeric(df.get("pct_cum"), errors="coerce")
+    df = df.dropna(subset=["semana_operacional"]).copy()
+    if df.empty:
+        return pd.DataFrame(columns=cols)
+
+    df["semana_operacional"] = df["semana_operacional"].astype(int)
+    df = df.sort_values("semana_operacional").drop_duplicates("semana_operacional", keep="last")
+
+    max_week_data = int(df["semana_operacional"].max()) if not df.empty else 0
+    planned_weeks = int(semanas_total or 0)
+    total_weeks = max(1, planned_weeks, max_week_data)
+
+    pct_map = {int(r["semana_operacional"]): float(r["pct_cum"]) for _, r in df.iterrows()}
+    rows_out: list[dict] = []
+    for week in range(1, total_weeks + 1):
+        pct_real = pct_map.get(week)
+        pct_ideal = round((week / max(planned_weeks, 1)) * 100, 2) if planned_weeks > 0 else None
+        delta = round(float(pct_real) - float(pct_ideal), 2) if pct_real is not None and pct_ideal is not None else None
+        rows_out.append({
+            "week_number": week,
+            "semana_label": f"S{week}",
+            "pct_real": pct_real if pct_real is not None else None,
+            "pct_ideal": pct_ideal,
+            "delta_pct": delta,
+        })
+    return pd.DataFrame(rows_out, columns=cols)
+
 @st.cache_data(ttl=120, show_spinner=False)
 def _load_gestor_options(tenant_id: str, token_key: str = "", ver: str = "0", _token: str = "") -> list[dict]:
     _ = token_key, ver, _token
@@ -1376,6 +1438,14 @@ def render_dashboard() -> None:
         departamentos = _load_departamentos(tenant_id, ver, token)
         grupos = _load_grupos(tenant_id, ver, token)
         gestor_options = _load_gestor_options(tenant_id, token, ver) if can_view_all_data(role) else []
+        trend_view = _load_weekly_trend_view(
+            tenant_id,
+            revisao_id,
+            int(rev.get("semanas_total") or 0),
+            token,
+            ver,
+            token,
+        )
 
     if dep_scope_ids in (None, [] ) and grp_scope_ids not in (None, []):
         dep_scope_ids = sorted({str(g.get("departamento_id")) for g in grupos if g.get("id") in set(grp_scope_ids) and g.get("departamento_id")})
@@ -1585,6 +1655,8 @@ def render_dashboard() -> None:
     if detailed_available:
         with st.spinner("", show_time=False):
             risco, previsao, heat, crit, trend = build_inteligencia(base_filtered)
+        if trend_view is not None and not trend_view.empty:
+            trend = trend_view.copy()
     else:
         risco, previsao = {"status_risco": "baixo", "risco_score": 0}, {"status_previsao": "sem_base"}
         heat = crit = trend = pd.DataFrame()
