@@ -745,13 +745,6 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, palette["panel"]]),
         ]))
 
-        notes = Table(
-            [
-                [Paragraph("Observações / materiais críticos", small_style)],
-                [Paragraph("<br/><br/>____________________________________________________________________________________________________________<br/><br/>____________________________________________________________________________________________________________<br/><br/>____________________________________________________________________________________________________________", body_style)],
-            ],
-            colWidths=[pw],
-        )
         notes.hAlign = "LEFT"
         notes.setStyle(TableStyle([
             ("GRID", (0, 0), (-1, -1), 0.7, palette["line_dark"]),
