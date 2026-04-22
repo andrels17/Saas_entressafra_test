@@ -29,7 +29,7 @@ from src.utils.ui_helpers import df_to_xlsx
 from src.utils.supabase_helpers import sb_for_user, current_tenant_id, current_user_id
 from src.db.supabase_client import get_supabase_anon
 from src.utils.mobile import is_mobile
-from src.utils.weeks import week_from_revisao
+from src.utils.weeks import week_from_revisao, apontamento_datetime_iso, effective_week_for_apontamento
 
 
 # ── Queries ─────────────────────────────────────────────────────────────
@@ -120,7 +120,11 @@ def _build_editor_df(tarefas: list[dict], semana_default: int) -> pd.DataFrame:
 def _df_to_changes(
         edited: pd.DataFrame,
         original: pd.DataFrame,
-        user_id: str | None) -> list[dict]:
+        user_id: str | None,
+        *,
+        data_inicio: date | None,
+        semanas_total: int | None,
+        data_apontamento: date | None = None) -> list[dict]:
     """Detecta linhas alteradas e monta payloads para upsert."""
     changes = []
     for idx in range(len(edited)):
@@ -151,13 +155,29 @@ def _df_to_changes(
             # mantém status original se nenhuma etapa marcada
             status = o["_status"]
 
+        effective_week = effective_week_for_apontamento(
+            data_apontamento=data_apontamento,
+            semana_operacional=int(e["Semana"]),
+            data_inicio=data_inicio,
+            semanas_total=semanas_total,
+        )
+        step_dt = apontamento_datetime_iso(
+            data_apontamento=data_apontamento,
+            semana_operacional=int(e["Semana"]),
+            data_inicio=data_inicio,
+            semanas_total=semanas_total,
+        )
+
         changes.append({
             "id": e["_id"],
             "etapa_d": d,
             "etapa_r": r,
             "etapa_m": m,
+            "dt_etapa_d": step_dt if d else None,
+            "dt_etapa_r": step_dt if r else None,
+            "dt_etapa_m": step_dt if m else None,
             "status": status,
-            "semana": int(e["Semana"]) or None,
+            "semana": effective_week,
             "observacao": obs_e or None,
             "updated_by": user_id or None,
         })
@@ -275,7 +295,7 @@ def _fragment_seletores(
 # ── Fragment: editor de tarefas ─────────────────────────────────────────
 
 
-def _render_mobile_card(t: dict, sb, user_id: str) -> None:
+def _render_mobile_card(t: dict, sb, user_id: str, *, semana_default: int, data_inicio: date | None, semanas_total: int | None, data_apontamento: date | None = None) -> None:
     """Card de tarefa individual optimizado para toque em mobile."""
     svc = t.get("servicos") or {}
     setor = (svc.get("setores") or {}).get("nome") or "Setor"
@@ -301,9 +321,25 @@ def _render_mobile_card(t: dict, sb, user_id: str) -> None:
         if new_d != bool(t.get("etapa_d")) or new_r != bool(t.get("etapa_r")) or new_m != bool(t.get("etapa_m")):
             new_status = "concluido" if (new_d and new_r and new_m) else (
                 "em_andamento" if (new_d or new_r or new_m) else status)
+            effective_week = effective_week_for_apontamento(
+                data_apontamento=data_apontamento,
+                semana_operacional=int(t.get("semana") or semana_default or 1),
+                data_inicio=data_inicio,
+                semanas_total=semanas_total,
+            )
+            step_dt = apontamento_datetime_iso(
+                data_apontamento=data_apontamento,
+                semana_operacional=int(t.get("semana") or semana_default or 1),
+                data_inicio=data_inicio,
+                semanas_total=semanas_total,
+            )
             try:
                 sb.table("tarefas_servico").update({
                     "etapa_d": new_d, "etapa_r": new_r, "etapa_m": new_m,
+                    "dt_etapa_d": step_dt if new_d else None,
+                    "dt_etapa_r": step_dt if new_r else None,
+                    "dt_etapa_m": step_dt if new_m else None,
+                    "semana": effective_week,
                     "status": new_status, "updated_by": user_id or None,
                 }).eq("id", tid).execute()
                 bump_data_version()
@@ -354,15 +390,32 @@ def _fragment_editor(
 
     if mobile:
         show_pending = st.toggle("Somente pendentes/travados", value=_pending_default, key=_pending_key)
-        semana_val = semana_default
+        semana_val = max(1, int(semana_default or 1))
     else:
         col_f1, col_f2 = st.columns([0.6, 0.4])
         with col_f1:
             show_pending = st.toggle("Somente pendentes/travados", value=_pending_default, key=_pending_key)
         with col_f2:
             semana_val = st.number_input(
-                "Semana (sugestão)", min_value=0, value=semana_default,
+                "Semana (sugestão)", min_value=1, value=max(1, int(semana_default or 1)),
                 step=1, key="apt_semana_num")
+
+    dtf1, dtf2 = st.columns([0.9, 1.1])
+    with dtf1:
+        usar_data_especifica = st.toggle(
+            "Usar data específica",
+            value=False,
+            key="apt_use_specific_date",
+            help="Quando ativado, a data escolhida será gravada no banco e a semana será recalculada a partir dela.",
+        )
+    with dtf2:
+        data_apontamento = st.date_input(
+            "🗓️ Data do apontamento",
+            value=None,
+            key="apt_specific_date",
+            disabled=not usar_data_especifica,
+            help="Se vazia, o sistema usa o primeiro dia da semana operacional selecionada.",
+        ) if usar_data_especifica else None
 
     setores_disponiveis = sorted({
         (((t.get("servicos") or {}).get("setores") or {}).get("nome") or "Setor")
@@ -410,7 +463,15 @@ def _fragment_editor(
         sb = sb_for_user()
         st.caption(f"{len(tarefas_filtradas)} tarefa(s) — toque nos toggles para registrar.")
         for t in tarefas_filtradas:
-            _render_mobile_card(t, sb, user_id)
+            _render_mobile_card(
+                t,
+                sb,
+                user_id,
+                semana_default=int(semana_val),
+                data_inicio=data_inicio,
+                semanas_total=semanas_total,
+                data_apontamento=data_apontamento if usar_data_especifica else None,
+            )
         return
 
     # ── Desktop: data_editor ──────────────────────────────────────────────────
@@ -440,7 +501,14 @@ def _fragment_editor(
     df_edited_full = df_orig.copy()
     df_edited_full[["Setor","Serviço","D","R","M","Semana","Observação"]] =         edited[["Setor","Serviço","D","R","M","Semana","Observação"]]
 
-    changes = _df_to_changes(df_edited_full, df_orig, user_id)
+    changes = _df_to_changes(
+        df_edited_full,
+        df_orig,
+        user_id,
+        data_inicio=data_inicio,
+        semanas_total=semanas_total,
+        data_apontamento=data_apontamento if usar_data_especifica else None,
+    )
 
     if not changes:
         st.info("Nenhuma alteração detectada.")
