@@ -156,6 +156,7 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
     from reportlab.lib.units import cm
     from reportlab.platypus import (
         HRFlowable,
+        KeepTogether,
         PageBreak,
         Paragraph,
         SimpleDocTemplate,
@@ -658,10 +659,14 @@ def _build_pdf_tables(*, titulo, grupo_nome, resumo_df, sector_tables, semana_re
                         )
 
             table.setStyle(TableStyle(style_cmds))
+
+            block_flow = []
             if len(chunks) > 1:
-                blocks.append(Paragraph(f"Bloco {chunk_idx}/{len(chunks)}", small_style))
-                blocks.append(Spacer(1, 0.10 * cm))
-            blocks.append(table)
+                block_flow.append(Paragraph(f"Bloco {chunk_idx}/{len(chunks)}", small_style))
+                block_flow.append(Spacer(1, 0.10 * cm))
+            block_flow.append(table)
+
+            blocks.append(KeepTogether(block_flow))
             if chunk_idx < len(chunks):
                 blocks.append(Spacer(1, 0.34 * cm))
         return blocks
