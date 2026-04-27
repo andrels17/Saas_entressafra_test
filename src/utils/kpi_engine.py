@@ -326,19 +326,11 @@ def get_group_kpis(
     if status in ("concluida", "encerrada", "fechada"):
         return _get_group_kpis_concluded(tenant_id, revisao_id, ver, _token)
 
-    # Para revisões ativas: se houve invalidação manual de cache (apontamento
-    # ou sincronização recente), pula mv_revisao_grupo_kpis — que depende de
-    # triggers do banco e pode estar desatualizada — e recalcula do raw.
-    # A view materializada só é usada no carregamento inicial (ver == "0").
-    kpi_ver = st.session_state.get("_kpi_ver", 0)
-    if prefer_mv and _base_ver == "0" and kpi_ver == 0:
-        mv_rows = _fetch_mv(tenant_id, revisao_id, _token)
-        if mv_rows:
-            df = _mv_to_df(mv_rows)
-            # Valida MV: se todos os grupos têm done_steps=0 mas há tarefas
-            # na revisão, a MV está desatualizada — recalcula do raw.
-            if not df.empty and df["done_steps"].sum() > 0:
-                return df
+    # Para revisões ativas: sempre recalcula do raw para garantir que
+    # alterações no template (serviços ativados/desativados) reflitam
+    # imediatamente no % — a MV depende de triggers do banco e pode ter
+    # svc_count desatualizado, causando divergência entre Matriz e Dashboard.
+    # A MV continua sendo usada apenas para revisões concluídas (TTL longo).
     return _compute_from_raw(tenant_id, revisao_id, _token)
 
 
