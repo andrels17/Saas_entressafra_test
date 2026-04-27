@@ -338,7 +338,7 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
                         st.rerun()
 
 
-def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_disp, semana_sugerida, group_rev_start, setor_to_services, tarefas, eqs, task_map, eq_label_short, rev_data_inicio: date | None = None, rev_semanas_total: int | None = None) -> None:
+def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_disp, semana_sugerida, group_rev_start, setor_to_services, tarefas, eqs, task_map, eq_label_short, tenant_id=None, rev_data_inicio: date | None = None, rev_semanas_total: int | None = None, **kwargs) -> None:
     # ── W: Ctrl+S — clica no primeiro botão "Salvar alterações" visível ──
     st.markdown(
         """<script>
