@@ -103,33 +103,32 @@ def normalize_service_ids(servicos_json: str) -> list[str]:
 
 
 def bulk_update_tasks(sb, updates: list[dict], *, chunk_size: int = 200) -> tuple[int, int]:
-    """Aplica updates em lote via upsert; cai para update individual se necessário.
+    """Aplica updates de tarefas de forma explícita.
 
-    Retorna (ok, failed).
+    Em alguns projetos Supabase/RLS, o UPDATE é executado, mas o retorno vem
+    sem linhas (`data=[]`) porque a política não permite SELECT no retorno.
+    Por isso, `data=[]` não é tratado como falha automática; falha é exceção
+    ou payload inválido.
     """
     if not updates:
         return 0, 0
 
     ok = 0
     failed = 0
-    for i in range(0, len(updates), chunk_size):
-        chunk = updates[i:i + chunk_size]
+    for row in updates:
+        row = dict(row or {})
+        tid = row.pop("id", None)
+        if not tid or not row:
+            failed += 1
+            continue
         try:
-            sb.table("tarefas_servico").upsert(chunk, on_conflict="id").execute()
-            ok += len(chunk)
-        except Exception:
-            for row in chunk:
-                row = dict(row)
-                tid = row.pop("id", None)
-                if not tid:
-                    failed += 1
-                    continue
-                try:
-                    table = sb.table("tarefas_servico")
-                    if hasattr(table, "_fail_upsert"):
-                        table._fail_upsert = False
-                    table.update(row).eq("id", tid).execute()
-                    ok += 1
-                except Exception:
-                    failed += 1
+            sb.table("tarefas_servico").update(row).eq("id", tid).execute()
+            ok += 1
+        except Exception as exc:
+            failed += 1
+            try:
+                import logging
+                logging.getLogger("saas").exception("Erro ao atualizar tarefa_servico %s: %s", tid, exc)
+            except Exception:
+                pass
     return ok, failed
