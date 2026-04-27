@@ -512,6 +512,12 @@ def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_di
             svc_ids_v = svc_ids
             svc_names_v = svc_names
 
+        sector_open = _sector_is_open(revisao_id, grupo_id, setor_nome)
+        # 🔄 Se o setor está aberto, atualiza antes de calcular o título/badges.
+        # Isso evita cabeçalho do setor em 82% enquanto a grade já mostra 100%.
+        if sector_open:
+            _refresh_visible_sector_tasks(sb, task_map, revisao_id, eqs, svc_ids_v)
+
         done_s, tot_s, pct_s, lbl_exp = sector_progress_label(
             equipamentos=eqs,
             svc_ids=svc_ids_v,
@@ -521,10 +527,17 @@ def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_di
         _ = (done_s, tot_s)
 
         auto_expand = (pct_s == 0) or (setor_nome == chip_target)
-        if auto_expand and not _sector_is_open(revisao_id, grupo_id, setor_nome):
+        if auto_expand and not sector_open:
             _sector_set_open(revisao_id, grupo_id, setor_nome, True)
+            sector_open = True
+            _refresh_visible_sector_tasks(sb, task_map, revisao_id, eqs, svc_ids_v)
+            done_s, tot_s, pct_s, lbl_exp = sector_progress_label(
+                equipamentos=eqs,
+                svc_ids=svc_ids_v,
+                task_map=task_map,
+                setor_nome=setor_nome,
+            )
 
-        sector_open = _sector_is_open(revisao_id, grupo_id, setor_nome)
         sector_intel = summarize_sector_intelligence(
             equipamentos=eqs,
             svc_ids=svc_ids_v,

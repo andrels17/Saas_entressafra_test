@@ -13,6 +13,10 @@ from src.ui.core.cache import clear_cached_functions
 from src.ui.core.cache_matrix import invalidate_matriz_cache
 from src.utils.nav import get_current_revisao, set_current_revisao
 from src.utils.supabase_helpers import current_role, current_tenant_id, sb_for_user
+try:
+    from src.utils.supabase_helpers import get_supabase_service
+except Exception:
+    get_supabase_service = None
 from src.utils.timezone import now_brt as _now_brt
 from src.utils.weeks import week_from_revisao as _week_from_revisao
 
@@ -217,6 +221,65 @@ def _load_eq_ocultos(sb: Any, tenant_id: str, revisao_id: str) -> set[str]:
         return set()
 
 
+def _refresh_all_tasks(
+    sb: Any,
+    tenant_id: str,
+    revisao_id: str,
+    eqs: list[dict[str, Any]],
+    all_services: list[dict[str, Any]],
+    task_map: dict[tuple[str, str], dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Recarrega todas as tarefas do grupo/revisão para KPIs, Header e Resumo.
+
+    O payload da matriz é cacheado para performance. Depois de apontamentos,
+    este refresh garante que o Resumo completo e o Header usem o mesmo estado
+    real do Supabase. Faz chunk de equipamentos para evitar truncamento do .in_().
+    """
+    eq_ids = [e.get("id") for e in (eqs or []) if e.get("id")]
+    svc_ids = [s.get("id") for s in (all_services or []) if s.get("id")]
+    if not revisao_id or not eq_ids or not svc_ids:
+        return []
+
+    read_sb = sb
+    if get_supabase_service is not None:
+        try:
+            read_sb = get_supabase_service() or sb
+        except Exception:
+            read_sb = sb
+
+    fresh_rows: list[dict[str, Any]] = []
+    select_cols = (
+        "id,tenant_id,revisao_id,equipamento_id,servico_id,status,semana,observacao,"
+        "etapa_d,etapa_r,etapa_m,dt_inicio,dt_etapa_d,dt_etapa_r,dt_etapa_m,updated_at"
+    )
+    try:
+        for i in range(0, len(eq_ids), 80):
+            rows = (
+                read_sb.table("tarefas_servico")
+                .select(select_cols)
+                .eq("tenant_id", tenant_id)
+                .eq("revisao_id", revisao_id)
+                .in_("equipamento_id", eq_ids[i:i + 80])
+                .in_("servico_id", svc_ids)
+                .execute()
+                .data
+            ) or []
+            fresh_rows.extend(rows)
+
+        for row in fresh_rows:
+            eid = row.get("equipamento_id")
+            sid = row.get("servico_id")
+            if not eid or not sid:
+                continue
+            task_map[(eid, sid)] = row
+            task_map[(str(eid), str(sid))] = row
+            task_map[(str(eid), sid)] = row
+            task_map[(eid, str(sid))] = row
+    except Exception:
+        return []
+    return fresh_rows
+
+
 def _build_eq_labels(eqs: list[dict[str, Any]], eq_ocultos_set: set[str]) -> tuple[dict[str, str], dict[str, str]]:
     eq_label = {
         e["id"]: (
@@ -272,27 +335,28 @@ def _resolve_semana_sugerida(rev_row: dict[str, Any] | None) -> int | None:
     return _week_from_revisao(_now_brt().date(), rev_data_inicio, rev_semanas_total)
 
 
+def _valid_services_for_group(
+    all_services: list[dict[str, Any]],
+    task_map: dict[tuple[str, str], dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Usa somente serviços que possuem tarefas reais para o grupo/revisão.
+
+    Isso mantém o Resumo/Header com o mesmo denominador do card da seleção
+    (ex.: 111 equipamentos × 11 serviços × 3 etapas), evitando diluir o
+    percentual com serviços do template que não tiveram tarefas geradas.
+    """
+    service_ids_with_tasks = {str(k[1]) for k in task_map.keys() if len(k) >= 2 and k[1] is not None}
+    valid = [s for s in (all_services or []) if s.get("id") and str(s.get("id")) in service_ids_with_tasks]
+    return valid or [s for s in (all_services or []) if s.get("id")]
+
+
 def _build_resumo_df(
     eqs: list[dict[str, Any]],
     all_services: list[dict[str, Any]],
     task_map: dict[tuple[str, str], dict[str, Any]],
     eq_label: dict[str, str],
 ) -> tuple[pd.DataFrame, int, int, int]:
-    # Usa o mesmo escopo real do card da seleção: somente serviços que possuem
-    # tarefas geradas para este grupo/revisão. Isso evita diluir o percentual com
-    # serviços existentes no template, mas sem tarefas no grupo atual.
-    valid_service_ids = {
-        str(key[1])
-        for key in task_map.keys()
-        if isinstance(key, tuple) and len(key) >= 2 and key[1] is not None
-    }
-    services_validos = [
-        s for s in all_services
-        if s.get("id") and str(s.get("id")) in valid_service_ids
-    ]
-    if not services_validos:
-        services_validos = [s for s in all_services if s.get("id")]
-
+    services_validos = _valid_services_for_group(all_services, task_map)
     total_per_eq = max(len(services_validos), 1) * 3
     resumo_rows: list[dict[str, Any]] = []
     tok_g = 0
@@ -301,13 +365,7 @@ def _build_resumo_df(
     for e in eqs:
         eid = str(e.get("id"))
         done = sum(
-            int(bool((
-                task_map.get((eid, str(s.get("id"))))
-                or task_map.get((e.get("id"), s.get("id")))
-                or task_map.get((str(e.get("id")), s.get("id")))
-                or task_map.get((e.get("id"), str(s.get("id"))))
-                or {}
-            ).get(f)))
+            int(bool((task_map.get((eid, str(s.get("id")))) or task_map.get((e.get("id"), s.get("id"))) or {}).get(f)))
             for s in services_validos
             if s.get("id")
             for f in ("etapa_d", "etapa_r", "etapa_m")
@@ -317,7 +375,7 @@ def _build_resumo_df(
             {
                 "Score": pct,
                 "%": pct,
-                "Equipamento": eq_label.get(e.get("id"), str(e.get("id"))),
+                "Equipamento": eq_label.get(e["id"], str(e.get("id"))),
                 "Concluidos": int(done),
                 "Total": int(total_per_eq),
             }
@@ -330,7 +388,7 @@ def _build_resumo_df(
     if not resumo_df.empty:
         resumo_df = resumo_df.sort_values(["Score", "%", "Equipamento"], ascending=[False, True, True]).reset_index(drop=True)
 
-    pct_geral = round((tok_g / max(len(eqs) * total_per_eq, 1)) * 100)
+    pct_geral = round((tok_g / max(len(eqs) * len(services_validos) * 3, 1)) * 100)
     return resumo_df, tok_g, eq100_g, pct_geral
 
 
@@ -461,6 +519,13 @@ def build_group_context(base_ctx: MatrixBaseContext) -> MatrixGroupContext | Non
 
     tarefas = payload.get("tarefas") or []
     task_map = {(str(t["equipamento_id"]), str(t["servico_id"])): t for t in tarefas}
+
+    # 🔄 Garante que Header/Resumo usem o mesmo estado real do banco
+    # (e não o payload antigo em cache).
+    fresh_tarefas = _refresh_all_tasks(base_ctx.sb, base_ctx.tenant_id, revisao_id, eqs, all_services, task_map)
+    if fresh_tarefas:
+        tarefas = fresh_tarefas
+
     semanas_disp = sorted({int(t.get("semana") or 0) for t in tarefas if t.get("semana")})
     semana_sugerida = _resolve_semana_sugerida(rev_row)
 
@@ -501,7 +566,7 @@ def build_group_context(base_ctx: MatrixBaseContext) -> MatrixGroupContext | Non
         eq_label_short=eq_label_short,
         semanas_disp=semanas_disp,
         semana_sugerida=semana_sugerida,
-        total_per_eq=int(resumo_df["Total"].iloc[0]) if not resumo_df.empty and "Total" in resumo_df.columns else max(len(all_services), 1) * 3,
+        total_per_eq=max(len(all_services), 1) * 3,
         resumo_df=resumo_df,
         tok_g=tok_g,
         eq100_g=eq100_g,
