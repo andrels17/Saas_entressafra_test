@@ -80,8 +80,56 @@ def _resolve_task_row(sb, task_map, revisao_id, equipamento_id, servico_id):
     return {}
 
 
+def _refresh_visible_sector_tasks(sb, task_map, revisao_id, eqs, svc_ids):
+    """Atualiza o task_map do setor aberto com dados frescos do Supabase."""
+    eq_ids = [e.get('id') for e in (eqs or []) if e.get('id')]
+    svc_ids = [sid for sid in (svc_ids or []) if sid]
+    if not revisao_id or not eq_ids or not svc_ids:
+        return
+
+    read_sb = sb
+    if get_supabase_service is not None:
+        try:
+            read_sb = get_supabase_service()
+        except Exception:
+            read_sb = sb
+
+    try:
+        select_cols = (
+            'id,equipamento_id,servico_id,status,semana,observacao,'
+            'etapa_d,etapa_r,etapa_m,dt_inicio,dt_etapa_d,dt_etapa_r,dt_etapa_m'
+        )
+        chunk_size = 80
+        for i in range(0, len(eq_ids), chunk_size):
+            eq_chunk = eq_ids[i:i + chunk_size]
+            rows = (
+                read_sb.table('tarefas_servico')
+                .select(select_cols)
+                .eq('revisao_id', revisao_id)
+                .in_('equipamento_id', eq_chunk)
+                .in_('servico_id', svc_ids)
+                .execute()
+                .data
+            ) or []
+            for row in rows:
+                eid = row.get('equipamento_id')
+                sid = row.get('servico_id')
+                if not eid or not sid:
+                    continue
+                task_map[(eid, sid)] = row
+                task_map[(str(eid), str(sid))] = row
+                task_map[(str(eid), sid)] = row
+                task_map[(eid, str(sid))] = row
+    except Exception as _e:
+        import logging
+        logging.getLogger('saas').debug('_refresh_visible_sector_tasks: %s', _e)
+
 def _invalidate_after_matrix_write() -> None:
     invalidate_matriz_cache()
+    try:
+        bump_data_version()
+    except Exception:
+        pass
     try:
         _load_payload.clear()
     except Exception:
@@ -93,6 +141,9 @@ def _invalidate_after_matrix_write() -> None:
 
 
 def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_v, svc_names_v, eqs, task_map, eq_label_short, rev_start, atraso_dias, semana_lote, usar_data_especifica=False, data_apontamento=None, rev_data_inicio: date | None = None, rev_semanas_total: int | None = None):
+    # Atualiza somente o setor aberto, evitando exibir dados antigos do cache.
+    _refresh_visible_sector_tasks(sb, task_map, revisao_id, eqs, svc_ids_v)
+
     df, col_meta, obs_map = build_sector_frame(
         equipamentos=eqs,
         svc_ids=svc_ids_v,
