@@ -24,6 +24,10 @@ from src.ui.pages.matriz_sector import (
 )
 from src.utils import nav
 from src.utils.supabase_helpers import normalize_id, current_user_id
+try:
+    from src.utils.supabase_helpers import get_supabase_service
+except Exception:
+    get_supabase_service = None
 from src.utils.timezone import now_utc as _now_utc
 from src.utils.weeks import apontamento_datetime_iso, effective_week_for_apontamento
 
@@ -58,7 +62,7 @@ def _resolve_task_row(sb, task_map, revisao_id, equipamento_id, servico_id):
     try:
         rows = (
             sb.table('tarefas_servico')
-            .select('id,semana,equipamento_id,servico_id')
+            .select('id,semana,equipamento_id,servico_id,etapa_d,etapa_r,etapa_m,status')
             .eq('revisao_id', revisao_id)
             .eq('equipamento_id', equipamento_id)
             .eq('servico_id', servico_id)
@@ -260,19 +264,43 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
                 semanas_total=rev_semanas_total,
             )
             missing = 0
-            payload_updates = []
+            grouped_updates = {}
+            dt_field_map = {'etapa_d': 'dt_etapa_d', 'etapa_r': 'dt_etapa_r', 'etapa_m': 'dt_etapa_m'}
+
             for eid, sid, field, nv in pending_changes:
                 t = _resolve_task_row(sb, task_map, revisao_id, eid, sid)
                 tid = t.get('id')
                 if not tid:
                     missing += 1
                     continue
-                upd = {'id': tid, field: bool(nv), 'updated_by': current_user_id() or None}
-                dtf = {'etapa_d': 'dt_etapa_d', 'etapa_r': 'dt_etapa_r', 'etapa_m': 'dt_etapa_m'}.get(field)
+
+                if tid not in grouped_updates:
+                    grouped_updates[tid] = {
+                        'id': tid,
+                        'updated_by': current_user_id() or None,
+                        # Estado atual vindo do banco/cache. As alterações abaixo sobrescrevem estes valores.
+                        '_etapa_d': bool(t.get('etapa_d', False)),
+                        '_etapa_r': bool(t.get('etapa_r', False)),
+                        '_etapa_m': bool(t.get('etapa_m', False)),
+                    }
+
+                upd = grouped_updates[tid]
+                nv_bool = bool(nv)
+                upd[field] = nv_bool
+                upd[f'_{field}'] = nv_bool
+
+                dtf = dt_field_map.get(field)
                 if dtf:
-                    upd[dtf] = step_dt if nv else None
-                if nv:
-                    upd['semana'] = effective_week
+                    upd[dtf] = step_dt if nv_bool else None
+
+            payload_updates = []
+            for upd in grouped_updates.values():
+                final_d = bool(upd.pop('_etapa_d', False))
+                final_r = bool(upd.pop('_etapa_r', False))
+                final_m = bool(upd.pop('_etapa_m', False))
+
+                upd['status'] = 'concluido' if (final_d and final_r and final_m) else 'pendente'
+                upd['semana'] = effective_week if (final_d or final_r or final_m) else None
                 payload_updates.append(upd)
 
             pb = st.empty()
@@ -283,8 +311,15 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
                 if missing:
                     st.caption(f'Itens sem correspondência de tarefa: {missing}.')
             else:
-                with st.spinner(f'Aplicando {len(payload_updates)} alterações em lote...'):
-                    ok, failed = _bulk_update_tasks(sb, payload_updates)
+                write_sb = sb
+                if get_supabase_service is not None:
+                    try:
+                        write_sb = get_supabase_service() or sb
+                    except Exception:
+                        write_sb = sb
+
+                with st.spinner(f'Aplicando {len(payload_updates)} tarefa(s) em lote...'):
+                    ok, failed = _bulk_update_tasks(write_sb, payload_updates)
 
                 if ok <= 0:
                     pb.error('Não foi possível persistir as alterações desta seleção.')
