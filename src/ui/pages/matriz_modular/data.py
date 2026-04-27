@@ -85,14 +85,27 @@ def _load_payload(tid, gid, rid, lim, ver="0", _token=""):
     _s2s, _all_s = _fetch_template(_sb, tid, gid)
     if not _all_s:
         return {"eqs": _eqs, "s2s": {}, "all_s": [], "tarefas": []}
-    _tarefas = (
-        _sb.table("tarefas_servico") .select(
-            "id,equipamento_id,servico_id,status,semana,observacao,"
-            "etapa_d,etapa_r,etapa_m,dt_inicio,dt_etapa_d,dt_etapa_r,dt_etapa_m") .eq(
-            "tenant_id", tid).eq(
-                "revisao_id", rid) .in_(
-                    "equipamento_id", [
-                        e["id"] for e in _eqs]).execute().data) or []
+    # Busca tarefas em chunks de 100 para contornar o limite silencioso do
+    # Supabase .in_() — grupos com >100 equipamentos retornavam dados truncados,
+    # causando divergência entre a Matriz (16%) e o Dashboard (20%).
+    _eq_ids = [e["id"] for e in _eqs]
+    _CHUNK = 100
+    _tarefas: list = []
+    for _i in range(0, len(_eq_ids), _CHUNK):
+        _chunk_ids = _eq_ids[_i: _i + _CHUNK]
+        _chunk = (
+            _sb.table("tarefas_servico")
+            .select(
+                "id,equipamento_id,servico_id,status,semana,observacao,"
+                "etapa_d,etapa_r,etapa_m,dt_inicio,dt_etapa_d,dt_etapa_r,dt_etapa_m"
+            )
+            .eq("tenant_id", tid)
+            .eq("revisao_id", rid)
+            .in_("equipamento_id", _chunk_ids)
+            .execute()
+            .data
+        ) or []
+        _tarefas.extend(_chunk)
     return {"eqs": _eqs, "s2s": _s2s, "all_s": _all_s, "tarefas": _tarefas}
 
 
