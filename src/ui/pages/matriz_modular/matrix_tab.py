@@ -10,6 +10,7 @@ from src.ui.components.forms import form_submit_button
 from src.ui.core.cache import bump_data_version
 from src.ui.core.cache_matrix import invalidate_matriz_cache
 from src.ui.pages.matriz_runtime import (
+    bulk_update_tasks as _bulk_update_tasks,
     sector_is_open as _sector_is_open,
     sector_set_open as _sector_set_open,
     svc_name_map as _svc_name_map,
@@ -29,35 +30,6 @@ from src.utils.weeks import apontamento_datetime_iso, effective_week_for_apontam
 from .data import _group_kpis, _load_payload
 from .insights import _sector_priority_sort_key
 from .pdf_export import _style_heatmap
-
-
-def _bulk_update_tasks(sb, updates: list[dict], *, chunk_size: int = 200) -> tuple[int, int]:
-    """Salva alterações da Matriz com UPDATE real por ID."""
-    if not updates:
-        return 0, 0
-    ok = 0
-    failed = 0
-    for raw in updates:
-        row = dict(raw or {})
-        tid = row.pop('id', None)
-        if not tid or not row:
-            failed += 1
-            continue
-        try:
-            resp = (
-                sb.table('tarefas_servico')
-                .update(row)
-                .eq('id', tid)
-                .execute()
-            )
-            data = getattr(resp, 'data', None)
-            if isinstance(data, list) and len(data) == 0:
-                failed += 1
-            else:
-                ok += 1
-        except Exception:
-            failed += 1
-    return ok, failed
 
 
 def _pct_bar_html(pct: int, height: int = 6) -> str:
@@ -296,19 +268,53 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
                 semanas_total=rev_semanas_total,
             )
             missing = 0
-            payload_updates = []
+            grouped_updates = {}
+            dt_fields = {'etapa_d': 'dt_etapa_d', 'etapa_r': 'dt_etapa_r', 'etapa_m': 'dt_etapa_m'}
+
             for eid, sid, field, nv in pending_changes:
                 t = _resolve_task_row(sb, task_map, revisao_id, eid, sid)
                 tid = t.get('id')
                 if not tid:
                     missing += 1
                     continue
-                upd = {'id': tid, field: bool(nv), 'updated_by': current_user_id() or None}
-                dtf = {'etapa_d': 'dt_etapa_d', 'etapa_r': 'dt_etapa_r', 'etapa_m': 'dt_etapa_m'}.get(field)
+
+                # Agrupa as alterações por tarefa. Antes, cada D/R/M ia em um UPDATE
+                # separado e o campo textual `status` não era recalculado; assim a
+                # célula podia ficar com D/R/M marcados, mas sem virar "concluido".
+                upd = grouped_updates.setdefault(
+                    str(tid),
+                    {
+                        'id': tid,
+                        'updated_by': current_user_id() or None,
+                        '_base_d': bool(t.get('etapa_d')),
+                        '_base_r': bool(t.get('etapa_r')),
+                        '_base_m': bool(t.get('etapa_m')),
+                    },
+                )
+                upd[field] = bool(nv)
+                dtf = dt_fields.get(field)
                 if dtf:
                     upd[dtf] = step_dt if nv else None
                 if nv:
                     upd['semana'] = effective_week
+
+            payload_updates = []
+            for upd in grouped_updates.values():
+                final_d = bool(upd.get('etapa_d', upd.get('_base_d', False)))
+                final_r = bool(upd.get('etapa_r', upd.get('_base_r', False)))
+                final_m = bool(upd.get('etapa_m', upd.get('_base_m', False)))
+                upd.pop('_base_d', None)
+                upd.pop('_base_r', None)
+                upd.pop('_base_m', None)
+
+                if final_d and final_r and final_m:
+                    upd['status'] = 'concluido'
+                elif final_d or final_r or final_m:
+                    upd['status'] = 'em_andamento'
+                else:
+                    upd['status'] = 'pendente'
+                    upd['semana'] = None
+
                 payload_updates.append(upd)
 
             pb = st.empty()
