@@ -278,15 +278,37 @@ def _build_resumo_df(
     task_map: dict[tuple[str, str], dict[str, Any]],
     eq_label: dict[str, str],
 ) -> tuple[pd.DataFrame, int, int, int]:
-    total_per_eq = max(len(all_services), 1) * 3
+    # Usa o mesmo escopo real do card da seleção: somente serviços que possuem
+    # tarefas geradas para este grupo/revisão. Isso evita diluir o percentual com
+    # serviços existentes no template, mas sem tarefas no grupo atual.
+    valid_service_ids = {
+        str(key[1])
+        for key in task_map.keys()
+        if isinstance(key, tuple) and len(key) >= 2 and key[1] is not None
+    }
+    services_validos = [
+        s for s in all_services
+        if s.get("id") and str(s.get("id")) in valid_service_ids
+    ]
+    if not services_validos:
+        services_validos = [s for s in all_services if s.get("id")]
+
+    total_per_eq = max(len(services_validos), 1) * 3
     resumo_rows: list[dict[str, Any]] = []
     tok_g = 0
     eq100_g = 0
 
     for e in eqs:
+        eid = str(e.get("id"))
         done = sum(
-            int(bool((task_map.get((e["id"], s.get("id"))) or {}).get(f)))
-            for s in all_services
+            int(bool((
+                task_map.get((eid, str(s.get("id"))))
+                or task_map.get((e.get("id"), s.get("id")))
+                or task_map.get((str(e.get("id")), s.get("id")))
+                or task_map.get((e.get("id"), str(s.get("id"))))
+                or {}
+            ).get(f)))
+            for s in services_validos
             if s.get("id")
             for f in ("etapa_d", "etapa_r", "etapa_m")
         )
@@ -295,20 +317,20 @@ def _build_resumo_df(
             {
                 "Score": pct,
                 "%": pct,
-                "Equipamento": eq_label.get(e["id"], str(e.get("id"))),
+                "Equipamento": eq_label.get(e.get("id"), str(e.get("id"))),
                 "Concluidos": int(done),
                 "Total": int(total_per_eq),
             }
         )
         tok_g += done
-        if done >= (len(all_services) * 3):
+        if done >= total_per_eq:
             eq100_g += 1
 
     resumo_df = pd.DataFrame(resumo_rows)
     if not resumo_df.empty:
         resumo_df = resumo_df.sort_values(["Score", "%", "Equipamento"], ascending=[False, True, True]).reset_index(drop=True)
 
-    pct_geral = round((tok_g / max(len(eqs) * len(all_services) * 3, 1)) * 100)
+    pct_geral = round((tok_g / max(len(eqs) * total_per_eq, 1)) * 100)
     return resumo_df, tok_g, eq100_g, pct_geral
 
 
@@ -479,7 +501,7 @@ def build_group_context(base_ctx: MatrixBaseContext) -> MatrixGroupContext | Non
         eq_label_short=eq_label_short,
         semanas_disp=semanas_disp,
         semana_sugerida=semana_sugerida,
-        total_per_eq=max(len(all_services), 1) * 3,
+        total_per_eq=int(resumo_df["Total"].iloc[0]) if not resumo_df.empty and "Total" in resumo_df.columns else max(len(all_services), 1) * 3,
         resumo_df=resumo_df,
         tok_g=tok_g,
         eq100_g=eq100_g,
