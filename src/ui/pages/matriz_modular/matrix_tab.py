@@ -86,15 +86,7 @@ def _invalidate_after_matrix_write() -> None:
         _group_kpis.clear()
     except Exception:
         pass
-    try:
-        from src.utils.kpi_engine import invalidate_kpi_cache
-        invalidate_kpi_cache()
-    except Exception:
-        pass
-    try:
-        bump_data_version()
-    except Exception:
-        pass
+
 
 def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_v, svc_names_v, eqs, task_map, eq_label_short, rev_start, atraso_dias, semana_lote, usar_data_especifica=False, data_apontamento=None, rev_data_inicio: date | None = None, rev_semanas_total: int | None = None):
     df, col_meta, obs_map = build_sector_frame(
@@ -268,53 +260,19 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
                 semanas_total=rev_semanas_total,
             )
             missing = 0
-            grouped_updates = {}
-            dt_fields = {'etapa_d': 'dt_etapa_d', 'etapa_r': 'dt_etapa_r', 'etapa_m': 'dt_etapa_m'}
-
+            payload_updates = []
             for eid, sid, field, nv in pending_changes:
                 t = _resolve_task_row(sb, task_map, revisao_id, eid, sid)
                 tid = t.get('id')
                 if not tid:
                     missing += 1
                     continue
-
-                # Agrupa as alterações por tarefa. Antes, cada D/R/M ia em um UPDATE
-                # separado e o campo textual `status` não era recalculado; assim a
-                # célula podia ficar com D/R/M marcados, mas sem virar "concluido".
-                upd = grouped_updates.setdefault(
-                    str(tid),
-                    {
-                        'id': tid,
-                        'updated_by': current_user_id() or None,
-                        '_base_d': bool(t.get('etapa_d')),
-                        '_base_r': bool(t.get('etapa_r')),
-                        '_base_m': bool(t.get('etapa_m')),
-                    },
-                )
-                upd[field] = bool(nv)
-                dtf = dt_fields.get(field)
+                upd = {'id': tid, field: bool(nv), 'updated_by': current_user_id() or None}
+                dtf = {'etapa_d': 'dt_etapa_d', 'etapa_r': 'dt_etapa_r', 'etapa_m': 'dt_etapa_m'}.get(field)
                 if dtf:
                     upd[dtf] = step_dt if nv else None
                 if nv:
                     upd['semana'] = effective_week
-
-            payload_updates = []
-            for upd in grouped_updates.values():
-                final_d = bool(upd.get('etapa_d', upd.get('_base_d', False)))
-                final_r = bool(upd.get('etapa_r', upd.get('_base_r', False)))
-                final_m = bool(upd.get('etapa_m', upd.get('_base_m', False)))
-                upd.pop('_base_d', None)
-                upd.pop('_base_r', None)
-                upd.pop('_base_m', None)
-
-                if final_d and final_r and final_m:
-                    upd['status'] = 'concluido'
-                elif final_d or final_r or final_m:
-                    upd['status'] = 'em_andamento'
-                else:
-                    upd['status'] = 'pendente'
-                    upd['semana'] = None
-
                 payload_updates.append(upd)
 
             pb = st.empty()
@@ -344,7 +302,7 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
                         st.rerun()
 
 
-def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_disp, semana_sugerida, group_rev_start, setor_to_services, tarefas, eqs, task_map, eq_label_short, tenant_id=None, rev_data_inicio: date | None = None, rev_semanas_total: int | None = None, **kwargs) -> None:
+def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_disp, semana_sugerida, group_rev_start, setor_to_services, tarefas, eqs, task_map, eq_label_short, rev_data_inicio: date | None = None, rev_semanas_total: int | None = None) -> None:
     # ── W: Ctrl+S — clica no primeiro botão "Salvar alterações" visível ──
     st.markdown(
         """<script>

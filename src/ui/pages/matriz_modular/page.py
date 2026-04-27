@@ -905,7 +905,6 @@ def _render_matriz_section(base_ctx, group_ctx) -> None:
 
     render_matrix_tab(
         sb=base_ctx.sb,
-        tenant_id=base_ctx.tenant_id,
         revisao_id=group_ctx.revisao_id,
         grupo_id=group_ctx.grupo_id,
         group_atraso_dias=group_ctx.group_atraso_dias,
