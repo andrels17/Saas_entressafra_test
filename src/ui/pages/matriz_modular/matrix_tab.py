@@ -9,6 +9,7 @@ import streamlit as st
 from src.ui.components.forms import form_submit_button
 from src.ui.core.cache import bump_data_version
 from src.ui.core.cache_matrix import invalidate_matriz_cache
+from src.services.dashboard_cache_service import refresh_dashboard_cache
 from src.ui.pages.matriz_runtime import (
     bulk_update_tasks as _bulk_update_tasks,
     sector_is_open as _sector_is_open,
@@ -76,7 +77,7 @@ def _resolve_task_row(sb, task_map, revisao_id, equipamento_id, servico_id):
     return {}
 
 
-def _invalidate_after_matrix_write() -> None:
+def _invalidate_after_matrix_write(sb=None, tenant_id=None, revisao_id=None) -> None:
     invalidate_matriz_cache()
     try:
         _load_payload.clear()
@@ -86,9 +87,15 @@ def _invalidate_after_matrix_write() -> None:
         _group_kpis.clear()
     except Exception:
         pass
+    bump_data_version()
+    if sb and tenant_id and revisao_id:
+        try:
+            refresh_dashboard_cache(sb, tenant_id, revisao_id)
+        except Exception:
+            pass
 
 
-def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_v, svc_names_v, eqs, task_map, eq_label_short, rev_start, atraso_dias, semana_lote, usar_data_especifica=False, data_apontamento=None, rev_data_inicio: date | None = None, rev_semanas_total: int | None = None):
+def _render_sector_editor(*, sb, tenant_id, revisao_id, grupo_id, setor_nome, svs, svc_ids_v, svc_names_v, eqs, task_map, eq_label_short, rev_start, atraso_dias, semana_lote, usar_data_especifica=False, data_apontamento=None, rev_data_inicio: date | None = None, rev_semanas_total: int | None = None):
     df, col_meta, obs_map = build_sector_frame(
         equipamentos=eqs,
         svc_ids=svc_ids_v,
@@ -261,18 +268,40 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
             )
             missing = 0
             payload_updates = []
+            # Agrupa alterações por tarefa para recalcular status corretamente
+            from collections import defaultdict
+            changes_by_task = defaultdict(list)
+            task_cache = {}
             for eid, sid, field, nv in pending_changes:
                 t = _resolve_task_row(sb, task_map, revisao_id, eid, sid)
                 tid = t.get('id')
                 if not tid:
                     missing += 1
                     continue
-                upd = {'id': tid, field: bool(nv), 'updated_by': current_user_id() or None}
-                dtf = {'etapa_d': 'dt_etapa_d', 'etapa_r': 'dt_etapa_r', 'etapa_m': 'dt_etapa_m'}.get(field)
-                if dtf:
-                    upd[dtf] = step_dt if nv else None
-                if nv:
-                    upd['semana'] = effective_week
+                task_cache[tid] = t
+                changes_by_task[tid].append((field, bool(nv)))
+
+            for tid, field_changes in changes_by_task.items():
+                t = task_cache[tid]
+                upd = {'id': tid, 'updated_by': current_user_id() or None}
+                # Aplica todas as mudanças de etapa desta tarefa
+                for field, nv in field_changes:
+                    upd[field] = nv
+                    dtf = {'etapa_d': 'dt_etapa_d', 'etapa_r': 'dt_etapa_r', 'etapa_m': 'dt_etapa_m'}.get(field)
+                    if dtf:
+                        upd[dtf] = step_dt if nv else None
+                    if nv:
+                        upd.setdefault('semana', effective_week)
+                # Recalcula status com base no estado final das 3 etapas
+                final_d = upd.get('etapa_d', bool(t.get('etapa_d')))
+                final_r = upd.get('etapa_r', bool(t.get('etapa_r')))
+                final_m = upd.get('etapa_m', bool(t.get('etapa_m')))
+                if final_d and final_r and final_m:
+                    upd['status'] = 'concluido'
+                elif not final_d and not final_r and not final_m:
+                    upd['status'] = 'pendente'
+                else:
+                    upd['status'] = 'em_andamento'
                 payload_updates.append(upd)
 
             pb = st.empty()
@@ -295,14 +324,14 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
                         + (f'  ·  {missing} não encontradas' if missing else '')
                     )
                     st.toast('✅ Alterações aplicadas com sucesso!')
-                    _invalidate_after_matrix_write()
+                    _invalidate_after_matrix_write(sb=sb, tenant_id=tenant_id, revisao_id=revisao_id)
                     try:
                         nav.rerun_keep_menu()
                     except Exception:
                         st.rerun()
 
 
-def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_disp, semana_sugerida, group_rev_start, setor_to_services, tarefas, eqs, task_map, eq_label_short, rev_data_inicio: date | None = None, rev_semanas_total: int | None = None) -> None:
+def render_matrix_tab(*, sb, tenant_id, revisao_id, grupo_id, group_atraso_dias, semanas_disp, semana_sugerida, group_rev_start, setor_to_services, tarefas, eqs, task_map, eq_label_short, rev_data_inicio: date | None = None, rev_semanas_total: int | None = None) -> None:
     # ── W: Ctrl+S — clica no primeiro botão "Salvar alterações" visível ──
     st.markdown(
         """<script>
@@ -482,6 +511,7 @@ def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_di
             st.markdown('<div class="mtz-sector-content-fade">', unsafe_allow_html=True)
             _render_sector_editor(
                 sb=sb,
+                tenant_id=tenant_id,
                 revisao_id=revisao_id,
                 grupo_id=grupo_id,
                 setor_nome=setor_nome,
