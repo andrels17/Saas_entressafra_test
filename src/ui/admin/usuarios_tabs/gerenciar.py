@@ -92,31 +92,42 @@ def _save_user_scope_multi(
         tenant_id: str,
         user_id: str,
         departamento_ids: list,
-        grupo_id):
+        grupo_id,
+        grupo_departamento_id=None):
+    """Salva departamentos vinculados e, opcionalmente, 1 único grupo.
+
+    Quando houver vários departamentos, o grupo fica gravado apenas na linha
+    do departamento ao qual ele pertence. Assim o gestor pode ter vários
+    departamentos, mas continua limitado a apenas 1 grupo.
+    """
     departamento_ids = [d for d in (departamento_ids or []) if d]
+    if grupo_id and grupo_departamento_id and grupo_departamento_id not in departamento_ids:
+        departamento_ids.append(grupo_departamento_id)
+
     new_ok = False
     try:
         svc.table("tenant_user_departamentos").delete().eq(
             "tenant_id", tenant_id).eq(
             "user_id", user_id).execute()
         if departamento_ids:
-            payload = [
-                {
+            payload = []
+            for d in departamento_ids:
+                payload.append({
                     "tenant_id": tenant_id,
                     "user_id": user_id,
                     "departamento_id": d,
-                    "grupo_id": (grupo_id if len(departamento_ids) == 1 else None),
-                }
-                for d in departamento_ids
-            ]
+                    "grupo_id": grupo_id if grupo_id and (not grupo_departamento_id or str(d) == str(grupo_departamento_id)) else None,
+                })
             svc.table("tenant_user_departamentos").insert(payload).execute()
         new_ok = True
     except Exception:
         new_ok = False
 
-    if len(departamento_ids) == 1:
+    # Mantém compatibilidade com tabela legada: grava o escopo principal.
+    if departamento_ids:
+        dep_legacy = grupo_departamento_id if grupo_id and grupo_departamento_id else departamento_ids[0]
         pl = {"tenant_id": tenant_id, "user_id": user_id,
-              "departamento_id": departamento_ids[0], "grupo_id": grupo_id}
+              "departamento_id": dep_legacy, "grupo_id": grupo_id}
         try:
             svc.table("tenant_user_scope").upsert(
                 pl, on_conflict="tenant_id,user_id").execute()
@@ -134,7 +145,7 @@ def _save_user_scope_multi(
             import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
 
     if not new_ok:
-        d0 = departamento_ids[0] if departamento_ids else None
+        d0 = grupo_departamento_id if grupo_id and grupo_departamento_id else (departamento_ids[0] if departamento_ids else None)
         if not d0:
             try:
                 svc.table("tenant_user_scope").delete().eq(
@@ -358,39 +369,49 @@ def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn) -> None:
             dept_names = [d["nome"] for d in depts]
 
             sel_grp_id = None
+            sel_grp_dep_id = None
             if cur_role == "gestor":
-                st.info("Gestor deve ficar vinculado a apenas 1 grupo. O departamento será definido pelo grupo selecionado.")
+                st.info("Gestor pode ter vários departamentos, mas deve ficar vinculado a apenas 1 grupo.")
 
-                default_dep_id = cur_deps[0] if cur_deps else None
-                dept_ids = [d["id"] for d in depts]
-                dep_idx = dept_ids.index(default_dep_id) if default_dep_id in dept_ids else 0
-                dep_nome = st.selectbox(
-                    "Departamento",
+                sel_dept_names = st.multiselect(
+                    "Departamentos",
                     dept_names,
-                    index=dep_idx,
-                    key=f"scope_dept_single_{target_user_id}",
+                    default=[
+                        n for n in dept_names if dept_map.get(n) in set(cur_deps)],
+                    key=f"scope_deps_gestor_{target_user_id}",
+                    placeholder="Selecione um ou mais departamentos…",
                 )
-                dep_id_single = dept_map.get(dep_nome)
-                sel_dep_ids = [dep_id_single] if dep_id_single else []
+                sel_dep_ids = [dept_map[n] for n in sel_dept_names if dept_map.get(n)]
 
                 grupos_filtered = [
                     g for g in grupos_all
-                    if str(g.get("departamento_id") or "") == str(dep_id_single or "")
+                    if not sel_dep_ids or str(g.get("departamento_id") or "") in {str(d) for d in sel_dep_ids}
                 ]
-                if not grupos_filtered:
-                    st.warning("Este departamento ainda não possui grupos ativos para vincular ao gestor.")
-                    sel_grp_id = None
+
+                if not sel_dep_ids:
+                    st.warning("Selecione pelo menos um departamento para habilitar o grupo do gestor.")
+                elif not grupos_filtered:
+                    st.warning("Os departamentos selecionados ainda não possuem grupos ativos.")
                 else:
-                    grp_names = [g["nome"] for g in grupos_filtered]
-                    grp_ids = [g["id"] for g in grupos_filtered]
-                    grp_idx = grp_ids.index(cur_grp) if cur_grp in grp_ids else 0
-                    sel_grp_name = st.selectbox(
-                        "Grupo do gestor",
-                        grp_names,
+                    grp_labels = []
+                    grp_label_to_obj = {}
+                    dep_nome_by_id = {d["id"]: d["nome"] for d in depts}
+                    for g in grupos_filtered:
+                        dep_nome_g = dep_nome_by_id.get(g.get("departamento_id"), "Sem departamento")
+                        label = f"{dep_nome_g} › {g['nome']}"
+                        grp_labels.append(label)
+                        grp_label_to_obj[label] = g
+                    cur_grp_label = next((lbl for lbl, g in grp_label_to_obj.items() if g.get("id") == cur_grp), None)
+                    grp_idx = grp_labels.index(cur_grp_label) if cur_grp_label in grp_labels else 0
+                    sel_grp_label = st.selectbox(
+                        "Grupo do gestor (apenas 1)",
+                        grp_labels,
                         index=grp_idx,
                         key=f"scope_grp_{target_user_id}",
                     )
-                    sel_grp_id = grp_ids[grp_names.index(sel_grp_name)]
+                    sel_grp_obj = grp_label_to_obj.get(sel_grp_label)
+                    sel_grp_id = sel_grp_obj.get("id") if sel_grp_obj else None
+                    sel_grp_dep_id = sel_grp_obj.get("departamento_id") if sel_grp_obj else None
             else:
                 sel_dept_names = st.multiselect(
                     "Departamentos",
@@ -492,7 +513,7 @@ def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn) -> None:
                         key=f"scope_save_{target_user_id}"):
                     try:
                         _save_user_scope_multi(
-                            svc, tenant_id, target_user_id, sel_dep_ids, sel_grp_id)
+                            svc, tenant_id, target_user_id, sel_dep_ids, sel_grp_id, sel_grp_dep_id)
                         st.success("✅ Escopo salvo.")
                         rerun_fn()
                     except Exception as e:
