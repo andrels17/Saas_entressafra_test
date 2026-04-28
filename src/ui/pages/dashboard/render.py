@@ -1367,6 +1367,8 @@ def render_dashboard() -> None:
     sb = sb_for_user()
     dep_scope_ids, grp_scope_ids = get_my_scope(tenant_id, sb)
     role = st.session_state.get("current_role") or ""
+    role_norm = str(role or "").strip().lower()
+    can_use_gestor_filter = role_norm in {"admin", "supervisor", "superadmin"}
     if can_view_all_data(role):
         if dep_scope_ids == []:
             dep_scope_ids = None
@@ -1402,7 +1404,7 @@ def render_dashboard() -> None:
         raw, raw_equipment, eq_meta, debug_meta = _load_base_cached(tenant_id, revisao_id, token, ver)
         departamentos = _load_departamentos(tenant_id, ver, token)
         grupos = _load_grupos(tenant_id, ver, token)
-        gestor_options = _load_gestor_options(tenant_id, token, ver) if can_view_all_data(role) else []
+        gestor_options = _load_gestor_options(tenant_id, token, ver) if can_use_gestor_filter else []
 
     if dep_scope_ids in (None, [] ) and grp_scope_ids not in (None, []):
         dep_scope_ids = sorted({str(g.get("departamento_id")) for g in grupos if g.get("id") in set(grp_scope_ids) and g.get("departamento_id")})
@@ -1499,7 +1501,7 @@ def render_dashboard() -> None:
     # Admin/supervisor conseguem simular o recorte de um gestor no Dashboard.
     # O recorte é aplicado antes dos filtros de departamento/grupo, para que
     # os selects exibam apenas os departamentos, grupos e equipamentos do gestor.
-    if can_view_all_data(role) and gestor_options:
+    if can_use_gestor_filter and gestor_options:
         gestor_labels = ["Todos os gestores"] + [
             str(g.get("gestor_nome") or "Gestor") for g in gestor_options
         ]
@@ -1529,10 +1531,11 @@ def render_dashboard() -> None:
             grp_set = set(gestor_selected_group_ids)
             departamentos_filter = [d for d in departamentos if str(d.get("id")) in dept_set]
             grupos_filter = [g for g in grupos if str(g.get("id")) in grp_set]
-            selection_summary(
-                "Filtro de gestor aplicado",
-                f"{len(departamentos_filter)} departamento(s) · {len(grupos_filter)} grupo(s)",
-            )
+            selection_summary({
+                "Gestor": gestor_sel_label,
+                "Departamentos": len(departamentos_filter),
+                "Grupos": len(grupos_filter),
+            })
 
     c1, c2, c3 = st.columns([1.1, 1.4, 0.6])
     with c1:
