@@ -133,23 +133,49 @@ def _save_user_scope_multi(
 
     payload = []
 
-    # Mantém vínculo explícito com departamentos selecionados.
-    for dep_id in departamento_ids:
-        payload.append({
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "departamento_id": dep_id,
-            "grupo_id": None,
-        })
+    # Monta primeiro os vínculos específicos por grupo.
+    # Importante: a PK antiga da tabela era por departamento; então não podemos
+    # inserir uma linha "departamento puro" e outra linha de grupo para o mesmo
+    # departamento. Além disso, para múltiplos grupos no mesmo departamento, o
+    # banco precisa estar com a migração SQL incluída neste pacote.
+    deps_com_grupo = set()
+    seen_group_rows = set()
 
-    # Mantém vínculos específicos com todos os grupos selecionados.
     for gid in grupo_ids:
         dep_id = grupo_departamento_ids.get(gid) or grupo_departamento_ids.get(str(gid))
+        if not dep_id:
+            continue
+
+        deps_com_grupo.add(dep_id)
+        row_key = (str(dep_id), str(gid))
+        if row_key in seen_group_rows:
+            continue
+
+        seen_group_rows.add(row_key)
         payload.append({
             "tenant_id": tenant_id,
             "user_id": user_id,
             "departamento_id": dep_id,
             "grupo_id": gid,
+        })
+
+    # Salva somente departamentos sem grupo específico selecionado.
+    # Se o departamento já aparece por grupo, a leitura do escopo continua
+    # reconhecendo o departamento através da própria linha do grupo.
+    seen_dept_rows = set()
+    for dep_id in departamento_ids:
+        if dep_id in deps_com_grupo:
+            continue
+        row_key = str(dep_id)
+        if row_key in seen_dept_rows:
+            continue
+
+        seen_dept_rows.add(row_key)
+        payload.append({
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "departamento_id": dep_id,
+            "grupo_id": None,
         })
 
     if payload:
