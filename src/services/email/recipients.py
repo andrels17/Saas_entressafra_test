@@ -216,27 +216,37 @@ def _fetch_groups_by_department(svc, tenant_id: str) -> dict[str, list[str]]:
     return dep_to_grupos
 
 
+
 def get_recipient_groups(tenant_id: str) -> list[RecipientGroup]:
-    """Retorna grupos de departamento com destinatários tipo gestor."""
+    """Retorna grupos de destinatários respeitando vínculos por grupo.
+
+    Compatibilidade para fluxos antigos:
+    - se o usuário está vinculado a grupos específicos, o e-mail/PDF usa
+      somente esses grupos;
+    - se está vinculado só ao departamento, usa todos os grupos do departamento;
+    - usuários com o mesmo departamento e o mesmo conjunto de grupos são
+      agrupados no mesmo RecipientGroup para evitar e-mails duplicados.
+    """
     svc = get_supabase_service()
     prefs = _fetch_email_prefs(svc, tenant_id)
 
     deps = _fetch_active_departments(svc, tenant_id)
     if not deps:
         return []
+
     dep_map = {dep["id"]: dep["nome"] for dep in deps}
     dep_to_grupos = _fetch_groups_by_department(svc, tenant_id)
 
     try:
         links = (
             svc.table("tenant_user_departamentos")
-            .select("user_id,departamento_id")
+            .select("user_id,departamento_id,grupo_id")
             .eq("tenant_id", tenant_id)
             .execute()
             .data
         ) or []
     except Exception as exc:
-        log.warning("get_recipient_groups: falha ao buscar vínculos por departamento: %s", exc)
+        log.warning("get_recipient_groups: falha ao buscar vínculos: %s", exc)
         links = []
 
     try:
@@ -250,55 +260,77 @@ def get_recipient_groups(tenant_id: str) -> list[RecipientGroup]:
     except Exception as exc:
         log.warning("get_recipient_groups: falha ao buscar tenant_users: %s", exc)
         tu_rows = []
-    user_roles = {row["user_id"]: row.get("role", "") for row in tu_rows if row.get("user_id")}
 
-    dep_to_users: dict[str, set[str]] = {}
+    user_roles = {
+        row["user_id"]: row.get("role", "")
+        for row in tu_rows
+        if row.get("user_id")
+    }
+
+    uid_to_deps: dict[str, set[str]] = {}
+    uid_dep_to_explicit_grps: dict[str, dict[str, set[str]]] = {}
+
     for link in links:
         uid = link.get("user_id")
         dep_id = link.get("departamento_id")
+        grp_id = link.get("grupo_id")
         if not (uid and dep_id):
             continue
         role = user_roles.get(uid, "")
-        if _resolve_tipo(uid, role, prefs) == TIPO_GESTOR:
-            dep_to_users.setdefault(dep_id, set()).add(uid)
+        if _resolve_tipo(uid, role, prefs) != TIPO_GESTOR:
+            continue
 
-    all_uids = {uid for uids in dep_to_users.values() for uid in uids}
+        uid_to_deps.setdefault(uid, set()).add(dep_id)
+        if grp_id:
+            uid_dep_to_explicit_grps.setdefault(uid, {}).setdefault(dep_id, set()).add(grp_id)
+
+    all_uids = set(uid_to_deps.keys())
     profiles = _fetch_profiles(svc, list(all_uids))
     emails = _fetch_user_emails(svc, all_uids)
 
-    groups: list[RecipientGroup] = []
-    for dep_id, dep_nome in dep_map.items():
-        uids = dep_to_users.get(dep_id, set())
-        recipients: list[Recipient] = []
-        for uid in uids:
-            email = emails.get(uid, "")
-            if not email:
-                continue
-            recipients.append(
-                Recipient(
-                    user_id=uid,
-                    email=email,
-                    nome=_nome_from(uid, profiles, email),
-                    tipo_relatorio=TIPO_GESTOR,
-                )
-            )
+    # (departamento_id, grupo_ids_tuple) → recipients
+    buckets: dict[tuple[str, tuple[str, ...]], list[Recipient]] = {}
+    seen_in_bucket: dict[tuple[str, tuple[str, ...]], set[str]] = {}
 
-        grupo_ids = dep_to_grupos.get(dep_id) or next(
-            (dep.get("_grupo_ids", []) for dep in deps if dep["id"] == dep_id),
-            [],
+    for uid, dep_ids in uid_to_deps.items():
+        email = emails.get(uid, "")
+        if not email:
+            continue
+
+        recipient = Recipient(
+            user_id=uid,
+            email=email,
+            nome=_nome_from(uid, profiles, email),
+            tipo_relatorio=TIPO_GESTOR,
         )
+
+        for dep_id in sorted(dep_ids):
+            explicit = uid_dep_to_explicit_grps.get(uid, {}).get(dep_id, set())
+            grupo_ids = sorted({str(g) for g in (explicit or dep_to_grupos.get(dep_id, [])) if g})
+            if not grupo_ids:
+                continue
+
+            key = (dep_id, tuple(grupo_ids))
+            seen = seen_in_bucket.setdefault(key, set())
+            if email in seen:
+                continue
+            seen.add(email)
+            buckets.setdefault(key, []).append(recipient)
+
+    groups: list[RecipientGroup] = []
+    for (dep_id, grupo_ids_tuple), recipients in buckets.items():
         if not recipients:
             continue
         groups.append(
             RecipientGroup(
                 departamento_id=dep_id,
-                departamento_nome=dep_nome,
+                departamento_nome=dep_map.get(dep_id, dep_id),
                 recipients=recipients,
-                grupo_ids=grupo_ids,
+                grupo_ids=list(grupo_ids_tuple),
             )
         )
-    return groups
 
+    return groups
 
 def get_executive_recipients(tenant_id: str) -> list[Recipient]:
     """Retorna destinatários do relatório executivo."""
@@ -430,21 +462,22 @@ class ManagerPdfBundle:
     grupo_ids_por_dept: dict[str, list[str]]  # dep_id → grupo_ids
 
 
+
 def get_manager_pdf_bundles(tenant_id: str) -> list[ManagerPdfBundle]:
-    """Retorna um bundle por gestor contendo todos os seus departamentos.
+    """Retorna um bundle por gestor respeitando departamentos e grupos vinculados.
 
-    Consolida vínculos de duas tabelas:
-      - tenant_user_departamentos: vínculos explícitos departamento_id (e grupo_id opcional)
-      - tenant_user_scope: vínculo legado de linha única (departamento_id ou grupo_id)
+    Fonte oficial dos vínculos:
+      - tenant_user_departamentos(departamento_id, grupo_id)
 
-    Se o gestor só tem grupo_id, deriva o departamento via equip_grupos.
-    Ao invés de um e-mail por departamento, o dispatcher envia um único
-    e-mail por gestor com todos os PDFs dos seus departamentos como anexos.
+    Regras:
+      - vínculo com grupo_id: o gestor recebe somente aquele(s) grupo(s);
+      - vínculo só com departamento_id: o gestor recebe todos os grupos daquele departamento;
+      - um gestor recebe apenas um e-mail com todos os anexos aplicáveis;
+      - e-mails duplicados são consolidados para não enviar duas vezes.
     """
     svc = get_supabase_service()
     prefs = _fetch_email_prefs(svc, tenant_id)
 
-    # Roles dos usuários — necessário para filtrar só gestores
     try:
         tu_rows = (
             svc.table("tenant_users")
@@ -456,9 +489,13 @@ def get_manager_pdf_bundles(tenant_id: str) -> list[ManagerPdfBundle]:
     except Exception as exc:
         log.warning("get_manager_pdf_bundles: falha ao buscar tenant_users: %s", exc)
         return []
-    user_roles = {row["user_id"]: row.get("role", "") for row in tu_rows if row.get("user_id")}
 
-    # Filtra apenas usuários do tipo gestor
+    user_roles = {
+        row["user_id"]: row.get("role", "")
+        for row in tu_rows
+        if row.get("user_id")
+    }
+
     gestor_uids: set[str] = {
         uid for uid, role in user_roles.items()
         if _resolve_tipo(uid, role, prefs) == TIPO_GESTOR
@@ -466,33 +503,13 @@ def get_manager_pdf_bundles(tenant_id: str) -> list[ManagerPdfBundle]:
     if not gestor_uids:
         return []
 
-    # Mapa grupo_id → departamento_id (para derivar depto a partir de grupo)
     dep_to_grupos = _fetch_groups_by_department(svc, tenant_id)
-    grp_to_dep: dict[str, str] = {}
-    for dep_id, grp_ids in dep_to_grupos.items():
-        for gid in grp_ids:
-            grp_to_dep[gid] = dep_id
 
-    # uid → set de dep_ids (consolidado de ambas as tabelas)
     uid_to_dep_ids: dict[str, set[str]] = {}
-    # uid → dep_id → set de grupo_ids explícitos (quando vinculado por grupo)
     uid_dep_to_grp_ids: dict[str, dict[str, set[str]]] = {}
 
-    def _add_link(uid: str, dep_id: str | None, grp_id: str | None):
-        """Registra o vínculo uid → dep_id, derivando dep_id do grupo se necessário."""
-        if not uid or uid not in gestor_uids:
-            return
-        if not dep_id and grp_id:
-            dep_id = grp_to_dep.get(grp_id)
-        if not dep_id:
-            return
-        uid_to_dep_ids.setdefault(uid, set()).add(dep_id)
-        if grp_id:
-            uid_dep_to_grp_ids.setdefault(uid, {}).setdefault(dep_id, set()).add(grp_id)
-
-    # Fonte 1: tenant_user_departamentos (principal, suporta múltiplos deptos)
     try:
-        rows1 = (
+        rows = (
             svc.table("tenant_user_departamentos")
             .select("user_id,departamento_id,grupo_id")
             .eq("tenant_id", tenant_id)
@@ -501,30 +518,23 @@ def get_manager_pdf_bundles(tenant_id: str) -> list[ManagerPdfBundle]:
         ) or []
     except Exception as exc:
         log.warning("get_manager_pdf_bundles: falha ao buscar tenant_user_departamentos: %s", exc)
-        rows1 = []
-    for row in rows1:
-        _add_link(row.get("user_id"), row.get("departamento_id"), row.get("grupo_id"))
+        rows = []
 
-    # Fonte 2: tenant_user_scope (legado — um registro por usuário)
-    try:
-        rows2 = (
-            svc.table("tenant_user_scope")
-            .select("user_id,departamento_id,grupo_id")
-            .eq("tenant_id", tenant_id)
-            .execute()
-            .data
-        ) or []
-    except Exception as exc:
-        log.warning("get_manager_pdf_bundles: falha ao buscar tenant_user_scope: %s", exc)
-        rows2 = []
-    for row in rows2:
-        _add_link(row.get("user_id"), row.get("departamento_id"), row.get("grupo_id"))
+    for row in rows:
+        uid = row.get("user_id")
+        dep_id = row.get("departamento_id")
+        grp_id = row.get("grupo_id")
+        if not uid or uid not in gestor_uids or not dep_id:
+            continue
+
+        uid_to_dep_ids.setdefault(uid, set()).add(dep_id)
+        if grp_id:
+            uid_dep_to_grp_ids.setdefault(uid, {}).setdefault(dep_id, set()).add(grp_id)
 
     if not uid_to_dep_ids:
         return []
 
-    # Busca nomes dos departamentos
-    all_dep_ids = list({d for deps in uid_to_dep_ids.values() for d in deps})
+    all_dep_ids = sorted({d for deps in uid_to_dep_ids.values() for d in deps})
     try:
         dep_rows = (
             svc.table("departamentos")
@@ -537,32 +547,61 @@ def get_manager_pdf_bundles(tenant_id: str) -> list[ManagerPdfBundle]:
     except Exception as exc:
         log.warning("get_manager_pdf_bundles: falha ao buscar departamentos: %s", exc)
         dep_rows = []
+
     dep_nome_map = {row["id"]: row.get("nome", "") for row in dep_rows}
 
     all_uids = set(uid_to_dep_ids.keys())
     profiles = _fetch_profiles(svc, list(all_uids))
     emails = _fetch_user_emails(svc, all_uids)
 
-    bundles: list[ManagerPdfBundle] = []
+    # Consolida por e-mail para evitar duplicidade caso existam dois usuários
+    # cadastrados com o mesmo endereço.
+    email_to_bundle_data: dict[str, dict[str, Any]] = {}
+
     for uid, dep_ids_set in uid_to_dep_ids.items():
         email = emails.get(uid, "")
         if not email:
             continue
-        dep_ids = sorted(dep_ids_set)  # ordem estável
 
-        # grupo_ids por departamento: se o gestor tem grupos explícitos, usa-os;
-        # caso contrário usa todos os grupos do departamento (comportamento padrão)
-        grp_map: dict[str, list[str]] = {}
-        for dep_id in dep_ids:
-            explicit = sorted(uid_dep_to_grp_ids.get(uid, {}).get(dep_id, set()))
-            grp_map[dep_id] = explicit if explicit else dep_to_grupos.get(dep_id, [])
+        entry = email_to_bundle_data.setdefault(
+            email,
+            {
+                "user_id": uid,
+                "nome": _nome_from(uid, profiles, email),
+                "dep_ids": set(),
+                "grp_map": {},
+            },
+        )
+
+        for dep_id in dep_ids_set:
+            entry["dep_ids"].add(dep_id)
+            explicit = {
+                str(g)
+                for g in uid_dep_to_grp_ids.get(uid, {}).get(dep_id, set())
+                if g
+            }
+            grupos_dept = {str(g) for g in dep_to_grupos.get(dep_id, []) if g}
+
+            if explicit:
+                entry["grp_map"].setdefault(dep_id, set()).update(explicit)
+            else:
+                # vínculo amplo por departamento
+                entry["grp_map"].setdefault(dep_id, set()).update(grupos_dept)
+
+    bundles: list[ManagerPdfBundle] = []
+    for email, data in email_to_bundle_data.items():
+        dep_ids = sorted(data["dep_ids"])
+        grp_map = {
+            dep_id: sorted(data["grp_map"].get(dep_id, set()))
+            for dep_id in dep_ids
+        }
 
         bundles.append(
             ManagerPdfBundle(
                 recipient=Recipient(
-                    user_id=uid,
+                    user_id=data["user_id"],
                     email=email,
-                    nome=_nome_from(uid, profiles, email),
+                    nome=data["nome"],
                     tipo_relatorio=TIPO_GESTOR,
                 ),
                 departamento_ids=dep_ids,
@@ -570,8 +609,8 @@ def get_manager_pdf_bundles(tenant_id: str) -> list[ManagerPdfBundle]:
                 grupo_ids_por_dept=grp_map,
             )
         )
-    return bundles
 
+    return bundles
 
 def _build_all_dept_groups(tenant_id: str) -> list[RecipientGroup]:
     """Retorna RecipientGroup para todos os departamentos ativos do tenant.
