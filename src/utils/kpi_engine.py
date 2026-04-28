@@ -124,7 +124,7 @@ def _fetch_mv(tenant_id: str, revisao_id: str, _token: str = "") -> list[dict]:
 def _mv_to_df(mv_rows: list[dict]) -> pd.DataFrame:
     df = pd.DataFrame(mv_rows)
     if df.empty:
-        return pd.DataFrame(columns=["grupo_id", "eq_count", "svc_count", "done_steps", "expected_steps", "backlog_steps", "pct"])
+        return pd.DataFrame(columns=["grupo_id", "eq_count", "svc_count", "done_steps", "expected_steps", "backlog_steps", "pct", "eq_done", "eq_sem_inicio", "eq_andamento"])
     for col in ["eq_count", "svc_count", "done_steps"]:
         source = df[col] if col in df.columns else pd.Series([0] * len(df), index=df.index)
         df[col] = pd.to_numeric(source, errors="coerce").fillna(0).astype(int)
@@ -152,8 +152,15 @@ def _mv_to_df(mv_rows: list[dict]) -> pd.DataFrame:
                             df.loc[mask, "expected_steps"] *
                             100).round().astype(int))
     df["pct"] = df["pct"].clip(0, 100).astype(int)
+    # A view materializada legada não possui contagem por equipamento.
+    # Mantemos as colunas para padronizar o schema; revisões ativas usam raw.
+    for col in ["eq_done", "eq_sem_inicio", "eq_andamento"]:
+        if col not in df.columns:
+            df[col] = 0
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
     return df[["grupo_id", "eq_count", "svc_count",
-               "done_steps", "expected_steps", "backlog_steps", "pct"]]
+               "done_steps", "expected_steps", "backlog_steps", "pct",
+               "eq_done", "eq_sem_inicio", "eq_andamento"]]
 
 
 def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.DataFrame:
@@ -251,6 +258,7 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
     # Antes filtrava por equipamento_id IN all_eq_ids, o que causava undercount:
     # tarefas de equipamentos não resolvidos no eq_to_gid eram ignoradas.
     done_by_gid: dict[str, int] = defaultdict(int)
+    done_by_eq: dict[str, int] = defaultdict(int)
     if revisao_id:
         start = 0
         page_size = 1000
@@ -276,24 +284,48 @@ def _compute_from_raw(tenant_id: str, revisao_id: str, _token: str = "") -> pd.D
                 sid = str(t.get("servico_id")) if t.get("servico_id") else None
                 gid = eq_to_gid.get(eid)
                 if gid and (not active_service_ids or sid in active_service_ids):
-                    done_by_gid[gid] += (
+                    _ok_steps = (
                         int(bool(t.get("etapa_d"))) +
                         int(bool(t.get("etapa_r"))) +
                         int(bool(t.get("etapa_m")))
                     )
+                    done_by_gid[gid] += _ok_steps
+                    if eid:
+                        done_by_eq[eid] += _ok_steps
             if len(trows) < page_size:
                 break
             start += page_size
 
-    rows: list[dict[str, Any]] = [
-        build_group_kpi(
+    rows: list[dict[str, Any]] = []
+    for gid in gids:
+        eq_ids_g = grp_to_eq.get(gid) or []
+        svc_count_g = len(grp_to_services.get(gid) or set())
+        expected_per_eq = svc_count_g * 3
+        eq_done = 0
+        eq_sem_inicio = 0
+        eq_andamento = 0
+        if expected_per_eq > 0:
+            for eid in eq_ids_g:
+                done_eq = int(done_by_eq.get(str(eid), 0))
+                if done_eq >= expected_per_eq:
+                    eq_done += 1
+                elif done_eq <= 0:
+                    eq_sem_inicio += 1
+                else:
+                    eq_andamento += 1
+
+        row = build_group_kpi(
             grupo_id=gid,
-            eq_count=len(grp_to_eq.get(gid) or []),
-            svc_count=len(grp_to_services.get(gid) or set()),
+            eq_count=len(eq_ids_g),
+            svc_count=svc_count_g,
             done_steps=int(done_by_gid.get(gid, 0)),
         )
-        for gid in gids
-    ]
+        row.update({
+            "eq_done": int(eq_done),
+            "eq_sem_inicio": int(eq_sem_inicio),
+            "eq_andamento": int(eq_andamento),
+        })
+        rows.append(row)
     return pd.DataFrame(rows)
 
 
