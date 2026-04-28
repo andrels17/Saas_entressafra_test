@@ -1089,17 +1089,13 @@ def dispatch_relatorio_semanal(
     # Pré-carrega todas as tarefas uma única vez — evita N queries ao banco.
     tarefas_index = _load_tarefas_all(sb, tenant_id, revisao_id)
 
-    # Cache de PDFs por escopo real.
-    # Dois gestores podem compartilhar o mesmo departamento, mas ter grupos
-    # diferentes. A chave precisa considerar os grupo_ids para evitar que um
-    # gestor receba PDF/cache montado com grupos de outro gestor.
-    pdf_cache: dict[tuple[str, tuple[str, ...]], tuple] = {}
+    # Cache de PDFs por dep_id — cada PDF é gerado uma única vez mesmo que
+    # vários gestores compartilhem o mesmo departamento.
+    pdf_cache: dict[str, tuple] = {}  # dep_id → (pdf_bytes, pdf_name, payload)
 
     def _get_or_build_pdf(dep_id: str, dep_nome: str, grupo_ids: list):
-        grupo_ids_norm = sorted({str(g) for g in (grupo_ids or []) if g})
-        cache_key = (str(dep_id), tuple(grupo_ids_norm))
-        if cache_key in pdf_cache:
-            return pdf_cache[cache_key]
+        if dep_id in pdf_cache:
+            return pdf_cache[dep_id]
         try:
             tarefas = _load_tarefas(
                 sb, tenant_id, revisao_id, grupo_ids,
@@ -1113,7 +1109,7 @@ def dispatch_relatorio_semanal(
                 branding=branding,
                 sb=sb,
                 tenant_id=tenant_id,
-                grupo_ids=grupo_ids_norm,
+                grupo_ids=grupo_ids,
                 dias_travado=dias_travado,
                 dias_sem_update=dias_sem_update,
             )
@@ -1128,8 +1124,8 @@ def dispatch_relatorio_semanal(
                 _vp(pdf_b, context=f"relatorio_semanal.{dep_nome[:30]}")
             except ImportError:
                 pass
-            pdf_cache[cache_key] = (pdf_b, pdf_n, payload)
-            return pdf_cache[cache_key]
+            pdf_cache[dep_id] = (pdf_b, pdf_n, payload)
+            return pdf_cache[dep_id]
         except Exception as exc:
             _log(f"  ❌ Erro ao gerar PDF de {dep_nome}: {exc}")
             return None
@@ -1538,7 +1534,7 @@ def dispatch_relatorio_semanal(
                 # ── Executivo: um e-mail único com todos os supervisores ──
                 if exec_recs:
                     result.total_emails += 1
-                    all_exec_emails = list(dict.fromkeys(rec.email for rec in exec_recs if rec.email))
+                    all_exec_emails = [rec.email for rec in exec_recs]
                     _log(f"    ↳ Executivo → {len(all_exec_emails)} destinatário(s): {', '.join(all_exec_emails)}")
                     if dry_run:
                         _log("    ↳ [DRY RUN] — e-mail não enviado.")
