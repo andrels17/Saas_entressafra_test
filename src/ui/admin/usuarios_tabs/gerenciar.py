@@ -49,7 +49,13 @@ def _load_tenant_users(svc, tenant_id: str) -> list[dict]:
 
 
 def _load_user_scope_multi(svc, tenant_id: str, user_id: str) -> dict:
-    out = {"departamento_ids": [], "grupo_ids": [], "grupo_id": None}
+    """Carrega escopo multi-vínculo usando apenas tenant_user_departamentos.
+
+    Estrutura esperada:
+    - uma linha pode representar somente departamento: grupo_id = NULL
+    - uma linha pode representar grupo específico: departamento_id + grupo_id
+    """
+    out = {"departamento_ids": [], "grupo_ids": []}
     try:
         rows = (
             svc.table("tenant_user_departamentos")
@@ -59,209 +65,152 @@ def _load_user_scope_multi(svc, tenant_id: str, user_id: str) -> dict:
             .execute()
             .data
         ) or []
-        if rows:
-            dep_seen = set()
-            grp_seen = set()
-            for r in rows:
-                d = r.get("departamento_id")
-                g = r.get("grupo_id")
-                if d and d not in dep_seen:
-                    dep_seen.add(d)
-                    out["departamento_ids"].append(d)
-                if g and g not in grp_seen:
-                    grp_seen.add(g)
-                    out["grupo_ids"].append(g)
-            out["grupo_id"] = out["grupo_ids"][0] if out["grupo_ids"] else None
-            return out
+
+        dep_seen = set()
+        grp_seen = set()
+        for r in rows:
+            dep_id = r.get("departamento_id")
+            grp_id = r.get("grupo_id")
+
+            if dep_id and dep_id not in dep_seen:
+                dep_seen.add(dep_id)
+                out["departamento_ids"].append(dep_id)
+
+            if grp_id and grp_id not in grp_seen:
+                grp_seen.add(grp_id)
+                out["grupo_ids"].append(grp_id)
+
     except Exception as _e:
-        import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
-    try:
-        row = (
-            svc.table("tenant_user_scope")
-            .select("departamento_id,grupo_id")
-            .eq("tenant_id", tenant_id)
-            .eq("user_id", user_id)
-            .limit(1)
-            .execute()
-            .data
-        ) or []
-        if row:
-            d = row[0].get("departamento_id")
-            g = row[0].get("grupo_id")
-            out["departamento_ids"] = [d] if d else []
-            out["grupo_ids"] = [g] if g else []
-            out["grupo_id"] = g
-    except Exception as _e:
-        import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
+        log.warning("Erro ao carregar escopo multi do usuário: %s", _e)
+
     return out
 
 
 def _save_user_scope_multi(
-        svc,
-        tenant_id: str,
-        user_id: str,
-        departamento_ids: list,
-        grupo_ids=None,
-        grupo_departamento_ids: dict | None = None):
-    """Salva departamentos e vários grupos vinculados ao usuário."""
+    svc,
+    tenant_id: str,
+    user_id: str,
+    departamento_ids: list | None,
+    grupo_ids: list | None = None,
+    grupo_departamento_ids: dict | None = None,
+):
+    """Salva escopo N:N sem fallback legado.
+
+    A fonte oficial dos vínculos passa a ser tenant_user_departamentos.
+    Para evitar conflito com a estrutura antiga, tenant_user_scope é apagada
+    para este usuário sempre que o escopo for salvo.
+    """
     departamento_ids = [d for d in (departamento_ids or []) if d]
+
     if grupo_ids is None:
         grupo_ids = []
     elif not isinstance(grupo_ids, (list, tuple, set)):
         grupo_ids = [grupo_ids]
     grupo_ids = [g for g in grupo_ids if g]
+
     grupo_departamento_ids = grupo_departamento_ids or {}
 
+    # Garante que todo grupo selecionado também inclua seu departamento.
+    dep_seen = set(departamento_ids)
     for gid in grupo_ids:
         dep_id = grupo_departamento_ids.get(gid) or grupo_departamento_ids.get(str(gid))
-        if dep_id and dep_id not in departamento_ids:
+        if dep_id and dep_id not in dep_seen:
             departamento_ids.append(dep_id)
+            dep_seen.add(dep_id)
 
-    new_ok = False
+    # Regrava tudo para não manter vínculo antigo/stale.
+    svc.table("tenant_user_departamentos").delete().eq(
+        "tenant_id", tenant_id
+    ).eq("user_id", user_id).execute()
+
+    # Remove registro legado para evitar leitura/relatório usando dado antigo.
     try:
-        svc.table("tenant_user_departamentos").delete().eq(
-            "tenant_id", tenant_id).eq(
-            "user_id", user_id).execute()
-        payload = []
-        for d in departamento_ids:
-            payload.append({
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-                "departamento_id": d,
-                "grupo_id": None,
-            })
-        for gid in grupo_ids:
-            payload.append({
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-                "departamento_id": grupo_departamento_ids.get(gid) or grupo_departamento_ids.get(str(gid)),
-                "grupo_id": gid,
-            })
-        if payload:
-            svc.table("tenant_user_departamentos").insert(payload).execute()
-        new_ok = True
-    except Exception:
-        new_ok = False
+        svc.table("tenant_user_scope").delete().eq(
+            "tenant_id", tenant_id
+        ).eq("user_id", user_id).execute()
+    except Exception as _e:
+        log.warning("Não foi possível limpar tenant_user_scope legado: %s", _e)
 
-    if departamento_ids or grupo_ids:
-        grp_legacy = grupo_ids[0] if grupo_ids else None
-        dep_legacy = None
-        if grp_legacy:
-            dep_legacy = grupo_departamento_ids.get(grp_legacy) or grupo_departamento_ids.get(str(grp_legacy))
-        dep_legacy = dep_legacy or (departamento_ids[0] if departamento_ids else None)
-        pl = {"tenant_id": tenant_id, "user_id": user_id,
-              "departamento_id": dep_legacy, "grupo_id": grp_legacy}
-        try:
-            svc.table("tenant_user_scope").upsert(
-                pl, on_conflict="tenant_id,user_id").execute()
-        except Exception:
-            try:
-                svc.table("tenant_user_scope").upsert(pl).execute()
-            except Exception as _e:
-                import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
-    else:
-        try:
-            svc.table("tenant_user_scope").delete().eq(
-                "tenant_id", tenant_id).eq(
-                "user_id", user_id).execute()
-        except Exception as _e:
-            import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
+    payload = []
 
-    if not new_ok:
-        if not departamento_ids and not grupo_ids:
-            try:
-                svc.table("tenant_user_scope").delete().eq(
-                    "tenant_id", tenant_id).eq(
-                    "user_id", user_id).execute()
-            except Exception as _e:
-                import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
-            return
-        grp_legacy = grupo_ids[0] if grupo_ids else None
-        dep_legacy = (grupo_departamento_ids.get(grp_legacy) or grupo_departamento_ids.get(str(grp_legacy))) if grp_legacy else None
-        dep_legacy = dep_legacy or (departamento_ids[0] if departamento_ids else None)
-        pl = {
+    # Mantém vínculo explícito com departamentos selecionados.
+    for dep_id in departamento_ids:
+        payload.append({
             "tenant_id": tenant_id,
             "user_id": user_id,
-            "departamento_id": dep_legacy,
-            "grupo_id": grp_legacy}
-        try:
-            svc.table("tenant_user_scope").upsert(
-                pl, on_conflict="tenant_id,user_id").execute()
-        except Exception:
-            svc.table("tenant_user_scope").upsert(pl).execute()
+            "departamento_id": dep_id,
+            "grupo_id": None,
+        })
+
+    # Mantém vínculos específicos com todos os grupos selecionados.
+    for gid in grupo_ids:
+        dep_id = grupo_departamento_ids.get(gid) or grupo_departamento_ids.get(str(gid))
+        payload.append({
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "departamento_id": dep_id,
+            "grupo_id": gid,
+        })
+
+    if payload:
+        svc.table("tenant_user_departamentos").insert(payload).execute()
 
 
 def _clear_user_scope(svc, tenant_id: str, user_id: str):
     """Remove todos os vínculos de departamento e grupo do usuário."""
     try:
         svc.table("tenant_user_departamentos").delete().eq(
-            "tenant_id", tenant_id).eq(
-            "user_id", user_id).execute()
+            "tenant_id", tenant_id
+        ).eq("user_id", user_id).execute()
     except Exception as _e:
-        import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
+        log.warning("Erro ao limpar tenant_user_departamentos: %s", _e)
+
+    # Limpeza defensiva da tabela legada, para não ressuscitar vínculo antigo em outros módulos.
     try:
         svc.table("tenant_user_scope").delete().eq(
-            "tenant_id", tenant_id).eq(
-            "user_id", user_id).execute()
+            "tenant_id", tenant_id
+        ).eq("user_id", user_id).execute()
     except Exception as _e:
-        import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
-
+        log.warning("Erro ao limpar tenant_user_scope legado: %s", _e)
 
 
 def _remove_user_scope_items(
-        svc,
-        tenant_id: str,
-        user_id: str,
-        departamento_ids: list | None = None,
-        grupo_ids: list | None = None,
-        remove_grupo: bool = False):
-    """Remove vínculos específicos de departamento e/ou grupo do usuário."""
+    svc,
+    tenant_id: str,
+    user_id: str,
+    departamento_ids: list | None = None,
+    grupo_ids: list | None = None,
+):
+    """Remove somente os vínculos selecionados.
+
+    - Departamento remove o departamento e todos os grupos vinculados nele.
+    - Grupo remove apenas aquele grupo, mantendo o departamento.
+    """
     departamento_ids = [d for d in (departamento_ids or []) if d]
     grupo_ids = [g for g in (grupo_ids or []) if g]
 
     try:
         for dep_id in departamento_ids:
             svc.table("tenant_user_departamentos").delete().eq(
-                "tenant_id", tenant_id).eq(
-                "user_id", user_id).eq(
-                "departamento_id", dep_id).execute()
+                "tenant_id", tenant_id
+            ).eq("user_id", user_id).eq("departamento_id", dep_id).execute()
 
-        if grupo_ids:
-            for gid in grupo_ids:
-                svc.table("tenant_user_departamentos").delete().eq(
-                    "tenant_id", tenant_id).eq(
-                    "user_id", user_id).eq(
-                    "grupo_id", gid).execute()
-        elif remove_grupo:
+        for gid in grupo_ids:
             svc.table("tenant_user_departamentos").delete().eq(
-                "tenant_id", tenant_id).eq(
-                "user_id", user_id).not_.is_("grupo_id", "null").execute()
-    except Exception as _e:
-        import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
+                "tenant_id", tenant_id
+            ).eq("user_id", user_id).eq("grupo_id", gid).execute()
 
-    try:
-        legacy_rows = (
-            svc.table("tenant_user_scope")
-            .select("departamento_id,grupo_id")
-            .eq("tenant_id", tenant_id)
-            .eq("user_id", user_id)
-            .limit(1)
-            .execute()
-            .data
-        ) or []
-        if legacy_rows:
-            legacy_dep = legacy_rows[0].get("departamento_id")
-            legacy_grp = legacy_rows[0].get("grupo_id")
-            if legacy_dep in departamento_ids:
-                svc.table("tenant_user_scope").delete().eq(
-                    "tenant_id", tenant_id).eq(
-                    "user_id", user_id).execute()
-            elif (grupo_ids and legacy_grp in grupo_ids) or remove_grupo:
-                svc.table("tenant_user_scope").update({"grupo_id": None}).eq(
-                    "tenant_id", tenant_id).eq(
-                    "user_id", user_id).execute()
+        # Limpa legado para evitar exibição/salvamento com vínculo antigo.
+        try:
+            svc.table("tenant_user_scope").delete().eq(
+                "tenant_id", tenant_id
+            ).eq("user_id", user_id).execute()
+        except Exception as _e:
+            log.warning("Erro ao limpar tenant_user_scope legado: %s", _e)
+
     except Exception as _e:
-        import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
+        log.warning("Erro ao remover vínculos específicos: %s", _e)
+
 
 def _load_departamentos(svc, tenant_id: str) -> list[dict]:
     try:
@@ -394,7 +343,7 @@ def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn) -> None:
         grupos_all = _load_grupos(svc, tenant_id)
         cur_scope = _load_user_scope_multi(svc, tenant_id, target_user_id)
         cur_deps = cur_scope.get("departamento_ids") or []
-        cur_grp = cur_scope.get("grupo_id")
+        cur_grp_ids = cur_scope.get("grupo_ids") or []
 
         if not depts:
             st.info("Cadastre departamentos para habilitar o escopo.")
@@ -402,8 +351,8 @@ def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn) -> None:
             dept_map = {d["nome"]: d["id"] for d in depts}
             dept_names = [d["nome"] for d in depts]
 
-            sel_grp_id = None
-            sel_grp_dep_id = None
+            sel_grp_ids = []
+            sel_grp_dep_map = {}
             if cur_role == "gestor":
                 st.info("Gestor pode ter vários departamentos e vários grupos vinculados.")
 
@@ -440,10 +389,10 @@ def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn) -> None:
                         grp_labels.append(label)
                         grp_label_to_obj[label] = g
 
-                    cur_grp_ids = set(cur_scope.get("grupo_ids") or ([cur_grp] if cur_grp else []))
+                    cur_grp_ids_set = set(cur_grp_ids)
                     default_grp_labels = [
                         lbl for lbl, g in grp_label_to_obj.items()
-                        if g.get("id") in cur_grp_ids
+                        if g.get("id") in cur_grp_ids_set
                     ]
                     sel_grp_labels = st.multiselect(
                         "Grupos do gestor",
@@ -455,8 +404,7 @@ def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn) -> None:
                     sel_grp_objs = [grp_label_to_obj[lbl] for lbl in sel_grp_labels if lbl in grp_label_to_obj]
                     sel_grp_ids = [g.get("id") for g in sel_grp_objs if g.get("id")]
                     sel_grp_dep_map = {g.get("id"): g.get("departamento_id") for g in sel_grp_objs if g.get("id")}
-                    sel_grp_id = sel_grp_ids
-                    sel_grp_dep_id = sel_grp_dep_map
+                    # sel_grp_ids e sel_grp_dep_map ficam sempre como lista/dict para salvar corretamente.
             else:
                 sel_dept_names = st.multiselect(
                     "Departamentos",
@@ -478,20 +426,24 @@ def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn) -> None:
                         {"id": None, "nome": "Todos os grupos do departamento"}] + grupos_filtered
                     grp_names = [g["nome"] for g in grp_opts]
                     grp_ids = [g["id"] for g in grp_opts]
-                    grp_idx = grp_ids.index(cur_grp) if cur_grp in grp_ids else 0
+                    cur_grp_single = cur_grp_ids[0] if cur_grp_ids else None
+                    grp_idx = grp_ids.index(cur_grp_single) if cur_grp_single in grp_ids else 0
                     sel_grp_name = st.selectbox(
                         "Grupo",
                         grp_names,
                         index=grp_idx,
                         key=f"scope_grp_{target_user_id}")
-                    sel_grp_id = grp_ids[grp_names.index(sel_grp_name)]
+                    selected_gid = grp_ids[grp_names.index(sel_grp_name)]
+                    if selected_gid:
+                        sel_grp_ids = [selected_gid]
+                        sel_grp_dep_map = {selected_gid: dep_id_single}
                 elif len(sel_dep_ids) > 1:
                     st.caption(
                         "Múltiplos departamentos — todos os grupos incluídos.")
 
             # Mostra vínculo atual
             cur_dep_nomes = []
-            cur_grp_ids = cur_scope.get("grupo_ids") or ([cur_grp] if cur_grp else [])
+            cur_grp_ids = cur_scope.get("grupo_ids") or []
             cur_grp_nomes = []
             if cur_deps:
                 cur_dep_nomes = [d["nome"] for d in depts if d["id"] in cur_deps]
@@ -501,7 +453,7 @@ def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn) -> None:
             if cur_dep_nomes or cur_grp_nomes:
                 partes = ", ".join(cur_dep_nomes) if cur_dep_nomes else "Sem departamento"
                 if cur_grp_nomes:
-                    partes += " › " + ", ".join(cur_grp_nomes)
+                    partes += " › " + " | ".join(cur_grp_nomes)
                 st.caption(f"Vínculo atual: **{partes}**")
             else:
                 st.caption("Sem vínculo definido.")
@@ -567,7 +519,13 @@ def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn) -> None:
                         key=f"scope_save_{target_user_id}"):
                     try:
                         _save_user_scope_multi(
-                            svc, tenant_id, target_user_id, sel_dep_ids, sel_grp_id, sel_grp_dep_id)
+                            svc,
+                            tenant_id,
+                            target_user_id,
+                            sel_dep_ids,
+                            grupo_ids=sel_grp_ids,
+                            grupo_departamento_ids=sel_grp_dep_map,
+                        )
                         st.success("✅ Escopo salvo.")
                         rerun_fn()
                     except Exception as e:
@@ -579,7 +537,7 @@ def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn) -> None:
                     "🔗 Desvincular tudo",
                     use_container_width=True,
                     key=f"scope_clear_{target_user_id}",
-                    disabled=not bool(cur_deps),
+                    disabled=not bool(cur_deps or cur_grp_ids),
                     help="Remove todos os vínculos de departamento e grupo deste usuário.",
                 ):
                     try:
