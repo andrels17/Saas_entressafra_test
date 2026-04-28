@@ -431,7 +431,8 @@ def _apply_semantic_bar_style(fig: go.Figure, chart_df: pd.DataFrame, value_col:
 def _build_gestor_rank_df(
         dashboard_groups_filtered: pd.DataFrame,
         gestor_options: list[dict],
-        top_n: int = 10) -> pd.DataFrame:
+        top_n: int = 10,
+        sort_ascending: bool = False) -> pd.DataFrame:
     if dashboard_groups_filtered is None or dashboard_groups_filtered.empty or not gestor_options:
         return pd.DataFrame(columns=["Categoria", "Valor", "label", "Grupos", "status"])
 
@@ -468,50 +469,8 @@ def _build_gestor_rank_df(
         return pd.DataFrame(columns=["Categoria", "Valor", "label", "Grupos", "status"])
 
     out = pd.DataFrame(rows)
-    out = out.sort_values(["Valor", "Grupos", "Categoria"], ascending=[False, False, True]).head(top_n)
+    out = out.sort_values(["Valor", "Grupos", "Categoria"], ascending=[sort_ascending, False, True]).head(top_n)
     return out
-
-
-def _render_gestor_highlights(gestor_df: pd.DataFrame) -> None:
-    if gestor_df is None or gestor_df.empty:
-        return
-    top_df = gestor_df.sort_values(["Valor", "Categoria"], ascending=[False, True]).head(5).copy()
-    crit_df = gestor_df.sort_values(["Valor", "Categoria"], ascending=[True, True]).head(5).copy()
-
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("#### Gestores mais avançados")
-        data_table(
-            top_df[["Categoria", "Valor", "Grupos", "status"]].rename(columns={
-                "Categoria": "Gestor",
-                "Valor": "% Concluído",
-                "Grupos": "Grupos",
-                "status": "Faixa",
-            }),
-            column_config={
-                "% Concluído": st.column_config.ProgressColumn("% Concluído", min_value=0, max_value=100, format="%d%%"),
-            },
-        )
-    with c2:
-        st.markdown("#### Gestores mais críticos")
-        data_table(
-            crit_df[["Categoria", "Valor", "Grupos", "status"]].rename(columns={
-                "Categoria": "Gestor",
-                "Valor": "% Concluído",
-                "Grupos": "Grupos",
-                "status": "Faixa",
-            }),
-            column_config={
-                "% Concluído": st.column_config.ProgressColumn("% Concluído", min_value=0, max_value=100, format="%d%%"),
-            },
-        )
-
-    critical_count = int((pd.to_numeric(gestor_df["Valor"], errors="coerce").fillna(0) < 50).sum())
-    attention_count = int(((pd.to_numeric(gestor_df["Valor"], errors="coerce").fillna(0) >= 50) & (pd.to_numeric(gestor_df["Valor"], errors="coerce").fillna(0) < 80)).sum())
-    advanced_count = int((pd.to_numeric(gestor_df["Valor"], errors="coerce").fillna(0) >= 80).sum())
-    tone = "warning" if critical_count else ("info" if attention_count else "success")
-
-
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -629,7 +588,8 @@ def _render_pct_rank_chart(
 
 def _build_rank_df_from_groups(
         dashboard_groups_filtered: pd.DataFrame,
-        top_n: int = 10) -> pd.DataFrame:
+        top_n: int = 10,
+        sort_ascending: bool = False) -> pd.DataFrame:
     if dashboard_groups_filtered is None or dashboard_groups_filtered.empty:
         return pd.DataFrame(columns=["Categoria", "Valor", "label"])
     src = dashboard_groups_filtered.copy()
@@ -644,14 +604,15 @@ def _build_rank_df_from_groups(
     )
     out["Valor"] = pd.to_numeric(out["Valor"], errors="coerce").fillna(0).clip(0, 100)
     out["label"] = out["Valor"].map(lambda v: f"{int(round(v))}%")
-    return out.sort_values(["Valor", "Categoria"], ascending=[False, True]).head(top_n)
+    return out.sort_values(["Valor", "Categoria"], ascending=[sort_ascending, True]).head(top_n)
 
 
 def _build_rank_df_from_departments(
         dashboard_groups_filtered: pd.DataFrame,
         gid_to_dept: dict,
         dept_map: dict,
-        top_n: int = 10) -> pd.DataFrame:
+        top_n: int = 10,
+        sort_ascending: bool = False) -> pd.DataFrame:
     if dashboard_groups_filtered is None or dashboard_groups_filtered.empty:
         return pd.DataFrame(columns=["Categoria", "Valor", "label"])
     tmp = dashboard_groups_filtered.copy()
@@ -676,12 +637,13 @@ def _build_rank_df_from_departments(
     agg["Categoria"] = agg["departamento_id"].map(lambda v: dept_map.get(str(v), "—"))
     agg["Valor"] = ((agg["done_steps"] / agg["expected_steps"]) * 100).round(0).clip(0, 100)
     agg["label"] = agg["Valor"].map(lambda v: f"{int(round(v))}%")
-    return agg[["Categoria", "Valor", "label"]].sort_values(["Valor", "Categoria"], ascending=[False, True]).head(top_n)
+    return agg[["Categoria", "Valor", "label"]].sort_values(["Valor", "Categoria"], ascending=[sort_ascending, True]).head(top_n)
 
 
 def _build_rank_df_from_equipment(
         equipment_source: pd.DataFrame,
-        top_n: int = 10) -> pd.DataFrame:
+        top_n: int = 10,
+        sort_ascending: bool = False) -> pd.DataFrame:
     if equipment_source is None or equipment_source.empty:
         return pd.DataFrame(columns=["Categoria", "Valor", "label"])
     edf = equipment_progress(equipment_source.copy())
@@ -704,7 +666,7 @@ def _build_rank_df_from_equipment(
     edf["Categoria"] = edf.apply(_equip_name, axis=1)
     edf["Valor"] = pd.to_numeric(edf[value_col], errors="coerce").fillna(0).clip(0, 100)
     edf["label"] = edf["Valor"].map(lambda v: f"{int(round(v))}%")
-    return edf[["Categoria", "Valor", "label"]].sort_values(["Valor", "Categoria"], ascending=[False, True]).head(top_n)
+    return edf[["Categoria", "Valor", "label"]].sort_values(["Valor", "Categoria"], ascending=[sort_ascending, True]).head(top_n)
 
 
 @st.cache_data(ttl=45, show_spinner=False)
@@ -713,7 +675,8 @@ def _build_unified_rank_figure_cached(
         dept_records: list[dict],
         group_records: list[dict],
         equip_records: list[dict],
-        gestor_records: list[dict]):
+        gestor_records: list[dict],
+        sort_ascending: bool = False):
     _ = payload_key
     datasets = [
         ("Departamentos", dept_records),
@@ -727,7 +690,7 @@ def _build_unified_rank_figure_cached(
         if df.empty:
             x, y, txt, colors = [], [], [], []
         else:
-            df = df.sort_values("Valor", ascending=True)
+            df = df.sort_values(["Valor", "Categoria"], ascending=[sort_ascending, True])
             x = df["Valor"].tolist()
             y = df["Categoria"].tolist()
             txt = df["label"].tolist()
@@ -765,7 +728,7 @@ def _build_unified_rank_figure_cached(
         title="Visão consolidada — Departamentos",
         margin=dict(l=10, r=90, t=110, b=10),
         xaxis=dict(range=[0, 110], title="% Concluído", tickfont=dict(color=MUTED), title_font=dict(color=MUTED)),
-        yaxis=dict(title="", type="category", tickfont=dict(color=MUTED)),
+        yaxis=dict(title="", type="category", tickfont=dict(color=MUTED), autorange="reversed"),
         showlegend=False,
     )
     fig.update_layout(
@@ -797,10 +760,28 @@ def _render_unified_rank_chart(
         equipment_source: pd.DataFrame,
         gestor_options: list[dict] | None = None,
         top_n: int = 10) -> None:
-    dept_df = _build_rank_df_from_departments(dashboard_groups_filtered, gid_to_dept, dept_map, top_n=top_n)
-    group_df = _build_rank_df_from_groups(dashboard_groups_filtered, top_n=top_n)
-    equip_df = _build_rank_df_from_equipment(equipment_source, top_n=top_n)
-    gestor_df = _build_gestor_rank_df(dashboard_groups_filtered, gestor_options or [], top_n=top_n)
+    ordem_label = st.radio(
+        "Ordenar ranking",
+        options=["Maior para menor", "Menor para maior"],
+        index=0,
+        horizontal=True,
+        key="dash_rank_order",
+        help="Alterne a ordenação do ranking consolidado entre maior e menor percentual concluído.",
+    )
+    sort_ascending = ordem_label == "Menor para maior"
+
+    dept_df = _build_rank_df_from_departments(
+        dashboard_groups_filtered, gid_to_dept, dept_map, top_n=top_n, sort_ascending=sort_ascending
+    )
+    group_df = _build_rank_df_from_groups(
+        dashboard_groups_filtered, top_n=top_n, sort_ascending=sort_ascending
+    )
+    equip_df = _build_rank_df_from_equipment(
+        equipment_source, top_n=top_n, sort_ascending=sort_ascending
+    )
+    gestor_df = _build_gestor_rank_df(
+        dashboard_groups_filtered, gestor_options or [], top_n=top_n, sort_ascending=sort_ascending
+    )
 
     if dept_df.empty and group_df.empty and equip_df.empty and gestor_df.empty:
         st.info("Sem dados para exibir.")
@@ -812,6 +793,7 @@ def _render_unified_rank_chart(
         + str(equip_df.to_dict("records")[:50])
         + str(gestor_df.to_dict("records")[:50])
         + str(top_n)
+        + str(sort_ascending)
     ))
     fig = _build_unified_rank_figure_cached(
         payload_key,
@@ -819,12 +801,10 @@ def _render_unified_rank_chart(
         group_df.to_dict("records"),
         equip_df.to_dict("records"),
         gestor_df.to_dict("records"),
+        sort_ascending=sort_ascending,
     )
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-    st.caption("Use o seletor no canto superior direito para alternar entre departamentos, grupos, equipamentos e gestores sem rerun.")
-
-    if gestor_df is not None and not gestor_df.empty:
-        _render_gestor_highlights(gestor_df)
+    st.caption("Use o seletor no canto superior direito para alternar entre departamentos, grupos, equipamentos e gestores.")
 
 
 
@@ -1379,37 +1359,14 @@ def _groups_from_kpi_df(kdf: pd.DataFrame, gid_to_name: dict, gid_to_dept: dict)
 
 def _overall_from_group_kpis(kdf: pd.DataFrame) -> dict:
     gk = calc_global_kpis(kdf)
-    if kdf is None or kdf.empty:
-        return {
-            "pct": float(gk.get("pct", 0) or 0),
-            "total": 0,
-            "concl": 0,
-            "sem_inicio": 0,
-            "andamento": 0,
-            "atrasados": 0,
-            "pend": 0,
-            "trav": 0,
-            "na": 0,
-        }
-
-    def _sum_col(col: str) -> int:
-        if col not in kdf.columns:
-            return 0
-        return int(pd.to_numeric(kdf[col], errors="coerce").fillna(0).sum())
-
-    total_eq = _sum_col("eq_count")
-    concl = _sum_col("eq_done")
-    sem_inicio = _sum_col("eq_sem_inicio")
-    andamento = _sum_col("eq_andamento")
-
     return {
         "pct": float(gk.get("pct", 0) or 0),
-        "total": total_eq,
-        "concl": concl,
-        "sem_inicio": sem_inicio,
-        "andamento": andamento,
+        "total": int(len(kdf)) if kdf is not None else 0,
+        "concl": 0,
+        "sem_inicio": 0,
+        "andamento": 0,
         "atrasados": 0,
-        "pend": sem_inicio,
+        "pend": 0,
         "trav": 0,
         "na": 0,
     }
