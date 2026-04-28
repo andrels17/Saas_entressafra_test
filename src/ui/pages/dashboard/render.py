@@ -1533,19 +1533,65 @@ def render_dashboard() -> None:
     use_kpi_fallback = bool((base.empty or float(base_overall.get("pct", 0) or 0) <= 0) and float(kpi_overall.get("pct", 0) or 0) > 0)
 
     st.markdown("### Filtros")
+
+    gestor_selected_group_ids: list[str] | None = None
+    gestor_selected_dept_ids: list[str] | None = None
+    departamentos_filter = list(departamentos)
+    grupos_filter = list(grupos)
+
+    # Admin/supervisor conseguem simular o recorte de um gestor no Dashboard.
+    # O recorte é aplicado antes dos filtros de departamento/grupo, para que
+    # os selects exibam apenas os departamentos, grupos e equipamentos do gestor.
+    if can_view_all_data(role) and gestor_options:
+        gestor_labels = ["Todos os gestores"] + [
+            str(g.get("gestor_nome") or "Gestor") for g in gestor_options
+        ]
+        gestor_by_label = {
+            str(g.get("gestor_nome") or "Gestor"): g for g in gestor_options
+        }
+        gestor_sel_label = st.selectbox(
+            "Gestor",
+            gestor_labels,
+            index=0,
+            key="dash_filter_gestor",
+            help="Filtra o Dashboard para enxergar somente os departamentos, grupos e equipamentos vinculados ao gestor.",
+        )
+        gestor_sel = gestor_by_label.get(gestor_sel_label)
+        if gestor_sel:
+            gestor_selected_group_ids = sorted({
+                str(gr.get("grupo_id") or "")
+                for gr in (gestor_sel.get("grupos") or [])
+                if str(gr.get("grupo_id") or "")
+            })
+            gestor_selected_dept_ids = sorted({
+                str(gr.get("departamento_id") or "")
+                for gr in (gestor_sel.get("grupos") or [])
+                if str(gr.get("departamento_id") or "")
+            })
+            dept_set = set(gestor_selected_dept_ids)
+            grp_set = set(gestor_selected_group_ids)
+            departamentos_filter = [d for d in departamentos if str(d.get("id")) in dept_set]
+            grupos_filter = [g for g in grupos if str(g.get("id")) in grp_set]
+            selection_summary(
+                "Filtro de gestor aplicado",
+                f"{len(departamentos_filter)} departamento(s) · {len(grupos_filter)} grupo(s)",
+            )
+
     c1, c2, c3 = st.columns([1.1, 1.4, 0.6])
     with c1:
+        dept_allowed_ids = gestor_selected_dept_ids if gestor_selected_dept_ids is not None else dep_scope_ids
         dept_selected_ids = multiselect_departamentos(
-            departamentos,
+            departamentos_filter,
             key="dash_filter_dept",
-            allowed_ids=dep_scope_ids,
+            allowed_ids=dept_allowed_ids,
         )
 
     with c2:
+        group_allowed_ids = gestor_selected_group_ids if gestor_selected_group_ids is not None else grp_scope_ids
         group_selected_ids = multiselect_grupos(
-            grupos,
+            grupos_filter,
             key="dash_filter_group",
-            allowed_group_ids=grp_scope_ids,
+            allowed_group_ids=group_allowed_ids,
             departamento_ids=dept_selected_ids,
         )
     top_n = int(
@@ -1559,8 +1605,8 @@ def render_dashboard() -> None:
             key="dash_filter_top"))
 
     # Sem seleção manual, o dashboard deve usar automaticamente todo o escopo disponível.
-    all_visible_dept_ids = [str(d.get("id")) for d in departamentos if d.get("id")]
-    all_visible_group_ids = [str(g.get("id")) for g in grupos if g.get("id")]
+    all_visible_dept_ids = [str(d.get("id")) for d in departamentos_filter if d.get("id")]
+    all_visible_group_ids = [str(g.get("id")) for g in grupos_filter if g.get("id")]
 
     # IMPORTANTE: quando nenhum filtro manual foi selecionado, passa None para
     # apply_filters em vez de passar a lista completa de IDs. Isso evita que
@@ -1575,12 +1621,17 @@ def render_dashboard() -> None:
             dept_set = {str(x) for x in dept_selected_ids}
             grp_ids = [
                 str(g.get("id"))
-                for g in grupos
+                for g in grupos_filter
                 if g.get("id") and str(g.get("departamento_id")) in dept_set
             ]
             effective_group_ids = grp_ids if grp_ids else None
+        elif gestor_selected_group_ids is not None:
+            effective_group_ids = gestor_selected_group_ids
         else:
             effective_group_ids = None
+
+    if not effective_dept_ids and gestor_selected_dept_ids is not None:
+        effective_dept_ids = gestor_selected_dept_ids
 
     base_filtered = apply_filters(base, effective_dept_ids, effective_group_ids)
     dashboard_groups_filtered = dashboard_groups.copy()

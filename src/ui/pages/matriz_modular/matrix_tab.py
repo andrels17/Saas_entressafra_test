@@ -24,10 +24,6 @@ from src.ui.pages.matriz_sector import (
 )
 from src.utils import nav
 from src.utils.supabase_helpers import normalize_id, current_user_id
-try:
-    from src.utils.supabase_helpers import get_supabase_service
-except Exception:
-    get_supabase_service = None
 from src.utils.timezone import now_utc as _now_utc
 from src.utils.weeks import apontamento_datetime_iso, effective_week_for_apontamento
 
@@ -62,7 +58,7 @@ def _resolve_task_row(sb, task_map, revisao_id, equipamento_id, servico_id):
     try:
         rows = (
             sb.table('tarefas_servico')
-            .select('id,semana,equipamento_id,servico_id,etapa_d,etapa_r,etapa_m,status')
+            .select('id,semana,equipamento_id,servico_id')
             .eq('revisao_id', revisao_id)
             .eq('equipamento_id', equipamento_id)
             .eq('servico_id', servico_id)
@@ -80,56 +76,8 @@ def _resolve_task_row(sb, task_map, revisao_id, equipamento_id, servico_id):
     return {}
 
 
-def _refresh_visible_sector_tasks(sb, task_map, revisao_id, eqs, svc_ids):
-    """Atualiza o task_map do setor aberto com dados frescos do Supabase."""
-    eq_ids = [e.get('id') for e in (eqs or []) if e.get('id')]
-    svc_ids = [sid for sid in (svc_ids or []) if sid]
-    if not revisao_id or not eq_ids or not svc_ids:
-        return
-
-    read_sb = sb
-    if get_supabase_service is not None:
-        try:
-            read_sb = get_supabase_service()
-        except Exception:
-            read_sb = sb
-
-    try:
-        select_cols = (
-            'id,equipamento_id,servico_id,status,semana,observacao,'
-            'etapa_d,etapa_r,etapa_m,dt_inicio,dt_etapa_d,dt_etapa_r,dt_etapa_m'
-        )
-        chunk_size = 80
-        for i in range(0, len(eq_ids), chunk_size):
-            eq_chunk = eq_ids[i:i + chunk_size]
-            rows = (
-                read_sb.table('tarefas_servico')
-                .select(select_cols)
-                .eq('revisao_id', revisao_id)
-                .in_('equipamento_id', eq_chunk)
-                .in_('servico_id', svc_ids)
-                .execute()
-                .data
-            ) or []
-            for row in rows:
-                eid = row.get('equipamento_id')
-                sid = row.get('servico_id')
-                if not eid or not sid:
-                    continue
-                task_map[(eid, sid)] = row
-                task_map[(str(eid), str(sid))] = row
-                task_map[(str(eid), sid)] = row
-                task_map[(eid, str(sid))] = row
-    except Exception as _e:
-        import logging
-        logging.getLogger('saas').debug('_refresh_visible_sector_tasks: %s', _e)
-
 def _invalidate_after_matrix_write() -> None:
     invalidate_matriz_cache()
-    try:
-        bump_data_version()
-    except Exception:
-        pass
     try:
         _load_payload.clear()
     except Exception:
@@ -138,12 +86,17 @@ def _invalidate_after_matrix_write() -> None:
         _group_kpis.clear()
     except Exception:
         pass
-
+    try:
+        from src.utils.kpi_engine import invalidate_kpi_cache
+        invalidate_kpi_cache()
+    except Exception:
+        pass
+    try:
+        bump_data_version()
+    except Exception:
+        pass
 
 def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_v, svc_names_v, eqs, task_map, eq_label_short, rev_start, atraso_dias, semana_lote, usar_data_especifica=False, data_apontamento=None, rev_data_inicio: date | None = None, rev_semanas_total: int | None = None):
-    # Atualiza somente o setor aberto, evitando exibir dados antigos do cache.
-    _refresh_visible_sector_tasks(sb, task_map, revisao_id, eqs, svc_ids_v)
-
     df, col_meta, obs_map = build_sector_frame(
         equipamentos=eqs,
         svc_ids=svc_ids_v,
@@ -315,7 +268,10 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
                 semanas_total=rev_semanas_total,
             )
             missing = 0
-            grouped_updates = {}
+            # Agrupa as alterações por tarefa para gravar D/R/M em um único UPDATE.
+            # Isso evita conflito quando a mesma linha recebe 3 alterações no mesmo clique.
+            updates_by_task = {}
+            current_by_task = {}
             dt_field_map = {'etapa_d': 'dt_etapa_d', 'etapa_r': 'dt_etapa_r', 'etapa_m': 'dt_etapa_m'}
 
             for eid, sid, field, nv in pending_changes:
@@ -325,33 +281,31 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
                     missing += 1
                     continue
 
-                if tid not in grouped_updates:
-                    grouped_updates[tid] = {
-                        'id': tid,
-                        'updated_by': current_user_id() or None,
-                        # Estado atual vindo do banco/cache. As alterações abaixo sobrescrevem estes valores.
-                        '_etapa_d': bool(t.get('etapa_d', False)),
-                        '_etapa_r': bool(t.get('etapa_r', False)),
-                        '_etapa_m': bool(t.get('etapa_m', False)),
+                if tid not in updates_by_task:
+                    updates_by_task[tid] = {'id': tid, 'updated_by': current_user_id() or None}
+                    current_by_task[tid] = {
+                        'etapa_d': bool(t.get('etapa_d')),
+                        'etapa_r': bool(t.get('etapa_r')),
+                        'etapa_m': bool(t.get('etapa_m')),
                     }
 
-                upd = grouped_updates[tid]
-                nv_bool = bool(nv)
-                upd[field] = nv_bool
-                upd[f'_{field}'] = nv_bool
+                new_value = bool(nv)
+                updates_by_task[tid][field] = new_value
+                current_by_task[tid][field] = new_value
 
                 dtf = dt_field_map.get(field)
                 if dtf:
-                    upd[dtf] = step_dt if nv_bool else None
+                    updates_by_task[tid][dtf] = step_dt if new_value else None
 
             payload_updates = []
-            for upd in grouped_updates.values():
-                final_d = bool(upd.pop('_etapa_d', False))
-                final_r = bool(upd.pop('_etapa_r', False))
-                final_m = bool(upd.pop('_etapa_m', False))
+            for tid, upd in updates_by_task.items():
+                final_state = current_by_task.get(tid, {})
+                all_done = all(bool(final_state.get(f)) for f in ('etapa_d', 'etapa_r', 'etapa_m'))
+                any_done = any(bool(final_state.get(f)) for f in ('etapa_d', 'etapa_r', 'etapa_m'))
 
-                upd['status'] = 'concluido' if (final_d and final_r and final_m) else 'pendente'
-                upd['semana'] = effective_week if (final_d or final_r or final_m) else None
+                upd['status'] = 'concluido' if all_done else ('em_andamento' if any_done else 'pendente')
+                if any_done:
+                    upd['semana'] = effective_week
                 payload_updates.append(upd)
 
             pb = st.empty()
@@ -362,15 +316,8 @@ def _render_sector_editor(*, sb, revisao_id, grupo_id, setor_nome, svs, svc_ids_
                 if missing:
                     st.caption(f'Itens sem correspondência de tarefa: {missing}.')
             else:
-                write_sb = sb
-                if get_supabase_service is not None:
-                    try:
-                        write_sb = get_supabase_service() or sb
-                    except Exception:
-                        write_sb = sb
-
-                with st.spinner(f'Aplicando {len(payload_updates)} tarefa(s) em lote...'):
-                    ok, failed = _bulk_update_tasks(write_sb, payload_updates)
+                with st.spinner(f'Aplicando {len(payload_updates)} alterações em lote...'):
+                    ok, failed = _bulk_update_tasks(sb, payload_updates)
 
                 if ok <= 0:
                     pb.error('Não foi possível persistir as alterações desta seleção.')
@@ -512,12 +459,6 @@ def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_di
             svc_ids_v = svc_ids
             svc_names_v = svc_names
 
-        sector_open = _sector_is_open(revisao_id, grupo_id, setor_nome)
-        # 🔄 Se o setor está aberto, atualiza antes de calcular o título/badges.
-        # Isso evita cabeçalho do setor em 82% enquanto a grade já mostra 100%.
-        if sector_open:
-            _refresh_visible_sector_tasks(sb, task_map, revisao_id, eqs, svc_ids_v)
-
         done_s, tot_s, pct_s, lbl_exp = sector_progress_label(
             equipamentos=eqs,
             svc_ids=svc_ids_v,
@@ -527,17 +468,10 @@ def render_matrix_tab(*, sb, revisao_id, grupo_id, group_atraso_dias, semanas_di
         _ = (done_s, tot_s)
 
         auto_expand = (pct_s == 0) or (setor_nome == chip_target)
-        if auto_expand and not sector_open:
+        if auto_expand and not _sector_is_open(revisao_id, grupo_id, setor_nome):
             _sector_set_open(revisao_id, grupo_id, setor_nome, True)
-            sector_open = True
-            _refresh_visible_sector_tasks(sb, task_map, revisao_id, eqs, svc_ids_v)
-            done_s, tot_s, pct_s, lbl_exp = sector_progress_label(
-                equipamentos=eqs,
-                svc_ids=svc_ids_v,
-                task_map=task_map,
-                setor_nome=setor_nome,
-            )
 
+        sector_open = _sector_is_open(revisao_id, grupo_id, setor_nome)
         sector_intel = summarize_sector_intelligence(
             equipamentos=eqs,
             svc_ids=svc_ids_v,
