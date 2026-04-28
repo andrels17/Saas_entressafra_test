@@ -171,6 +171,53 @@ def _clear_user_scope(svc, tenant_id: str, user_id: str):
         import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
 
 
+
+def _remove_user_scope_items(
+        svc,
+        tenant_id: str,
+        user_id: str,
+        departamento_ids: list | None = None,
+        remove_grupo: bool = False):
+    """Remove vínculos específicos de departamento e/ou grupo do usuário."""
+    departamento_ids = [d for d in (departamento_ids or []) if d]
+
+    try:
+        for dep_id in departamento_ids:
+            svc.table("tenant_user_departamentos").delete().eq(
+                "tenant_id", tenant_id).eq(
+                "user_id", user_id).eq(
+                "departamento_id", dep_id).execute()
+
+        if remove_grupo:
+            svc.table("tenant_user_departamentos").update({"grupo_id": None}).eq(
+                "tenant_id", tenant_id).eq(
+                "user_id", user_id).execute()
+    except Exception as _e:
+        import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
+
+    try:
+        legacy_rows = (
+            svc.table("tenant_user_scope")
+            .select("departamento_id,grupo_id")
+            .eq("tenant_id", tenant_id)
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+            .data
+        ) or []
+        if legacy_rows:
+            legacy_dep = legacy_rows[0].get("departamento_id")
+            if legacy_dep in departamento_ids:
+                svc.table("tenant_user_scope").delete().eq(
+                    "tenant_id", tenant_id).eq(
+                    "user_id", user_id).execute()
+            elif remove_grupo:
+                svc.table("tenant_user_scope").update({"grupo_id": None}).eq(
+                    "tenant_id", tenant_id).eq(
+                    "user_id", user_id).execute()
+    except Exception as _e:
+        import logging; logging.getLogger("saas").warning("gerenciar.py: %s", _e)
+
 def _load_departamentos(svc, tenant_id: str) -> list[dict]:
     try:
         return (
@@ -377,6 +424,8 @@ def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn) -> None:
                         "Múltiplos departamentos — todos os grupos incluídos.")
 
             # Mostra vínculo atual
+            cur_dep_nomes = []
+            cur_grp_nome = None
             if cur_deps:
                 cur_dep_nomes = [d["nome"]
                                  for d in depts if d["id"] in cur_deps]
@@ -388,6 +437,50 @@ def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn) -> None:
                 st.caption(f"Vínculo atual: **{partes}**")
             else:
                 st.caption("Sem vínculo definido.")
+
+            if cur_deps or cur_grp:
+                remove_opts = []
+                dep_label_to_id = {}
+                for dep in depts:
+                    if dep["id"] in cur_deps:
+                        label = f"Departamento: {dep['nome']}"
+                        remove_opts.append(label)
+                        dep_label_to_id[label] = dep["id"]
+
+                grp_remove_label = None
+                if cur_grp_nome:
+                    grp_remove_label = f"Grupo: {cur_grp_nome}"
+                    remove_opts.append(grp_remove_label)
+
+                selected_remove = st.multiselect(
+                    "Remover vínculos específicos",
+                    remove_opts,
+                    key=f"scope_remove_items_{target_user_id}",
+                    placeholder="Selecione departamento(s) e/ou grupo para remover…",
+                    help="Remove somente os vínculos escolhidos, sem apagar o usuário.",
+                )
+
+                if st.button(
+                    "🧹 Remover selecionados",
+                    use_container_width=True,
+                    key=f"scope_remove_selected_{target_user_id}",
+                    disabled=not bool(selected_remove),
+                    help="Remove apenas os vínculos selecionados acima.",
+                ):
+                    try:
+                        remove_dep_ids = [
+                            dep_label_to_id[label]
+                            for label in selected_remove
+                            if label in dep_label_to_id
+                        ]
+                        remove_grupo = bool(grp_remove_label and grp_remove_label in selected_remove)
+                        _remove_user_scope_items(
+                            svc, tenant_id, target_user_id, remove_dep_ids, remove_grupo)
+                        st.success("✅ Vínculos selecionados removidos.")
+                        rerun_fn()
+                    except Exception as e:
+                        st.error("Erro ao remover vínculos selecionados.")
+                        st.json(safe_json_fn(e))
 
             col_salvar, col_desvincular = st.columns(2)
             with col_salvar:
