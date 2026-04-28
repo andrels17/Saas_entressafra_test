@@ -17,6 +17,9 @@ _HOME_SCHEMA_DEFAULTS: dict[str, Any] = {
     "svc_count": 0,
     "done_steps": 0,
     "expected_steps": 0,
+    "eq_done": 0,
+    "eq_sem_inicio": 0,
+    "eq_andamento": 0,
     "departamento_nome": None,
 }
 
@@ -46,7 +49,10 @@ def enforce_home_schema(df_like) -> pd.DataFrame:
         "eq_count",
         "svc_count",
         "done_steps",
-            "expected_steps"]:
+        "expected_steps",
+        "eq_done",
+        "eq_sem_inicio",
+        "eq_andamento"]:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
     df["pct"] = df["pct"].astype(float)
@@ -130,8 +136,15 @@ def compute_coverage(kdf: pd.DataFrame) -> dict:
                 "eq_count",
                 0),
             errors="coerce").fillna(0).sum()) if not scope_w.empty else 0
-    eq_done = int(pd.to_numeric(scope_w.loc[scope_w["pct"] >= 100, "eq_count"], errors="coerce").fillna(
-        0).sum()) if not scope_w.empty else 0
+    # Conta equipamentos concluídos pela mesma regra do Dashboard:
+    # equipamento com 100% das etapas previstas concluídas. Antes a Home
+    # somava eq_count somente de grupos com pct=100, por isso mostrava 4
+    # enquanto o Dashboard mostrava 30 equipamentos concluídos.
+    if not scope_w.empty and "eq_done" in scope_w.columns:
+        eq_done = int(pd.to_numeric(scope_w["eq_done"], errors="coerce").fillna(0).sum())
+    else:
+        eq_done = int(pd.to_numeric(scope_w.loc[scope_w["pct"] >= 100, "eq_count"], errors="coerce").fillna(
+            0).sum()) if not scope_w.empty else 0
     crit = int((scope_w["pct"] < 50).sum()) if not scope_w.empty else 0
     base = int(len(scope_w)) if not scope_w.empty else 0
     risco = int(round(crit / base * 100)) if base > 0 else 0

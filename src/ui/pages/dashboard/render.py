@@ -1379,14 +1379,37 @@ def _groups_from_kpi_df(kdf: pd.DataFrame, gid_to_name: dict, gid_to_dept: dict)
 
 def _overall_from_group_kpis(kdf: pd.DataFrame) -> dict:
     gk = calc_global_kpis(kdf)
+    if kdf is None or kdf.empty:
+        return {
+            "pct": float(gk.get("pct", 0) or 0),
+            "total": 0,
+            "concl": 0,
+            "sem_inicio": 0,
+            "andamento": 0,
+            "atrasados": 0,
+            "pend": 0,
+            "trav": 0,
+            "na": 0,
+        }
+
+    def _sum_col(col: str) -> int:
+        if col not in kdf.columns:
+            return 0
+        return int(pd.to_numeric(kdf[col], errors="coerce").fillna(0).sum())
+
+    total_eq = _sum_col("eq_count")
+    concl = _sum_col("eq_done")
+    sem_inicio = _sum_col("eq_sem_inicio")
+    andamento = _sum_col("eq_andamento")
+
     return {
         "pct": float(gk.get("pct", 0) or 0),
-        "total": int(len(kdf)) if kdf is not None else 0,
-        "concl": 0,
-        "sem_inicio": 0,
-        "andamento": 0,
+        "total": total_eq,
+        "concl": concl,
+        "sem_inicio": sem_inicio,
+        "andamento": andamento,
         "atrasados": 0,
-        "pend": 0,
+        "pend": sem_inicio,
         "trav": 0,
         "na": 0,
     }
@@ -1574,10 +1597,7 @@ def render_dashboard() -> None:
             grupos_filter = [g for g in grupos if str(g.get("id")) in grp_set]
             selection_summary(
                 "Filtro de gestor aplicado",
-                {
-                    "Departamentos": f"{len(departamentos_filter)} selecionado(s)",
-                    "Grupos": f"{len(grupos_filter)} selecionado(s)",
-                },
+                f"{len(departamentos_filter)} departamento(s) · {len(grupos_filter)} grupo(s)",
             )
 
     c1, c2, c3 = st.columns([1.1, 1.4, 0.6])
