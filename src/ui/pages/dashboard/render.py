@@ -1318,21 +1318,6 @@ def _fragment_tendencia(trend: pd.DataFrame) -> None:
     )
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-    display = trend[["semana_label", "pct_real", "pct_ideal", "delta_pct"]].copy()
-    display = display.rename(columns={
-        "semana_label": "Semana",
-        "pct_real": "Real (%)",
-        "pct_ideal": "Ideal (%)",
-        "delta_pct": "Delta (p.p.)",
-    })
-    data_table(
-        display.sort_values("Semana", ascending=False),
-        column_config={
-            "Real (%)": st.column_config.NumberColumn("Real (%)", format="%.1f"),
-            "Ideal (%)": st.column_config.NumberColumn("Ideal (%)", format="%.1f"),
-            "Delta (p.p.)": st.column_config.NumberColumn("Delta (p.p.)", format="%.1f"),
-        },
-    )
 
 
 
@@ -1418,14 +1403,6 @@ def render_dashboard() -> None:
         departamentos = _load_departamentos(tenant_id, ver, token)
         grupos = _load_grupos(tenant_id, ver, token)
         gestor_options = _load_gestor_options(tenant_id, token, ver) if can_view_all_data(role) else []
-        trend_view = _load_weekly_trend_view(
-            tenant_id,
-            revisao_id,
-            int(rev.get("semanas_total") or 0),
-            token,
-            ver,
-            token,
-        )
 
     if dep_scope_ids in (None, [] ) and grp_scope_ids not in (None, []):
         dep_scope_ids = sorted({str(g.get("departamento_id")) for g in grupos if g.get("id") in set(grp_scope_ids) and g.get("departamento_id")})
@@ -1686,8 +1663,6 @@ def render_dashboard() -> None:
     if detailed_available:
         with st.spinner("", show_time=False):
             risco, previsao, heat, crit, trend = build_inteligencia(base_filtered)
-        if trend_view is not None and not trend_view.empty:
-            trend = trend_view.copy()
     else:
         risco, previsao = {"status_risco": "baixo", "risco_score": 0}, {"status_previsao": "sem_base"}
         heat = crit = trend = pd.DataFrame()
