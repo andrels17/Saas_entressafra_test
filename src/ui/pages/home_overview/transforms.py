@@ -130,21 +130,28 @@ def compute_coverage(kdf: pd.DataFrame) -> dict:
         ((kdf["eq_count"] > 0) & (
             kdf["svc_count"] > 0)).sum())
     scope_w = kdf[(kdf["eq_count"] > 0) & (kdf["svc_count"] > 0)].copy()
+
     eq_total = int(
         pd.to_numeric(
             scope_w.get(
                 "eq_count",
                 0),
             errors="coerce").fillna(0).sum()) if not scope_w.empty else 0
+
     # Conta equipamentos concluídos pela mesma regra do Dashboard:
-    # equipamento com 100% das etapas previstas concluídas. Antes a Home
-    # somava eq_count somente de grupos com pct=100, por isso mostrava 4
-    # enquanto o Dashboard mostrava 30 equipamentos concluídos.
+    # equipamento com 100% das etapas previstas concluídas.
     if not scope_w.empty and "eq_done" in scope_w.columns:
         eq_done = int(pd.to_numeric(scope_w["eq_done"], errors="coerce").fillna(0).sum())
     else:
         eq_done = int(pd.to_numeric(scope_w.loc[scope_w["pct"] >= 100, "eq_count"], errors="coerce").fillna(
             0).sum()) if not scope_w.empty else 0
+
+    # Novo KPI da Home: grupos concluídos.
+    # Usa apenas grupos válidos para operação (com equipamentos e template)
+    # e considera concluído quando o progresso do grupo é 100%.
+    grupos_concluidos = int((pd.to_numeric(scope_w.get("pct", 0), errors="coerce").fillna(0) >= 100).sum()) if not scope_w.empty else 0
+    grupos_total_operacional = int(len(scope_w)) if not scope_w.empty else 0
+
     crit = int((scope_w["pct"] < 50).sum()) if not scope_w.empty else 0
     base = int(len(scope_w)) if not scope_w.empty else 0
     risco = int(round(crit / base * 100)) if base > 0 else 0
@@ -152,6 +159,8 @@ def compute_coverage(kdf: pd.DataFrame) -> dict:
         "total_grupos": total_grupos,
         "grupos_com_template": grupos_com_template,
         "grupos_com_peso": grupos_com_peso,
+        "grupos_concluidos": grupos_concluidos,
+        "grupos_total_operacional": grupos_total_operacional,
         "eq_total": eq_total,
         "eq_done": eq_done,
         "risco_pct": risco,

@@ -134,16 +134,16 @@ def _fragment_kpis(
         )
     with r2c2:
         st.metric(
-            "Cobertura",
-            f"{cov['grupos_com_peso']}/{cov['total_grupos']}",
-            delta="c/ equipamentos + template",
+            "Grupos concluídos",
+            f"{cov.get('grupos_concluidos', 0)}/{cov.get('grupos_total_operacional', cov.get('grupos_com_peso', 0))}",
+            delta="grupos com 100% das etapas",
             delta_color="off",
-            help="Grupos que têm equipamentos ativos E template de serviços configurado.",
+            help="Quantidade de grupos operacionais concluídos. Conta apenas grupos com equipamentos ativos e template de serviços configurado.",
         )
 
-    # Popover de alerta de cobertura (não ocupa espaço vertical permanente)
+    # Popover de alerta operacional (não ocupa espaço vertical permanente)
     if cov["grupos_com_peso"] <= 1 and cov["total_grupos"] >= 2:
-        with st.popover("⚠️ Cobertura baixa — saiba mais"):
+        with st.popover("⚠️ Poucos grupos operacionais — saiba mais"):
             st.warning(
                 f"Apenas **{cov['grupos_com_peso']}/{cov['total_grupos']}** grupos "
                 "têm equipamentos ativos + template. O % global pode refletir apenas um grupo."
