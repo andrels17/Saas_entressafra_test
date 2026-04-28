@@ -1574,7 +1574,10 @@ def render_dashboard() -> None:
             grupos_filter = [g for g in grupos if str(g.get("id")) in grp_set]
             selection_summary(
                 "Filtro de gestor aplicado",
-                f"{len(departamentos_filter)} departamento(s) · {len(grupos_filter)} grupo(s)",
+                {
+                    "Departamentos": f"{len(departamentos_filter)} selecionado(s)",
+                    "Grupos": f"{len(grupos_filter)} selecionado(s)",
+                },
             )
 
     c1, c2, c3 = st.columns([1.1, 1.4, 0.6])
