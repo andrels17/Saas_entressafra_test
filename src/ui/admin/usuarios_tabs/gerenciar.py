@@ -310,37 +310,71 @@ def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn) -> None:
             dept_map = {d["nome"]: d["id"] for d in depts}
             dept_names = [d["nome"] for d in depts]
 
-            sel_dept_names = st.multiselect(
-                "Departamentos",
-                dept_names,
-                default=[
-                    n for n in dept_names if dept_map.get(n) in set(cur_deps)],
-                key=f"scope_deps_{target_user_id}",
-                placeholder="Selecione um ou mais departamentos…",
-            )
-            sel_dep_ids = [dept_map[n]
-                           for n in sel_dept_names if dept_map.get(n)]
-
             sel_grp_id = None
-            if len(sel_dep_ids) == 1:
-                dep_id_single = sel_dep_ids[0]
+            if cur_role == "gestor":
+                st.info("Gestor deve ficar vinculado a apenas 1 grupo. O departamento será definido pelo grupo selecionado.")
+
+                default_dep_id = cur_deps[0] if cur_deps else None
+                dept_ids = [d["id"] for d in depts]
+                dep_idx = dept_ids.index(default_dep_id) if default_dep_id in dept_ids else 0
+                dep_nome = st.selectbox(
+                    "Departamento",
+                    dept_names,
+                    index=dep_idx,
+                    key=f"scope_dept_single_{target_user_id}",
+                )
+                dep_id_single = dept_map.get(dep_nome)
+                sel_dep_ids = [dep_id_single] if dep_id_single else []
+
                 grupos_filtered = [
-                    g for g in grupos_all if (
-                        not g.get("departamento_id") or g.get("departamento_id") == dep_id_single)]
-                grp_opts = [
-                    {"id": None, "nome": "Todos os grupos do departamento"}] + grupos_filtered
-                grp_names = [g["nome"] for g in grp_opts]
-                grp_ids = [g["id"] for g in grp_opts]
-                grp_idx = grp_ids.index(cur_grp) if cur_grp in grp_ids else 0
-                sel_grp_name = st.selectbox(
-                    "Grupo",
-                    grp_names,
-                    index=grp_idx,
-                    key=f"scope_grp_{target_user_id}")
-                sel_grp_id = grp_ids[grp_names.index(sel_grp_name)]
-            elif len(sel_dep_ids) > 1:
-                st.caption(
-                    "Múltiplos departamentos — todos os grupos incluídos.")
+                    g for g in grupos_all
+                    if str(g.get("departamento_id") or "") == str(dep_id_single or "")
+                ]
+                if not grupos_filtered:
+                    st.warning("Este departamento ainda não possui grupos ativos para vincular ao gestor.")
+                    sel_grp_id = None
+                else:
+                    grp_names = [g["nome"] for g in grupos_filtered]
+                    grp_ids = [g["id"] for g in grupos_filtered]
+                    grp_idx = grp_ids.index(cur_grp) if cur_grp in grp_ids else 0
+                    sel_grp_name = st.selectbox(
+                        "Grupo do gestor",
+                        grp_names,
+                        index=grp_idx,
+                        key=f"scope_grp_{target_user_id}",
+                    )
+                    sel_grp_id = grp_ids[grp_names.index(sel_grp_name)]
+            else:
+                sel_dept_names = st.multiselect(
+                    "Departamentos",
+                    dept_names,
+                    default=[
+                        n for n in dept_names if dept_map.get(n) in set(cur_deps)],
+                    key=f"scope_deps_{target_user_id}",
+                    placeholder="Selecione um ou mais departamentos…",
+                )
+                sel_dep_ids = [dept_map[n]
+                               for n in sel_dept_names if dept_map.get(n)]
+
+                if len(sel_dep_ids) == 1:
+                    dep_id_single = sel_dep_ids[0]
+                    grupos_filtered = [
+                        g for g in grupos_all if (
+                            not g.get("departamento_id") or g.get("departamento_id") == dep_id_single)]
+                    grp_opts = [
+                        {"id": None, "nome": "Todos os grupos do departamento"}] + grupos_filtered
+                    grp_names = [g["nome"] for g in grp_opts]
+                    grp_ids = [g["id"] for g in grp_opts]
+                    grp_idx = grp_ids.index(cur_grp) if cur_grp in grp_ids else 0
+                    sel_grp_name = st.selectbox(
+                        "Grupo",
+                        grp_names,
+                        index=grp_idx,
+                        key=f"scope_grp_{target_user_id}")
+                    sel_grp_id = grp_ids[grp_names.index(sel_grp_name)]
+                elif len(sel_dep_ids) > 1:
+                    st.caption(
+                        "Múltiplos departamentos — todos os grupos incluídos.")
 
             # Mostra vínculo atual
             if cur_deps:
@@ -361,6 +395,7 @@ def render_tab_gerenciar(svc, tenant_id: str, rerun_fn, safe_json_fn) -> None:
                     "💾 Salvar escopo",
                     type="primary",
                     use_container_width=True,
+                        disabled=(cur_role == "gestor" and not sel_grp_id),
                         key=f"scope_save_{target_user_id}"):
                     try:
                         _save_user_scope_multi(
