@@ -28,9 +28,24 @@ def notice_card(title: str, body: str, *, tone: str = "info") -> None:
     )
 
 
-def selection_summary(title: str, items: Mapping[str, object], *, caption: str | None = None) -> None:
+def selection_summary(title: str, items: Mapping[str, object] | object = None, *, caption: str | None = None) -> None:
+    """Renderiza resumo em chips.
+
+    O uso correto é passar um dict: {"Departamento": "X", "Grupo": "Y"}.
+    Esta função também aceita string/lista como compatibilidade defensiva,
+    evitando erro de produção quando alguma chamada antiga enviar outro tipo.
+    """
+    if items is None:
+        normalized_items: dict[str, object] = {}
+    elif isinstance(items, Mapping):
+        normalized_items = dict(items)
+    elif isinstance(items, (list, tuple, set)):
+        normalized_items = {"Selecionado": ", ".join(str(v) for v in items if v is not None)}
+    else:
+        normalized_items = {"Resumo": items}
+
     chips: list[str] = []
-    for label, value in items.items():
+    for label, value in normalized_items.items():
         if value is None:
             continue
         text = str(value).strip()
@@ -40,7 +55,7 @@ def selection_summary(title: str, items: Mapping[str, object], *, caption: str |
             '<span style="display:inline-block;padding:.34rem .58rem;border-radius:999px;'
             'margin:.15rem .32rem .15rem 0;background:rgba(255,255,255,.06);'
             'border:1px solid rgba(255,255,255,.10);font-size:.84rem;color:#E5EDF7">'
-            f'<strong style="font-weight:700">{escape(label)}:</strong> {escape(text)}'
+            f'<strong style="font-weight:700">{escape(str(label))}:</strong> {escape(text)}'
             '</span>'
         )
 
