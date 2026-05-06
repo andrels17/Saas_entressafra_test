@@ -1089,13 +1089,22 @@ def dispatch_relatorio_semanal(
     # Pré-carrega todas as tarefas uma única vez — evita N queries ao banco.
     tarefas_index = _load_tarefas_all(sb, tenant_id, revisao_id)
 
-    # Cache de PDFs por dep_id — cada PDF é gerado uma única vez mesmo que
-    # vários gestores compartilhem o mesmo departamento.
-    pdf_cache: dict[str, tuple] = {}  # dep_id → (pdf_bytes, pdf_name, payload)
+    # Cache de PDFs por ESCOPO (departamento + grupos).
+    #
+    # IMPORTANTE: dois gestores podem estar vinculados ao mesmo departamento,
+    # mas com grupos diferentes. Se o cache usar apenas dep_id, o primeiro PDF
+    # gerado para aquele departamento pode ser reaproveitado indevidamente para
+    # outro gestor, fazendo o e-mail sair com grupos errados.
+    pdf_cache: dict[tuple[str, tuple[str, ...]], tuple] = {}
+
+    def _pdf_cache_key(dep_id: str, grupo_ids: list) -> tuple[str, tuple[str, ...]]:
+        grupos_norm = tuple(sorted({str(g) for g in (grupo_ids or []) if g}))
+        return str(dep_id), grupos_norm
 
     def _get_or_build_pdf(dep_id: str, dep_nome: str, grupo_ids: list):
-        if dep_id in pdf_cache:
-            return pdf_cache[dep_id]
+        cache_key = _pdf_cache_key(dep_id, grupo_ids)
+        if cache_key in pdf_cache:
+            return pdf_cache[cache_key]
         try:
             tarefas = _load_tarefas(
                 sb, tenant_id, revisao_id, grupo_ids,
@@ -1124,8 +1133,8 @@ def dispatch_relatorio_semanal(
                 _vp(pdf_b, context=f"relatorio_semanal.{dep_nome[:30]}")
             except ImportError:
                 pass
-            pdf_cache[dep_id] = (pdf_b, pdf_n, payload)
-            return pdf_cache[dep_id]
+            pdf_cache[cache_key] = (pdf_b, pdf_n, payload)
+            return pdf_cache[cache_key]
         except Exception as exc:
             _log(f"  ❌ Erro ao gerar PDF de {dep_nome}: {exc}")
             return None
