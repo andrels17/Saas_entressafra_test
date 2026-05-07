@@ -1330,7 +1330,13 @@ def _groups_from_kpi_df(kdf: pd.DataFrame, gid_to_name: dict, gid_to_dept: dict)
     tmp = kdf.copy()
     tmp["grupo_id"] = tmp["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None)
     tmp["departamento_id"] = tmp["grupo_id"].map(lambda v: gid_to_dept.get(str(v)) if v is not None else None)
-    tmp["grupo"] = tmp["grupo_id"].map(lambda v: gid_to_name.get(str(v), str(v)) if v is not None else "—")
+    tmp["grupo"] = tmp["grupo_id"].map(lambda v: gid_to_name.get(str(v)) if v is not None else None)
+    tmp["grupo"] = tmp.apply(
+        lambda r: str(r.get("grupo") or "").strip()
+        if str(r.get("grupo") or "").strip()
+        else (f"Grupo sem nome ({str(r.get('grupo_id') or '')[:8]})" if r.get("grupo_id") else "—"),
+        axis=1,
+    )
     tmp["done_steps"] = pd.to_numeric(tmp.get("done_steps", 0), errors="coerce").fillna(0).astype(int)
     tmp["expected_steps"] = pd.to_numeric(tmp.get("expected_steps", 0), errors="coerce").fillna(0).astype(int)
     tmp["pct_concluido"] = (
@@ -1400,11 +1406,33 @@ def render_dashboard() -> None:
 
     ver = str(st.session_state.get("data_version", "0"))
     token = st.session_state.get("sb_access_token", "")
+    token_key = _token_cache_key(token)
     with st.spinner("", show_time=False):
-        raw, raw_equipment, eq_meta, debug_meta = _load_base_cached(tenant_id, revisao_id, token, ver)
-        departamentos = _load_departamentos(tenant_id, ver, token)
-        grupos = _load_grupos(tenant_id, ver, token)
-        gestor_options = _load_gestor_options(tenant_id, token, ver) if can_use_gestor_filter else []
+        raw, raw_equipment, eq_meta, debug_meta = _load_base_cached(
+            tenant_id,
+            revisao_id,
+            token_key=token_key,
+            ver=ver,
+            _token=token,
+        )
+        departamentos = _load_departamentos(
+            tenant_id,
+            token_key=token_key,
+            ver=ver,
+            _token=token,
+        )
+        grupos = _load_grupos(
+            tenant_id,
+            token_key=token_key,
+            ver=ver,
+            _token=token,
+        )
+        gestor_options = _load_gestor_options(
+            tenant_id,
+            token_key=token_key,
+            ver=ver,
+            _token=token,
+        ) if can_use_gestor_filter else []
 
     if dep_scope_ids in (None, [] ) and grp_scope_ids not in (None, []):
         dep_scope_ids = sorted({str(g.get("departamento_id")) for g in grupos if g.get("id") in set(grp_scope_ids) and g.get("departamento_id")})
@@ -1432,6 +1460,42 @@ def render_dashboard() -> None:
 
     base = normalize_matriz_base(raw, eq_meta)
     equipment_base = normalize_matriz_base(raw_equipment, eq_meta)
+
+    # Correção defensiva: a visão consolidada de grupos não pode exibir UUID.
+    # Em alguns perfis, a consulta de grupos usada nos filtros pode vir restrita
+    # pela RLS/ativo=True, enquanto a base detalhada já carrega o nome do grupo.
+    # Então completamos o lookup grupo_id -> nome a partir da própria base.
+    def _is_uuid_like_label(value: object) -> bool:
+        txt = str(value or "").strip()
+        if len(txt) != 36:
+            return False
+        parts = txt.split("-")
+        if [len(p) for p in parts] != [8, 4, 4, 4, 12]:
+            return False
+        try:
+            int(txt.replace("-", ""), 16)
+            return True
+        except Exception:
+            return False
+
+    for _df_lookup in (base, equipment_base):
+        if _df_lookup is None or _df_lookup.empty:
+            continue
+        if "grupo_id" not in _df_lookup.columns:
+            continue
+        lookup_cols = [c for c in ["grupo_id", "grupo", "departamento_id"] if c in _df_lookup.columns]
+        for _row in _df_lookup[lookup_cols].dropna(subset=["grupo_id"]).drop_duplicates().to_dict("records"):
+            _gid_s = str(_row.get("grupo_id") or "").strip()
+            if not _gid_s:
+                continue
+            _gname = _row.get("grupo")
+            _name_s = str(_gname).strip() if _gname is not None else ""
+            if _name_s and _name_s != "—" and not _is_uuid_like_label(_name_s):
+                if not gid_to_name.get(_gid_s) or _is_uuid_like_label(gid_to_name.get(_gid_s)):
+                    gid_to_name[_gid_s] = _name_s
+            _dept_s = str(_row.get("departamento_id") or "").strip()
+            if _dept_s and not gid_to_dept.get(_gid_s):
+                gid_to_dept[_gid_s] = _dept_s
     # Para equipamentos, preservamos a base completa SOMENTE dentro do escopo do
     # usuário. A combinação híbrida entre linhas sintéticas e linhas reais de
     # tarefa acontece dentro de _fragment_equipamentos(). O problema anterior
