@@ -458,6 +458,38 @@ def _filter_groups_by_ids(df: pd.DataFrame, allowed_group_ids: set[str] | None) 
     return df[df["grupo_id"].map(lambda v: str(v) if pd.notna(v) and v is not None else None).isin(allowed_group_ids)].copy()
 
 
+
+
+def _ensure_dashboard_base_columns(df: pd.DataFrame | None) -> pd.DataFrame:
+    """Garante o schema mínimo esperado por transforms.equipment_progress/overall_from_base.
+
+    Alguns filtros podem zerar a base ou deixar uma base vinda do KPI/fallback sem
+    todas as colunas detalhadas. Sem essas colunas, o groupby de equipment_progress
+    gera KeyError.
+    """
+    required_defaults = {
+        "equipamento_id": None,
+        "grupo_id": None,
+        "grupo": "—",
+        "departamento_id": None,
+        "frota": "—",
+        "modelo": "—",
+        "state": "pendente",
+        "ok_count": 0,
+        "na": False,
+        "status": "pendente",
+        "etapa_d": False,
+        "etapa_r": False,
+        "etapa_m": False,
+    }
+    if df is None:
+        return pd.DataFrame(columns=list(required_defaults.keys()))
+    out = df.copy()
+    for col, default in required_defaults.items():
+        if col not in out.columns:
+            out[col] = default
+    return out
+
 def _risk_scale() -> list[list[float | str]]:
     return [
         [0.0, "#12B76A"],
@@ -1499,8 +1531,8 @@ def render_dashboard() -> None:
     gid_to_dept = {str(g["id"]): str(g.get("departamento_id")) if g.get("departamento_id") else None
                    for g in grupos if g.get("id")}
 
-    base = normalize_matriz_base(raw, eq_meta)
-    equipment_base = normalize_matriz_base(raw_equipment, eq_meta)
+    base = _ensure_dashboard_base_columns(normalize_matriz_base(raw, eq_meta))
+    equipment_base = _ensure_dashboard_base_columns(normalize_matriz_base(raw_equipment, eq_meta))
 
     active_equipment_ids: set[str] | None = None
     if eq_meta:
@@ -1512,8 +1544,8 @@ def render_dashboard() -> None:
         if not active_equipment_ids:
             active_equipment_ids = None
 
-    base = _filter_active_base(base, active_group_ids=active_group_ids or None, active_equipment_ids=active_equipment_ids)
-    equipment_base = _filter_active_base(equipment_base, active_group_ids=active_group_ids or None, active_equipment_ids=active_equipment_ids)
+    base = _ensure_dashboard_base_columns(_filter_active_base(base, active_group_ids=active_group_ids or None, active_equipment_ids=active_equipment_ids))
+    equipment_base = _ensure_dashboard_base_columns(_filter_active_base(equipment_base, active_group_ids=active_group_ids or None, active_equipment_ids=active_equipment_ids))
 
     # Complementa os mapas com os nomes vindos da base detalhada.
     # Isso é essencial no ranking "Menor para maior": normalmente os primeiros
@@ -1538,16 +1570,16 @@ def render_dashboard() -> None:
     # era manter equipment_base sem aplicar o escopo automático do gestor,
     # fazendo a aba listar equipamentos de outros departamentos/grupos.
     if dep_scope_ids is not None or grp_scope_ids is not None:
-        equipment_base = apply_filters(equipment_base, dep_scope_ids, grp_scope_ids)
+        equipment_base = _ensure_dashboard_base_columns(apply_filters(equipment_base, dep_scope_ids, grp_scope_ids))
         if equipment_base.empty and dep_scope_ids not in (None, []):
             # Mesmo fallback defensivo usado na base principal: se o vínculo do
             # gestor vier por departamento e a lista de grupos estiver
             # desatualizada, mantém o recorte por departamento em vez de zerar.
-            equipment_base = apply_filters(
+            equipment_base = _ensure_dashboard_base_columns(apply_filters(
                 base=base.copy(),
                 departamento_ids=dep_scope_ids,
                 grupo_ids=None,
-            )
+            ))
     if not base.empty:
         if "data_inicio" not in base.columns:
             base["data_inicio"] = pd.NaT
@@ -1577,11 +1609,11 @@ def render_dashboard() -> None:
         if active_group_ids:
             kpi_df = kpi_df[kpi_df["grupo_id"].isin(active_group_ids)]
 
-    base = apply_filters(base, dep_scope_ids, grp_scope_ids)
+    base = _ensure_dashboard_base_columns(apply_filters(base, dep_scope_ids, grp_scope_ids))
     if base.empty and dep_scope_ids not in (None, []):
         # fallback defensivo: quando o vínculo vier por departamento e a lista de grupos
         # estiver desatualizada, mantém o filtro por departamento em vez de zerar o dashboard.
-        base = apply_filters(base=raw_base, departamento_ids=dep_scope_ids, grupo_ids=None)
+        base = _ensure_dashboard_base_columns(apply_filters(base=raw_base, departamento_ids=dep_scope_ids, grupo_ids=None))
 
     # Grupos no dashboard devem seguir a mesma fonte de verdade da Matriz/PDF.
     # Antes usávamos group_progress(base) e só caíamos no KPI engine como fallback.
@@ -1720,7 +1752,7 @@ def render_dashboard() -> None:
         else:
             effective_group_ids = sorted(manager_group_ids.intersection(active_group_ids)) if active_group_ids else sorted(manager_group_ids)
 
-    base_filtered = apply_filters(base, effective_dept_ids, effective_group_ids)
+    base_filtered = _ensure_dashboard_base_columns(apply_filters(base, effective_dept_ids, effective_group_ids))
     dashboard_groups_filtered = dashboard_groups.copy()
     if use_kpi_fallback and not dashboard_groups_filtered.empty:
         if effective_dept_ids and "departamento_id" in dashboard_groups_filtered.columns:
