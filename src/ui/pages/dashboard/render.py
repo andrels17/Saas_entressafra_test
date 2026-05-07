@@ -134,7 +134,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
         try:
             eq_rows = _fetch_all(
                 sb.table("equipamentos")
-                .select("id,frota,modelo,grupo_id")
+                .select("id,frota,modelo,grupo_id,ativo")
                 .eq("tenant_id", tenant_id)
                 .eq("ativo", True)
             )
@@ -145,7 +145,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
         try:
             eq_rows = _fetch_all(
                 sb.table("equipamentos")
-                .select("id,frota,modelo,grupo_id")
+                .select("id,frota,modelo,grupo_id,ativo")
                 .eq("tenant_id", tenant_id)
             )
         except Exception as exc:
@@ -158,7 +158,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
             try:
                 chunk = (
                     sb.table("equipamentos")
-                    .select("id,frota,modelo,grupo_id")
+                    .select("id,frota,modelo,grupo_id,ativo")
                     .in_("id", batch)
                     .execute()
                     .data or []
@@ -174,12 +174,28 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
     try:
         grupo_rows = _fetch_all(
             sb.table("equip_grupos")
-            .select("id,nome,departamento_id")
+            .select("id,nome,departamento_id,ativo")
             .eq("tenant_id", tenant_id)
         )
     except Exception as exc:
         log_error(exc, context="dashboard._load_base_cached", table="equip_grupos")
         grupo_rows = []
+
+    # Se a RPC de equipamentos não devolver a coluna ativo, complementa com a tabela.
+    # Isso impede que equipamentos desativados apareçam no ranking "Menor para maior".
+    try:
+        eq_status_rows = _fetch_all(
+            sb.table("equipamentos")
+            .select("id,ativo")
+            .eq("tenant_id", tenant_id)
+        )
+        eq_status_map = {str(r.get("id")): r.get("ativo") for r in eq_status_rows if r.get("id") is not None}
+        for _eq in eq_rows:
+            _eid = str(_eq.get("id")) if _eq.get("id") is not None else ""
+            if _eid in eq_status_map:
+                _eq["ativo"] = eq_status_map[_eid]
+    except Exception as exc:
+        log_error(exc, context="dashboard._load_base_cached.eq_status", table="equipamentos")
 
     serv_rows = []
     try:
@@ -253,6 +269,8 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
             "departamento_id": eq.get("departamento_id") or grp.get("departamento_id"),
             "frota": eq.get("frota"),
             "modelo": eq.get("modelo"),
+            "equipamento_ativo": eq.get("ativo", True),
+            "grupo_ativo": grp.get("ativo", True),
             "servico_id": t.get("servico_id"),
             "setor_nome": svc.get("setor") or "—",
             "status": t.get("status"),
@@ -303,6 +321,8 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
                 "departamento_id": eq.get("departamento_id") or grp.get("departamento_id"),
                 "frota": eq.get("frota"),
                 "modelo": eq.get("modelo"),
+                "equipamento_ativo": eq.get("ativo", True),
+                "grupo_ativo": grp.get("ativo", True),
                 "servico_id": sid,
                 "setor_nome": svc.get("setor") or "—",
                 "status": t.get("status") or "pendente",
@@ -341,6 +361,9 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
             "equipamento_id": r.get("id"),
             "frota": r.get("frota"),
             "modelo": r.get("modelo"),
+            "grupo_id": r.get("grupo_id"),
+            "ativo": r.get("ativo", True),
+            "equipamento_ativo": r.get("ativo", True),
             "departamento_id": r.get("departamento_id"),
         }
         for r in eq_rows
@@ -400,6 +423,39 @@ def _pct_status(v: float) -> str:
     if v >= 50:
         return "Atenção"
     return "Crítico"
+
+
+def _is_active_value(value) -> bool:
+    """Interpreta a coluna ativo vinda do Supabase sem descartar dados quando ela não existe."""
+    if value is None or pd.isna(value):
+        return True
+    if isinstance(value, bool):
+        return value
+    txt = str(value).strip().lower()
+    return txt not in {"false", "0", "não", "nao", "n", "inativo", "inactive"}
+
+
+def _filter_active_base(df: pd.DataFrame, active_group_ids: set[str] | None = None,
+                        active_equipment_ids: set[str] | None = None) -> pd.DataFrame:
+    """Remove grupos/equipamentos inativos sem quebrar perfis que não recebem a coluna ativo."""
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    if "grupo_ativo" in out.columns:
+        out = out[out["grupo_ativo"].map(_is_active_value)]
+    if active_group_ids is not None and "grupo_id" in out.columns:
+        out = out[out["grupo_id"].map(lambda v: str(v) if pd.notna(v) and v is not None else None).isin(active_group_ids)]
+    if "equipamento_ativo" in out.columns:
+        out = out[out["equipamento_ativo"].map(_is_active_value)]
+    if active_equipment_ids is not None and "equipamento_id" in out.columns:
+        out = out[out["equipamento_id"].map(lambda v: str(v) if pd.notna(v) and v is not None else None).isin(active_equipment_ids)]
+    return out
+
+
+def _filter_groups_by_ids(df: pd.DataFrame, allowed_group_ids: set[str] | None) -> pd.DataFrame:
+    if df is None or df.empty or allowed_group_ids is None or "grupo_id" not in df.columns:
+        return df
+    return df[df["grupo_id"].map(lambda v: str(v) if pd.notna(v) and v is not None else None).isin(allowed_group_ids)].copy()
 
 
 def _risk_scale() -> list[list[float | str]]:
@@ -1432,6 +1488,11 @@ def render_dashboard() -> None:
         else:
             grupos = [g for g in grupos if g.get("departamento_id") in dep_scope_ids]
 
+    # A Visão consolidada deve considerar somente cadastros ativos por padrão.
+    # Isso evita que o ranking "Menor para maior" seja preenchido por grupos/equipamentos antigos 0%.
+    active_group_ids = {str(g.get("id")) for g in grupos if g.get("id") and _is_active_value(g.get("ativo", True))}
+    active_dept_ids = {str(d.get("id")) for d in departamentos if d.get("id") and _is_active_value(d.get("ativo", True))}
+
     dept_map = {str(d["id"]): d.get("nome", "—")
                 for d in departamentos if d.get("id")}
     gid_to_name = {str(g["id"]): g.get("nome", "—") for g in grupos if g.get("id")}
@@ -1440,6 +1501,19 @@ def render_dashboard() -> None:
 
     base = normalize_matriz_base(raw, eq_meta)
     equipment_base = normalize_matriz_base(raw_equipment, eq_meta)
+
+    active_equipment_ids: set[str] | None = None
+    if eq_meta:
+        active_equipment_ids = {
+            str(e.get("equipamento_id") or e.get("id"))
+            for e in eq_meta
+            if (e.get("equipamento_id") or e.get("id")) and _is_active_value(e.get("ativo", e.get("equipamento_ativo", True)))
+        }
+        if not active_equipment_ids:
+            active_equipment_ids = None
+
+    base = _filter_active_base(base, active_group_ids=active_group_ids or None, active_equipment_ids=active_equipment_ids)
+    equipment_base = _filter_active_base(equipment_base, active_group_ids=active_group_ids or None, active_equipment_ids=active_equipment_ids)
 
     # Complementa os mapas com os nomes vindos da base detalhada.
     # Isso é essencial no ranking "Menor para maior": normalmente os primeiros
@@ -1500,6 +1574,8 @@ def render_dashboard() -> None:
         if grp_scope_ids not in (None, []):
             _grp_scope_set = {str(x) for x in grp_scope_ids}
             kpi_df = kpi_df[kpi_df["grupo_id"].isin(_grp_scope_set)]
+        if active_group_ids:
+            kpi_df = kpi_df[kpi_df["grupo_id"].isin(active_group_ids)]
 
     base = apply_filters(base, dep_scope_ids, grp_scope_ids)
     if base.empty and dep_scope_ids not in (None, []):
@@ -1513,6 +1589,7 @@ def render_dashboard() -> None:
     # diferentes da consolidação oficial. Agora, sempre que houver KPI consolidado,
     # usamos ele como fonte principal para percentuais de grupos.
     dashboard_groups = _groups_from_kpi_df(kpi_df, gid_to_name, gid_to_dept) if not kpi_df.empty else group_progress(base)
+    dashboard_groups = _filter_groups_by_ids(dashboard_groups, active_group_ids or None)
     base_overall = overall_from_base(base)
     kpi_overall = _overall_from_group_kpis(kpi_df) if not kpi_df.empty else {"pct": 0}
     use_kpi_fallback = bool((base.empty or float(base_overall.get("pct", 0) or 0) <= 0) and float(kpi_overall.get("pct", 0) or 0) > 0)
@@ -1562,6 +1639,24 @@ def render_dashboard() -> None:
                 "Departamentos": len(departamentos_filter),
                 "Grupos": len(grupos_filter),
             })
+
+    only_manager_linked = False
+    manager_group_ids: set[str] = set()
+    if can_use_gestor_filter and gestor_options:
+        manager_group_ids = {
+            str(gr.get("grupo_id") or "").strip()
+            for gestor in gestor_options
+            for gr in (gestor.get("grupos") or [])
+            if str(gr.get("grupo_id") or "").strip()
+        }
+        only_manager_linked = st.checkbox(
+            "Mostrar somente grupos/equipamentos vinculados a gestores",
+            value=False,
+            key="dash_only_manager_linked",
+            help="Quando marcado, remove da visão consolidada os grupos que não estão vinculados a nenhum gestor de relatório.",
+        )
+        if only_manager_linked and manager_group_ids:
+            grupos_filter = [g for g in grupos_filter if str(g.get("id")) in manager_group_ids]
 
     c1, c2, c3 = st.columns([1.1, 1.4, 0.6])
     with c1:
@@ -1618,6 +1713,12 @@ def render_dashboard() -> None:
 
     if not effective_dept_ids and gestor_selected_dept_ids is not None:
         effective_dept_ids = gestor_selected_dept_ids
+
+    if only_manager_linked and manager_group_ids:
+        if effective_group_ids:
+            effective_group_ids = [gid for gid in effective_group_ids if str(gid) in manager_group_ids]
+        else:
+            effective_group_ids = sorted(manager_group_ids.intersection(active_group_ids)) if active_group_ids else sorted(manager_group_ids)
 
     base_filtered = apply_filters(base, effective_dept_ids, effective_group_ids)
     dashboard_groups_filtered = dashboard_groups.copy()
@@ -1702,6 +1803,11 @@ def render_dashboard() -> None:
     equipment_source_for_chart = equipment_base_filtered.copy()
     if equipment_source_for_chart.empty and detailed_available and task_rows_current > 0:
         equipment_source_for_chart = base_filtered.copy()
+    equipment_source_for_chart = _filter_active_base(
+        equipment_source_for_chart,
+        active_group_ids=active_group_ids or None,
+        active_equipment_ids=active_equipment_ids,
+    )
 
     st.markdown("### Visão consolidada")
     _render_unified_rank_chart(
