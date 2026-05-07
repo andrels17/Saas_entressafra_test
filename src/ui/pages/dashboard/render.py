@@ -134,7 +134,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
         try:
             eq_rows = _fetch_all(
                 sb.table("equipamentos")
-                .select("id,frota,modelo,grupo_id,ativo")
+                .select("id,frota,modelo,grupo_id")
                 .eq("tenant_id", tenant_id)
                 .eq("ativo", True)
             )
@@ -145,7 +145,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
         try:
             eq_rows = _fetch_all(
                 sb.table("equipamentos")
-                .select("id,frota,modelo,grupo_id,ativo")
+                .select("id,frota,modelo,grupo_id")
                 .eq("tenant_id", tenant_id)
             )
         except Exception as exc:
@@ -158,7 +158,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
             try:
                 chunk = (
                     sb.table("equipamentos")
-                    .select("id,frota,modelo,grupo_id,ativo")
+                    .select("id,frota,modelo,grupo_id")
                     .in_("id", batch)
                     .execute()
                     .data or []
@@ -174,7 +174,7 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
     try:
         grupo_rows = _fetch_all(
             sb.table("equip_grupos")
-            .select("id,nome,departamento_id,ativo")
+            .select("id,nome,departamento_id")
             .eq("tenant_id", tenant_id)
         )
     except Exception as exc:
@@ -342,8 +342,6 @@ def _load_base_cached(tenant_id: str, revisao_id: str, token_key: str = "",
             "frota": r.get("frota"),
             "modelo": r.get("modelo"),
             "departamento_id": r.get("departamento_id"),
-            "grupo_id": r.get("grupo_id"),
-            "ativo": r.get("ativo"),
         }
         for r in eq_rows
     ]
@@ -376,7 +374,7 @@ def _load_grupos(tenant_id: str, token_key: str = "", ver: str = "0", _token: st
     try:
         return (
             sb.table("equip_grupos")
-            .select("id,nome,departamento_id,ativo")
+            .select("id,nome,departamento_id")
             .eq("tenant_id", tenant_id)
             .eq("ativo", True)
             .order("nome")
@@ -1344,77 +1342,47 @@ def _groups_from_kpi_df(kdf: pd.DataFrame, gid_to_name: dict, gid_to_dept: dict)
     return tmp[["grupo", "grupo_id", "departamento_id", "pct_concluido", "done_steps", "expected_steps"]].copy()
 
 
-def _safe_group_overall(kdf: pd.DataFrame) -> dict:
-    """Calcula o KPI global tanto no formato do kpi_engine quanto no resumo da visão consolidada."""
+def _overall_from_group_kpis(kdf: pd.DataFrame) -> dict:
     if kdf is None or kdf.empty:
-        return {"pct": 0, "total": 0, "concl": 0, "sem_inicio": 0, "andamento": 0, "atrasados": 0, "pend": 0, "trav": 0, "na": 0}
+        return {
+            "pct": 0.0, "total": 0, "concl": 0, "sem_inicio": 0,
+            "andamento": 0, "atrasados": 0, "pend": 0, "trav": 0, "na": 0,
+        }
+
     df = kdf.copy()
-    if {"eq_count", "svc_count"}.issubset(df.columns):
+    # calc_global_kpis() espera a estrutura completa do KPI engine
+    # (eq_count/svc_count). Quando o dashboard passa a base resumida
+    # da visão consolidada, ela tem done_steps/expected_steps.
+    # Neste caso calculamos o percentual diretamente para evitar KeyError.
+    if "eq_count" in df.columns and "svc_count" in df.columns:
         try:
             gk = calc_global_kpis(df)
             pct = float(gk.get("pct", 0) or 0)
         except Exception:
-            pct = 0.0
-    elif {"done_steps", "expected_steps"}.issubset(df.columns):
+            done = pd.to_numeric(df.get("done_steps", 0), errors="coerce").fillna(0).sum()
+            expected = pd.to_numeric(df.get("expected_steps", 0), errors="coerce").fillna(0).sum()
+            pct = round((done / expected) * 100, 0) if expected > 0 else 0.0
+    else:
         done = pd.to_numeric(df.get("done_steps", 0), errors="coerce").fillna(0).sum()
         expected = pd.to_numeric(df.get("expected_steps", 0), errors="coerce").fillna(0).sum()
-        pct = float(round((done / expected) * 100, 0)) if expected > 0 else 0.0
-    elif {"pct_concluido"}.issubset(df.columns):
-        pct = float(pd.to_numeric(df["pct_concluido"], errors="coerce").fillna(0).mean())
-    else:
-        pct = 0.0
+        pct = round((done / expected) * 100, 0) if expected > 0 else 0.0
+
     return {
-        "pct": max(0.0, min(100.0, pct)),
+        "pct": float(max(0, min(100, pct))),
         "total": int(len(df)),
-        "concl": 0,
-        "sem_inicio": 0,
-        "andamento": 0,
-        "atrasados": 0,
-        "pend": 0,
-        "trav": 0,
-        "na": 0,
+        "concl": int((pd.to_numeric(df.get("pct_concluido", df.get("pct", 0)), errors="coerce").fillna(0) >= 100).sum()),
+        "sem_inicio": int((pd.to_numeric(df.get("pct_concluido", df.get("pct", 0)), errors="coerce").fillna(0) <= 0).sum()),
+        "andamento": int(((pd.to_numeric(df.get("pct_concluido", df.get("pct", 0)), errors="coerce").fillna(0) > 0) & (pd.to_numeric(df.get("pct_concluido", df.get("pct", 0)), errors="coerce").fillna(0) < 100)).sum()),
+        "atrasados": 0, "pend": 0, "trav": 0, "na": 0,
     }
 
-def _overall_from_group_kpis(kdf: pd.DataFrame) -> dict:
-    return _safe_group_overall(kdf)
 
+def _ensure_dashboard_base_columns(df: pd.DataFrame | None) -> pd.DataFrame:
+    """Garante as colunas mínimas usadas por transforms.overall_from_base/equipment_progress.
 
-
-@st.cache_data(ttl=120, show_spinner=False)
-def _load_active_equipment_ids(tenant_id: str, token_key: str = "", ver: str = "0", _token: str = "") -> set[str]:
-    """Retorna IDs de equipamentos ativos para evitar que a visão consolidada mostre frotas inativas."""
-    _ = token_key, ver
-    sb = _sb_from_token(_token)
-    try:
-        rows = []
-        start = 0
-        page_size = 1000
-        while True:
-            chunk = (
-                sb.table("equipamentos")
-                .select("id")
-                .eq("tenant_id", tenant_id)
-                .eq("ativo", True)
-                .range(start, start + page_size - 1)
-                .execute()
-                .data or []
-            )
-            rows.extend(chunk)
-            if len(chunk) < page_size:
-                break
-            start += page_size
-        return {str(r.get("id")) for r in rows if r.get("id") is not None}
-    except Exception as exc:
-        log_error(exc, context="dashboard._load_active_equipment_ids", table="equipamentos")
-        return set()
-
-
-def _ensure_dashboard_base_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Garante as colunas mínimas exigidas por overall_from_base/equipment_progress.
-
-    Alguns filtros de ativos/vínculos podem devolver DataFrames vazios ou
-    bases vindas de fallback sem todas as colunas que transforms.py agrupa.
-    Esta normalização evita KeyError sem alterar percentuais já calculados.
+    Alguns recortes (ativos, gestor, grupo ou KPI fallback) podem devolver um
+    DataFrame vazio ou sem uma das colunas do groupby. Em vez de quebrar o
+    dashboard com KeyError, devolvemos uma base normalizada e segura.
     """
     required_defaults = {
         "equipamento_id": None,
@@ -1427,7 +1395,6 @@ def _ensure_dashboard_base_columns(df: pd.DataFrame) -> pd.DataFrame:
         "ok_count": 0,
         "na": False,
         "trav": False,
-        "updated_at": pd.NaT,
         "data_inicio": pd.NaT,
         "data_fim": pd.NaT,
     }
@@ -1437,15 +1404,12 @@ def _ensure_dashboard_base_columns(df: pd.DataFrame) -> pd.DataFrame:
     for col, default in required_defaults.items():
         if col not in out.columns:
             out[col] = default
-    for col in ("equipamento_id", "grupo_id", "departamento_id"):
-        out[col] = out[col].map(lambda v: str(v) if pd.notna(v) and v is not None else None)
-    out["grupo"] = out["grupo"].fillna("—").astype(str)
-    out["frota"] = out["frota"].fillna("—").astype(str)
-    out["modelo"] = out["modelo"].fillna("—").astype(str)
-    out["state"] = out["state"].fillna("pendente").astype(str)
-    out["ok_count"] = pd.to_numeric(out["ok_count"], errors="coerce").fillna(0).clip(0, 3)
-    out["na"] = out["na"].fillna(False).astype(bool)
-    out["trav"] = out["trav"].fillna(False).astype(bool)
+    if not out.empty:
+        out["grupo"] = out["grupo"].fillna("—").astype(str)
+        out["frota"] = out["frota"].fillna("—").astype(str)
+        out["modelo"] = out["modelo"].fillna("—").astype(str)
+        out["ok_count"] = pd.to_numeric(out["ok_count"], errors="coerce").fillna(0)
+        out["na"] = out["na"].fillna(False).astype(bool)
     return out
 
 def render_dashboard() -> None:
@@ -1503,9 +1467,6 @@ def render_dashboard() -> None:
             _load_gestor_options(tenant_id, token_key=token_key, ver=ver, _token=token)
             if can_use_gestor_filter else []
         )
-        active_equipment_ids_from_table = _load_active_equipment_ids(
-            tenant_id, token_key=token_key, ver=ver, _token=token
-        )
 
     if dep_scope_ids in (None, [] ) and grp_scope_ids not in (None, []):
         dep_scope_ids = sorted({str(g.get("departamento_id")) for g in grupos if g.get("id") in set(grp_scope_ids) and g.get("departamento_id")})
@@ -1531,51 +1492,44 @@ def render_dashboard() -> None:
     gid_to_dept = {str(g["id"]): str(g.get("departamento_id")) if g.get("departamento_id") else None
                    for g in grupos if g.get("id")}
 
+    # Listas carregadas por _load_departamentos/_load_grupos já vêm com ativo=True.
+    # Usamos estes conjuntos para impedir que o ranking "menor para maior" traga
+    # grupos/departamentos inativos que ainda existem em tarefas/KPIs antigos.
     active_dept_ids = {str(d.get("id")) for d in departamentos if d.get("id")}
     active_group_ids = {str(g.get("id")) for g in grupos if g.get("id")}
-    # Usa a tabela de equipamentos como fonte confiável de ativos. Quando a RPC
-    # do dashboard não retorna a coluna ativo, eq_meta fica com ativo=None e não
-    # consegue remover frotas inativas; por isso priorizamos a consulta direta.
-    active_equipment_ids = set(active_equipment_ids_from_table or [])
-    if not active_equipment_ids:
-        active_equipment_ids = {
-            str(e.get("equipamento_id"))
-            for e in (eq_meta or [])
-            if e.get("equipamento_id") is not None and e.get("ativo") is not False
-        }
+    manager_group_ids = {
+        str(gr.get("grupo_id") or "").strip()
+        for gestor in (gestor_options or [])
+        for gr in (gestor.get("grupos") or [])
+        if str(gr.get("grupo_id") or "").strip()
+    }
 
-    def _filter_active_dashboard_scope(df: pd.DataFrame) -> pd.DataFrame:
-        if df is None:
-            return pd.DataFrame()
-        out = df.copy()
-        if out.empty:
-            return out
-        if active_group_ids and "grupo_id" in out.columns:
-            out = out[out["grupo_id"].map(lambda v: str(v) if pd.notna(v) and v is not None else None).isin(active_group_ids)]
-        if active_dept_ids and "departamento_id" in out.columns:
-            out = out[out["departamento_id"].map(lambda v: str(v) if pd.notna(v) and v is not None else None).isin(active_dept_ids)]
-        if active_equipment_ids and "equipamento_id" in out.columns:
-            out = out[out["equipamento_id"].map(lambda v: str(v) if pd.notna(v) and v is not None else None).isin(active_equipment_ids)]
-        return out
+    base = _ensure_dashboard_base_columns(normalize_matriz_base(raw, eq_meta))
+    equipment_base = _ensure_dashboard_base_columns(normalize_matriz_base(raw_equipment, eq_meta))
 
-    base = _ensure_dashboard_base_columns(_filter_active_dashboard_scope(normalize_matriz_base(raw, eq_meta)))
-    equipment_base = _ensure_dashboard_base_columns(_filter_active_dashboard_scope(normalize_matriz_base(raw_equipment, eq_meta)))
+    # Mantém o dashboard restrito aos cadastros ativos. Isso remove grupos e
+    # equipamentos antigos/inativos do ranking, principalmente quando a ordem é
+    # "Menor para maior" e há muitos registros 0%.
+    if active_group_ids:
+        base = base[base["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(active_group_ids)].copy()
+        equipment_base = equipment_base[equipment_base["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(active_group_ids)].copy()
+
     # Para equipamentos, preservamos a base completa SOMENTE dentro do escopo do
     # usuário. A combinação híbrida entre linhas sintéticas e linhas reais de
     # tarefa acontece dentro de _fragment_equipamentos(). O problema anterior
     # era manter equipment_base sem aplicar o escopo automático do gestor,
     # fazendo a aba listar equipamentos de outros departamentos/grupos.
     if dep_scope_ids is not None or grp_scope_ids is not None:
-        equipment_base = _ensure_dashboard_base_columns(apply_filters(equipment_base, dep_scope_ids, grp_scope_ids))
+        equipment_base = apply_filters(equipment_base, dep_scope_ids, grp_scope_ids)
         if equipment_base.empty and dep_scope_ids not in (None, []):
             # Mesmo fallback defensivo usado na base principal: se o vínculo do
             # gestor vier por departamento e a lista de grupos estiver
             # desatualizada, mantém o recorte por departamento em vez de zerar.
-            equipment_base = _ensure_dashboard_base_columns(apply_filters(
+            equipment_base = apply_filters(
                 base=base.copy(),
                 departamento_ids=dep_scope_ids,
                 grupo_ids=None,
-            ))
+            )
     if not base.empty:
         if "data_inicio" not in base.columns:
             base["data_inicio"] = pd.NaT
@@ -1617,16 +1571,36 @@ def render_dashboard() -> None:
     # diferentes da consolidação oficial. Agora, sempre que houver KPI consolidado,
     # usamos ele como fonte principal para percentuais de grupos.
     dashboard_groups = _groups_from_kpi_df(kpi_df, gid_to_name, gid_to_dept) if not kpi_df.empty else group_progress(base)
-    dashboard_groups = _filter_active_dashboard_scope(dashboard_groups)
-    base_overall = overall_from_base(base) if not base.empty else {"pct": 0}
+    if active_group_ids and not dashboard_groups.empty and "grupo_id" in dashboard_groups.columns:
+        dashboard_groups = dashboard_groups[
+            dashboard_groups["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(active_group_ids)
+        ].copy()
+    base_overall = overall_from_base(_ensure_dashboard_base_columns(base)) if not base.empty else {"pct": 0}
     kpi_overall = _overall_from_group_kpis(kpi_df) if not kpi_df.empty else {"pct": 0}
     use_kpi_fallback = bool((base.empty or float(base_overall.get("pct", 0) or 0) <= 0) and float(kpi_overall.get("pct", 0) or 0) > 0)
 
     st.markdown("### Filtros")
 
+    only_manager_linked = False
+    if can_use_gestor_filter and manager_group_ids:
+        only_manager_linked = st.checkbox(
+            "Mostrar somente grupos/equipamentos vinculados a gestores",
+            value=True,
+            key="dash_only_manager_linked",
+            help="Remove do ranking os grupos/equipamentos que não estão vinculados a nenhum gestor ativo de relatório.",
+        )
+        if only_manager_linked:
+            linked_active_groups = active_group_ids.intersection(manager_group_ids) if active_group_ids else manager_group_ids
+            if linked_active_groups:
+                base = base[base["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(linked_active_groups)].copy()
+                equipment_base = equipment_base[equipment_base["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(linked_active_groups)].copy()
+                if not dashboard_groups.empty and "grupo_id" in dashboard_groups.columns:
+                    dashboard_groups = dashboard_groups[dashboard_groups["grupo_id"].map(lambda v: str(v) if pd.notna(v) else None).isin(linked_active_groups)].copy()
+                if not kpi_df.empty and "grupo_id" in kpi_df.columns:
+                    kpi_df = kpi_df[kpi_df["grupo_id"].isin(linked_active_groups)].copy()
+
     gestor_selected_group_ids: list[str] | None = None
     gestor_selected_dept_ids: list[str] | None = None
-    manager_link_group_ids: set[str] | None = None
     departamentos_filter = list(departamentos)
     grupos_filter = list(grupos)
 
@@ -1668,30 +1642,6 @@ def render_dashboard() -> None:
                 "Departamentos": len(departamentos_filter),
                 "Grupos": len(grupos_filter),
             })
-
-    if can_use_gestor_filter and gestor_options:
-        restrict_linked = st.checkbox(
-            "Mostrar somente grupos/equipamentos vinculados a gestores",
-            value=True,
-            key="dash_only_manager_linked",
-            help="Quando ativo, a visão consolidada remove grupos e equipamentos ativos que não estão vinculados a nenhum gestor.",
-        )
-        if restrict_linked:
-            manager_link_group_ids = {
-                str(gr.get("grupo_id") or "").strip()
-                for gestor in gestor_options
-                for gr in (gestor.get("grupos") or [])
-                if str(gr.get("grupo_id") or "").strip()
-            }
-            if manager_link_group_ids:
-                manager_link_group_ids = manager_link_group_ids.intersection(active_group_ids) if active_group_ids else manager_link_group_ids
-                grupos_filter = [g for g in grupos_filter if str(g.get("id")) in manager_link_group_ids]
-                visible_deps_from_groups = {
-                    str(g.get("departamento_id"))
-                    for g in grupos_filter
-                    if g.get("departamento_id")
-                }
-                departamentos_filter = [d for d in departamentos_filter if str(d.get("id")) in visible_deps_from_groups]
 
     c1, c2, c3 = st.columns([1.1, 1.4, 0.6])
     with c1:
@@ -1743,17 +1693,14 @@ def render_dashboard() -> None:
             effective_group_ids = grp_ids if grp_ids else None
         elif gestor_selected_group_ids is not None:
             effective_group_ids = gestor_selected_group_ids
-        elif manager_link_group_ids is not None:
-            _linked_active_ids = manager_link_group_ids.intersection(active_group_ids) if active_group_ids else manager_link_group_ids
-            effective_group_ids = sorted(_linked_active_ids)
         else:
             effective_group_ids = None
 
     if not effective_dept_ids and gestor_selected_dept_ids is not None:
         effective_dept_ids = gestor_selected_dept_ids
 
-    base_filtered = _ensure_dashboard_base_columns(_filter_active_dashboard_scope(apply_filters(base, effective_dept_ids, effective_group_ids)))
-    dashboard_groups_filtered = _filter_active_dashboard_scope(dashboard_groups.copy())
+    base_filtered = _ensure_dashboard_base_columns(apply_filters(base, effective_dept_ids, effective_group_ids))
+    dashboard_groups_filtered = dashboard_groups.copy()
     if use_kpi_fallback and not dashboard_groups_filtered.empty:
         if effective_dept_ids and "departamento_id" in dashboard_groups_filtered.columns:
             _eff_dept = {str(x) for x in effective_dept_ids}
@@ -1787,11 +1734,9 @@ def render_dashboard() -> None:
     # Quando a base detalhada vier vazia/zerada para perfis com escopo, usa a
     # fonte consolidada por grupo para não exibir todos os percentuais como 0.
     if use_kpi_fallback:
-        overall = _overall_from_group_kpis(
-            kpi_df if effective_group_ids is None and effective_dept_ids is None else dashboard_groups_filtered
-        )
+        overall = _overall_from_group_kpis(kpi_df if effective_group_ids is None and effective_dept_ids is None else dashboard_groups_filtered.rename(columns={"pct_concluido": "pct"}))
     else:
-        overall = overall_from_base(base_filtered) if not base_filtered.empty else _overall_from_group_kpis(dashboard_groups_filtered)
+        overall = overall_from_base(_ensure_dashboard_base_columns(base_filtered)) if not base_filtered.empty else {"pct": 0, "total": 0, "concl": 0, "sem_inicio": 0, "andamento": 0, "atrasados": 0, "pend": 0, "trav": 0, "na": 0}
 
     _fragment_kpis_globais(overall)
     st.divider()
@@ -1826,7 +1771,7 @@ def render_dashboard() -> None:
 
     if detailed_available:
         with st.spinner("", show_time=False):
-            risco, previsao, heat, crit, trend = build_inteligencia(_ensure_dashboard_base_columns(base_filtered))
+            risco, previsao, heat, crit, trend = build_inteligencia(base_filtered)
     else:
         risco, previsao = {"status_risco": "baixo", "risco_score": 0}, {"status_previsao": "sem_base"}
         heat = crit = trend = pd.DataFrame()
@@ -1834,9 +1779,9 @@ def render_dashboard() -> None:
     st.divider()
 
     task_rows_current = int((debug_meta or {}).get("task_rows_current_revision") or 0)
-    equipment_source_for_chart = _filter_active_dashboard_scope(equipment_base_filtered.copy())
+    equipment_source_for_chart = equipment_base_filtered.copy()
     if equipment_source_for_chart.empty and detailed_available and task_rows_current > 0:
-        equipment_source_for_chart = _filter_active_dashboard_scope(base_filtered.copy())
+        equipment_source_for_chart = base_filtered.copy()
 
     st.markdown("### Visão consolidada")
     _render_unified_rank_chart(
