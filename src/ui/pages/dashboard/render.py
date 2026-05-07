@@ -1378,6 +1378,76 @@ def _safe_group_overall(kdf: pd.DataFrame) -> dict:
 def _overall_from_group_kpis(kdf: pd.DataFrame) -> dict:
     return _safe_group_overall(kdf)
 
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _load_active_equipment_ids(tenant_id: str, token_key: str = "", ver: str = "0", _token: str = "") -> set[str]:
+    """Retorna IDs de equipamentos ativos para evitar que a visão consolidada mostre frotas inativas."""
+    _ = token_key, ver
+    sb = _sb_from_token(_token)
+    try:
+        rows = []
+        start = 0
+        page_size = 1000
+        while True:
+            chunk = (
+                sb.table("equipamentos")
+                .select("id")
+                .eq("tenant_id", tenant_id)
+                .eq("ativo", True)
+                .range(start, start + page_size - 1)
+                .execute()
+                .data or []
+            )
+            rows.extend(chunk)
+            if len(chunk) < page_size:
+                break
+            start += page_size
+        return {str(r.get("id")) for r in rows if r.get("id") is not None}
+    except Exception as exc:
+        log_error(exc, context="dashboard._load_active_equipment_ids", table="equipamentos")
+        return set()
+
+
+def _ensure_dashboard_base_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Garante as colunas mínimas exigidas por overall_from_base/equipment_progress.
+
+    Alguns filtros de ativos/vínculos podem devolver DataFrames vazios ou
+    bases vindas de fallback sem todas as colunas que transforms.py agrupa.
+    Esta normalização evita KeyError sem alterar percentuais já calculados.
+    """
+    required_defaults = {
+        "equipamento_id": None,
+        "grupo_id": None,
+        "grupo": "—",
+        "departamento_id": None,
+        "frota": "—",
+        "modelo": "—",
+        "state": "pendente",
+        "ok_count": 0,
+        "na": False,
+        "trav": False,
+        "updated_at": pd.NaT,
+        "data_inicio": pd.NaT,
+        "data_fim": pd.NaT,
+    }
+    if df is None:
+        return pd.DataFrame(columns=list(required_defaults.keys()))
+    out = df.copy()
+    for col, default in required_defaults.items():
+        if col not in out.columns:
+            out[col] = default
+    for col in ("equipamento_id", "grupo_id", "departamento_id"):
+        out[col] = out[col].map(lambda v: str(v) if pd.notna(v) and v is not None else None)
+    out["grupo"] = out["grupo"].fillna("—").astype(str)
+    out["frota"] = out["frota"].fillna("—").astype(str)
+    out["modelo"] = out["modelo"].fillna("—").astype(str)
+    out["state"] = out["state"].fillna("pendente").astype(str)
+    out["ok_count"] = pd.to_numeric(out["ok_count"], errors="coerce").fillna(0).clip(0, 3)
+    out["na"] = out["na"].fillna(False).astype(bool)
+    out["trav"] = out["trav"].fillna(False).astype(bool)
+    return out
+
 def render_dashboard() -> None:
     page_header("Dashboard")
 
@@ -1433,6 +1503,9 @@ def render_dashboard() -> None:
             _load_gestor_options(tenant_id, token_key=token_key, ver=ver, _token=token)
             if can_use_gestor_filter else []
         )
+        active_equipment_ids_from_table = _load_active_equipment_ids(
+            tenant_id, token_key=token_key, ver=ver, _token=token
+        )
 
     if dep_scope_ids in (None, [] ) and grp_scope_ids not in (None, []):
         dep_scope_ids = sorted({str(g.get("departamento_id")) for g in grupos if g.get("id") in set(grp_scope_ids) and g.get("departamento_id")})
@@ -1460,16 +1533,23 @@ def render_dashboard() -> None:
 
     active_dept_ids = {str(d.get("id")) for d in departamentos if d.get("id")}
     active_group_ids = {str(g.get("id")) for g in grupos if g.get("id")}
-    active_equipment_ids = {
-        str(e.get("equipamento_id"))
-        for e in (eq_meta or [])
-        if e.get("equipamento_id") is not None and e.get("ativo") is not False
-    }
+    # Usa a tabela de equipamentos como fonte confiável de ativos. Quando a RPC
+    # do dashboard não retorna a coluna ativo, eq_meta fica com ativo=None e não
+    # consegue remover frotas inativas; por isso priorizamos a consulta direta.
+    active_equipment_ids = set(active_equipment_ids_from_table or [])
+    if not active_equipment_ids:
+        active_equipment_ids = {
+            str(e.get("equipamento_id"))
+            for e in (eq_meta or [])
+            if e.get("equipamento_id") is not None and e.get("ativo") is not False
+        }
 
     def _filter_active_dashboard_scope(df: pd.DataFrame) -> pd.DataFrame:
-        if df is None or df.empty:
-            return df
+        if df is None:
+            return pd.DataFrame()
         out = df.copy()
+        if out.empty:
+            return out
         if active_group_ids and "grupo_id" in out.columns:
             out = out[out["grupo_id"].map(lambda v: str(v) if pd.notna(v) and v is not None else None).isin(active_group_ids)]
         if active_dept_ids and "departamento_id" in out.columns:
@@ -1478,24 +1558,24 @@ def render_dashboard() -> None:
             out = out[out["equipamento_id"].map(lambda v: str(v) if pd.notna(v) and v is not None else None).isin(active_equipment_ids)]
         return out
 
-    base = _filter_active_dashboard_scope(normalize_matriz_base(raw, eq_meta))
-    equipment_base = _filter_active_dashboard_scope(normalize_matriz_base(raw_equipment, eq_meta))
+    base = _ensure_dashboard_base_columns(_filter_active_dashboard_scope(normalize_matriz_base(raw, eq_meta)))
+    equipment_base = _ensure_dashboard_base_columns(_filter_active_dashboard_scope(normalize_matriz_base(raw_equipment, eq_meta)))
     # Para equipamentos, preservamos a base completa SOMENTE dentro do escopo do
     # usuário. A combinação híbrida entre linhas sintéticas e linhas reais de
     # tarefa acontece dentro de _fragment_equipamentos(). O problema anterior
     # era manter equipment_base sem aplicar o escopo automático do gestor,
     # fazendo a aba listar equipamentos de outros departamentos/grupos.
     if dep_scope_ids is not None or grp_scope_ids is not None:
-        equipment_base = apply_filters(equipment_base, dep_scope_ids, grp_scope_ids)
+        equipment_base = _ensure_dashboard_base_columns(apply_filters(equipment_base, dep_scope_ids, grp_scope_ids))
         if equipment_base.empty and dep_scope_ids not in (None, []):
             # Mesmo fallback defensivo usado na base principal: se o vínculo do
             # gestor vier por departamento e a lista de grupos estiver
             # desatualizada, mantém o recorte por departamento em vez de zerar.
-            equipment_base = apply_filters(
+            equipment_base = _ensure_dashboard_base_columns(apply_filters(
                 base=base.copy(),
                 departamento_ids=dep_scope_ids,
                 grupo_ids=None,
-            )
+            ))
     if not base.empty:
         if "data_inicio" not in base.columns:
             base["data_inicio"] = pd.NaT
@@ -1525,11 +1605,11 @@ def render_dashboard() -> None:
             _grp_scope_set = {str(x) for x in grp_scope_ids}
             kpi_df = kpi_df[kpi_df["grupo_id"].isin(_grp_scope_set)]
 
-    base = apply_filters(base, dep_scope_ids, grp_scope_ids)
+    base = _ensure_dashboard_base_columns(apply_filters(base, dep_scope_ids, grp_scope_ids))
     if base.empty and dep_scope_ids not in (None, []):
         # fallback defensivo: quando o vínculo vier por departamento e a lista de grupos
         # estiver desatualizada, mantém o filtro por departamento em vez de zerar o dashboard.
-        base = apply_filters(base=raw_base, departamento_ids=dep_scope_ids, grupo_ids=None)
+        base = _ensure_dashboard_base_columns(apply_filters(base=raw_base, departamento_ids=dep_scope_ids, grupo_ids=None))
 
     # Grupos no dashboard devem seguir a mesma fonte de verdade da Matriz/PDF.
     # Antes usávamos group_progress(base) e só caíamos no KPI engine como fallback.
@@ -1604,6 +1684,7 @@ def render_dashboard() -> None:
                 if str(gr.get("grupo_id") or "").strip()
             }
             if manager_link_group_ids:
+                manager_link_group_ids = manager_link_group_ids.intersection(active_group_ids) if active_group_ids else manager_link_group_ids
                 grupos_filter = [g for g in grupos_filter if str(g.get("id")) in manager_link_group_ids]
                 visible_deps_from_groups = {
                     str(g.get("departamento_id"))
@@ -1663,14 +1744,15 @@ def render_dashboard() -> None:
         elif gestor_selected_group_ids is not None:
             effective_group_ids = gestor_selected_group_ids
         elif manager_link_group_ids is not None:
-            effective_group_ids = sorted(manager_link_group_ids)
+            _linked_active_ids = manager_link_group_ids.intersection(active_group_ids) if active_group_ids else manager_link_group_ids
+            effective_group_ids = sorted(_linked_active_ids)
         else:
             effective_group_ids = None
 
     if not effective_dept_ids and gestor_selected_dept_ids is not None:
         effective_dept_ids = gestor_selected_dept_ids
 
-    base_filtered = _filter_active_dashboard_scope(apply_filters(base, effective_dept_ids, effective_group_ids))
+    base_filtered = _ensure_dashboard_base_columns(_filter_active_dashboard_scope(apply_filters(base, effective_dept_ids, effective_group_ids)))
     dashboard_groups_filtered = _filter_active_dashboard_scope(dashboard_groups.copy())
     if use_kpi_fallback and not dashboard_groups_filtered.empty:
         if effective_dept_ids and "departamento_id" in dashboard_groups_filtered.columns:
@@ -1715,7 +1797,7 @@ def render_dashboard() -> None:
     st.divider()
 
     detailed_available = not base_filtered.empty
-    equipment_base_filtered = apply_filters(equipment_base, effective_dept_ids, effective_group_ids)
+    equipment_base_filtered = _ensure_dashboard_base_columns(apply_filters(equipment_base, effective_dept_ids, effective_group_ids))
     equipment_detailed_available = not equipment_base_filtered.empty
 
     equipment_detail_reason = ""
@@ -1744,7 +1826,7 @@ def render_dashboard() -> None:
 
     if detailed_available:
         with st.spinner("", show_time=False):
-            risco, previsao, heat, crit, trend = build_inteligencia(base_filtered)
+            risco, previsao, heat, crit, trend = build_inteligencia(_ensure_dashboard_base_columns(base_filtered))
     else:
         risco, previsao = {"status_risco": "baixo", "risco_score": 0}, {"status_previsao": "sem_base"}
         heat = crit = trend = pd.DataFrame()
