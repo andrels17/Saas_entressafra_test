@@ -372,14 +372,16 @@ def _load_grupos(tenant_id: str, token_key: str = "", ver: str = "0", _token: st
     _ = token_key, ver
     sb = _sb_from_token(_token)
     try:
-        return (
+        # IMPORTANTE: o Dashboard usa KPIs consolidados por grupo que incluem
+        # todos os grupos do tenant, inclusive grupos marcados como inativos.
+        # Se aqui buscarmos apenas ativo=True, a visão consolidada fica sem o
+        # lookup grupo_id -> nome e, ao ordenar de menor para maior, aparecem
+        # rótulos como "Grupo sem nome (uuid...)".
+        return _fetch_all(
             sb.table("equip_grupos")
             .select("id,nome,departamento_id")
             .eq("tenant_id", tenant_id)
-            .eq("ativo", True)
             .order("nome")
-            .execute()
-            .data or []
         )
     except Exception as exc:
         log_error(exc, context="dashboard._load_grupos", table="equip_grupos")
