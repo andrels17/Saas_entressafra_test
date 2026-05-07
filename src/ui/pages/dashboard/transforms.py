@@ -250,6 +250,14 @@ def group_progress(base: pd.DataFrame) -> pd.DataFrame:
                 "pct_concluido",
                 "done_steps",
                 "expected_steps"])
+    base = base.copy()
+    if "grupo" not in base.columns and "grupo_nome" in base.columns:
+        base["grupo"] = base["grupo_nome"]
+    base["grupo"] = _series_or_default(base, "grupo", "—").fillna("—")
+    if "na" not in base.columns:
+        base["na"] = False
+    if "ok_count" not in base.columns:
+        base["ok_count"] = 0.0
     valid = _valid_scope(base)
     rows = []
     for (gid, grupo, dept), sub in valid.groupby(
@@ -311,6 +319,19 @@ def equipment_progress(base: pd.DataFrame) -> pd.DataFrame:
     if base is None or base.empty:
         return pd.DataFrame(columns=cols)
     base = base.copy()
+    # Normaliza nomes de colunas: o base do dashboard chega com "grupo_nome"
+    # (antes do rename feito em normalize_matriz_base). Garante que "grupo"
+    # sempre existe independente do caminho de carregamento.
+    if "grupo" not in base.columns and "grupo_nome" in base.columns:
+        base["grupo"] = base["grupo_nome"]
+    base["grupo"] = _series_or_default(base, "grupo", "—").fillna("—")
+    # Garante colunas de estado presentes (base do dashboard pode não tê-las)
+    if "na" not in base.columns:
+        base["na"] = False
+    if "state" not in base.columns:
+        base["state"] = "pendente"
+    if "ok_count" not in base.columns:
+        base["ok_count"] = 0.0
     base["frota"] = base.get(
         "frota",
         pd.Series(
