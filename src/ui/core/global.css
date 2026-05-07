@@ -35,40 +35,52 @@
     padding-bottom: 2rem !important;
     max-width: 1380px !important;
 }
-/* ── Ocultar chrome nativo do Streamlit ─────────────────────────── */
-/*
-   Importante: NÃO esconda o header inteiro.
-   O botão nativo que reabre a sidebar quando ela é recolhida fica dentro
-   dele; se o header for display:none, o usuário fecha o menu e não consegue
-   abrir novamente. Mantemos o header transparente/sem altura visual e
-   escondemos apenas toolbar/menu/deploy.
+/* ── Ocultar chrome nativo do Streamlit ───────────────────────────
+   IMPORTANTE: o header do Streamlit NÃO pode ser removido com display:none.
+   Quando a sidebar é fechada, o botão nativo para abrir novamente fica dentro
+   desse header/toolbar. Por isso mantemos o header ativo e escondemos apenas
+   o que não interessa visualmente.
 */
 header[data-testid="stHeader"] {
     display: block !important;
     visibility: visible !important;
+    opacity: 1 !important;
     background: transparent !important;
-    height: 0 !important;
-    min-height: 0 !important;
+    height: 3.25rem !important;
+    min-height: 3.25rem !important;
     pointer-events: none !important;
+    z-index: 999998 !important;
 }
 header[data-testid="stHeader"] > div {
     background: transparent !important;
-    height: 0 !important;
-    min-height: 0 !important;
+    pointer-events: none !important;
 }
 
-/* Botão nativo de abrir/recolher sidebar: deixa clicável mesmo com header visualmente oculto. */
-button[data-testid="baseButton-headerNoPadding"],
-button[data-testid="stBaseButton-headerNoPadding"],
-button[kind="headerNoPadding"],
+/* Botões nativos de abrir/recolher sidebar.
+   Mantidos sempre visíveis/clicáveis, inclusive depois que o menu é fechado. */
+div[data-testid="collapsedControl"],
 div[data-testid="stSidebarCollapsedControl"],
 div[data-testid="stSidebarCollapseButton"],
-[data-testid="collapsedControl"] {
-    display: flex !important;
+button[data-testid="stSidebarCollapseButton"],
+button[data-testid="stSidebarExpandButton"],
+button[data-testid="baseButton-headerNoPadding"],
+button[data-testid="stBaseButton-headerNoPadding"],
+button[kind="headerNoPadding"] {
     visibility: visible !important;
     opacity: 1 !important;
     pointer-events: auto !important;
     z-index: 999999 !important;
+}
+
+/* Posição do botão quando a sidebar está recolhida. */
+div[data-testid="collapsedControl"],
+div[data-testid="stSidebarCollapsedControl"] {
+    display: flex !important;
+    position: fixed !important;
+    top: 0.72rem !important;
+    left: 0.72rem !important;
+    width: 2.45rem !important;
+    height: 2.45rem !important;
 }
 
 /* Menu hambúrguer, footer "Made with Streamlit", botão Deploy */
@@ -79,23 +91,30 @@ footer,
 /* Barra de decoração (linha colorida no topo) */
 div[data-testid="stDecoration"] { display: none !important; }
 
-/* Toolbar de ações flutuantes (Share, editar, GitHub, Deploy).
-   Não use seletor global para baseButton-headerNoPadding aqui, senão some
-   também o botão de reabrir a sidebar. */
-div[data-testid="stToolbar"],
-div[data-testid="stActionButton"],
-div[class*="StatusWidget"] { display: none !important; }
+/* Toolbar superior: deixa a área viva para o botão da sidebar, mas oculta os
+   controles extras do Streamlit sem bloquear o collapsedControl. */
+div[data-testid="stToolbar"] {
+    display: flex !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    background: transparent !important;
+}
+div[data-testid="stToolbar"] div[data-testid="collapsedControl"],
+div[data-testid="stToolbar"] div[data-testid="stSidebarCollapsedControl"],
 div[data-testid="stToolbar"] button[data-testid="baseButton-headerNoPadding"],
 div[data-testid="stToolbar"] button[data-testid="stBaseButton-headerNoPadding"] {
-    display: none !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
 }
+div[data-testid="stActionButton"],
+div[class*="StatusWidget"] { display: none !important; }
 
 /* Badge "Manage app" no canto inferior direito */
 div[data-testid="manage-app-button"],
 .viewerBadge_container__r5tak,
 [class*="viewerBadge"] { display: none !important; }
 
-/* Compensa o espaço que o header ocupava */
+/* Compensa o espaço do header transparente. */
 .block-container { padding-top: 1rem !important; }
 
 /* ── Sidebar ────────────────────────────────────────────────────── */
