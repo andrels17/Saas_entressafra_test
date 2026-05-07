@@ -36,8 +36,40 @@
     max-width: 1380px !important;
 }
 /* ── Ocultar chrome nativo do Streamlit ─────────────────────────── */
-/* Topbar: esconder completamente (Share, estrela, lápis, GitHub, Deploy) */
-header[data-testid="stHeader"] { display: none !important; }
+/*
+   Importante: NÃO esconda o header inteiro.
+   O botão nativo que reabre a sidebar quando ela é recolhida fica dentro
+   dele; se o header for display:none, o usuário fecha o menu e não consegue
+   abrir novamente. Mantemos o header transparente/sem altura visual e
+   escondemos apenas toolbar/menu/deploy.
+*/
+header[data-testid="stHeader"] {
+    display: block !important;
+    visibility: visible !important;
+    background: transparent !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    pointer-events: none !important;
+}
+header[data-testid="stHeader"] > div {
+    background: transparent !important;
+    height: 0 !important;
+    min-height: 0 !important;
+}
+
+/* Botão nativo de abrir/recolher sidebar: deixa clicável mesmo com header visualmente oculto. */
+button[data-testid="baseButton-headerNoPadding"],
+button[data-testid="stBaseButton-headerNoPadding"],
+button[kind="headerNoPadding"],
+div[data-testid="stSidebarCollapsedControl"],
+div[data-testid="stSidebarCollapseButton"],
+[data-testid="collapsedControl"] {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    z-index: 999999 !important;
+}
 
 /* Menu hambúrguer, footer "Made with Streamlit", botão Deploy */
 #MainMenu,
@@ -47,11 +79,16 @@ footer,
 /* Barra de decoração (linha colorida no topo) */
 div[data-testid="stDecoration"] { display: none !important; }
 
-/* Toolbar de ações flutuantes (Share, editar, GitHub, Deploy) */
+/* Toolbar de ações flutuantes (Share, editar, GitHub, Deploy).
+   Não use seletor global para baseButton-headerNoPadding aqui, senão some
+   também o botão de reabrir a sidebar. */
 div[data-testid="stToolbar"],
 div[data-testid="stActionButton"],
-button[data-testid="baseButton-headerNoPadding"],
 div[class*="StatusWidget"] { display: none !important; }
+div[data-testid="stToolbar"] button[data-testid="baseButton-headerNoPadding"],
+div[data-testid="stToolbar"] button[data-testid="stBaseButton-headerNoPadding"] {
+    display: none !important;
+}
 
 /* Badge "Manage app" no canto inferior direito */
 div[data-testid="manage-app-button"],
