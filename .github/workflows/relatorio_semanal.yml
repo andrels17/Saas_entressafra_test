@@ -2,7 +2,11 @@ name: Relatório Semanal
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    # Roda de 5 em 5 min entre 10h e 11h59 em Brasília.
+    # O scheduler.py ainda valida dia/hora configurados no Supabase
+    # e usa last_dispatched_at para evitar envio duplicado.
+    - cron: "*/5 10-11 * * 1"
+      timezone: "America/Sao_Paulo"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -60,6 +64,7 @@ jobs:
           SCHEDULER_REVISAO_ID: ${{ github.event.inputs.revisao_id || '' }}
           SCHEDULER_DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '0' }}
           SCHEDULER_FORCE: ${{ github.event.inputs.force == 'true' && '1' || '0' }}
+          SCHEDULER_TOLERANCE_MINUTES: "90"
         run: python scheduler.py
 
       - name: Notificar falha
