@@ -103,6 +103,7 @@ def main() -> int:
     tenant_id = os.environ.get("SCHEDULER_TENANT_ID", "").strip()
     dry_run   = os.environ.get("SCHEDULER_DRY_RUN", "0").strip() == "1"
     force     = os.environ.get("SCHEDULER_FORCE", "0").strip() == "1"
+    tolerance_minutes = int(os.environ.get("SCHEDULER_TOLERANCE_MINUTES", "10") or "10")
 
     if not tenant_id:
         log.error("SCHEDULER_TENANT_ID não definido. Abortando.")
@@ -120,10 +121,11 @@ def main() -> int:
         if not cfg.ativo:
             log.info("Agendamento desativado no painel. Abortando.")
             return 0
-        if not should_dispatch_now(cfg):
+        if not should_dispatch_now(cfg, tolerance_minutes=tolerance_minutes):
             proximo = cfg.proximo_disparo_brt().strftime("%d/%m/%Y %H:%M")
             log.info("Fora da janela de disparo. Próximo: %s BRT. "
-                     "Use SCHEDULER_FORCE=1 para forçar.", proximo)
+                     "Use SCHEDULER_FORCE=1 para forçar. Tolerância atual: ±%d min.",
+                     proximo, tolerance_minutes)
             return 0
 
     # Parâmetros: config do Supabase tem prioridade; env vars são fallback
@@ -143,7 +145,7 @@ def main() -> int:
     log.info("Tenant   : %s", tenant_id)
     log.info("Revisão  : %s", revisao_id)
     log.info("Config   : %s", cfg.descricao_humana())
-    log.info("Dry run  : %s | Force: %s", dry_run, force)
+    log.info("Dry run  : %s | Force: %s | Tolerância: ±%d min", dry_run, force, tolerance_minutes)
     log.info("Dias trav: %d | Dias upd: %d", dias_trav, dias_upd)
 
     from src.services.email.dispatcher import dispatch_relatorio_semanal
